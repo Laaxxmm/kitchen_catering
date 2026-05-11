@@ -53,6 +53,11 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // in listDeliveries / getDelivery); the route itself is allowed.
   { pattern: /^\/deliveries(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "ACCOUNTS", "KITCHEN_HEAD", "DELIVERY"] },
 
+  // Mobile-shell routes (driver-focused; Phase 5). Reuses the same
+  // data-scoping rules — listDeliveries/getDelivery already enforce
+  // own-scope for DELIVERY role.
+  { pattern: /^\/m(\/|$)/, allow: ["ADMIN", "MANAGER", "DELIVERY", "KITCHEN_HEAD", "STORE_KEEPER", "SALES", "ACCOUNTS"] },
+
   // Procurement — Phase 2 (placeholder accessible to relevant roles)
   { pattern: /^\/procurement(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "ACCOUNTS"] },
 
