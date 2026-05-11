@@ -128,3 +128,26 @@ export async function nextVendorCode(tx: Tx): Promise<string> {
   const n = await nextSequenceValue(tx, seq, 0);
   return `V-${String(n).padStart(4, "0")}`;
 }
+
+// ─── Finance (Phase 3) ───────────────────────────────────────────────────
+
+export async function nextPettyCashVoucherNo(tx: Tx): Promise<string> {
+  const fy = getFyForDate(new Date());
+  const seq = (tx as unknown as { pettyCashVoucherNumberSequence?: typeof tx.orderCodeSequence })
+    .pettyCashVoucherNumberSequence;
+  if (!seq) throw new Error("pettyCashVoucherNumberSequence not present in Prisma client");
+  const n = await nextSequenceValue(tx, seq, fy.storageYear);
+  return `PCV-${fy.label}-${String(n).padStart(4, "0")}`;
+}
+
+/**
+ * Salary run number = `SR-YY-YY-MM` (FY suffix + 2-digit calendar month).
+ * Not strictly atomic-FY-sequenced because there's exactly one run per
+ * calendar month (DB unique on periodMonth), so the run number is
+ * deterministic from the period.
+ */
+export function salaryRunNo(periodMonth: Date): string {
+  const fy = getFyForDate(periodMonth);
+  const mm = String(periodMonth.getUTCMonth() + 1).padStart(2, "0");
+  return `SR-${fy.label}-${mm}`;
+}

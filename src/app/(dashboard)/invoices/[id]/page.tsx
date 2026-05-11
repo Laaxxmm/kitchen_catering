@@ -80,6 +80,27 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         {invoice.order && <span className="text-ik-ink-3">· Order <Link href={`/orders/${invoice.order.id}`} className="font-mono text-brand hover:underline">{invoice.order.code}</Link></span>}
       </div>
 
+      {invoice.irn && (
+        <div className="mb-4 rounded-md border border-positive-wash bg-positive-wash p-3 text-[12.5px]">
+          <div className="font-medium text-positive">E-invoice generated</div>
+          <div className="mt-1 grid gap-1 font-mono">
+            <div><span className="text-ik-ink-3">IRN:</span> <span className="break-all">{invoice.irn}</span></div>
+            <div><span className="text-ik-ink-3">Ack:</span> {invoice.ackNo} · {invoice.ackDate ? formatIST(invoice.ackDate) : "—"}</div>
+            <div><span className="text-ik-ink-3">Provider:</span> {invoice.eInvoiceStatus}</div>
+          </div>
+        </div>
+      )}
+      {invoice.eInvoiceStatus === "PENDING" && (
+        <div className="mb-4 rounded-md border border-amber-wash bg-amber-wash p-3 text-[12.5px] text-amber">
+          IRN generation in progress — refresh in a moment.
+        </div>
+      )}
+      {invoice.eInvoiceStatus === "FAILED" && (
+        <div className="mb-4 rounded-md border border-alert-wash bg-alert-wash p-3 text-[12.5px] text-alert">
+          IRN generation failed. See /admin/audit for the error log.
+        </div>
+      )}
+
       <div className="grid gap-6 md:grid-cols-3">
         <section className="md:col-span-2 grid gap-4">
           <div className="rounded-md border border-ik-rule bg-ik-card p-4">

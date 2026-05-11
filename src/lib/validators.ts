@@ -474,6 +474,45 @@ export const InventoryAuditPostInput = z.object({
 });
 
 // =====================================================================
+// FINANCE (Phase 3): petty cash + salary
+// =====================================================================
+
+export const PettyCashFloatInput = z.object({
+  custodianId: z.string(),
+  name: z.string().min(1).max(120),
+  openingBalance: decimalString,
+});
+
+export const PettyCashVoucherInput = z.object({
+  floatId: z.string(),
+  amount: decimalString,
+  category: z.string().min(1).max(40),
+  paidTo: z.string().min(1).max(200),
+  reason: z.string().min(1).max(500),
+  paidAt: isoDate.optional(),
+});
+
+export const PettyCashTopUpInput = z.object({
+  floatId: z.string(),
+  amount: decimalString,
+  source: z.string().min(1).max(40),
+  reference: z.string().max(120).nullable().optional(),
+});
+
+export const SalaryStructureInput = z.object({
+  employeeId: z.string(),
+  type: z.enum(["HOURLY", "SALARIED"]),
+  hourlyRate: decimalString.nullable().optional(),
+  monthlySalary: decimalString.nullable().optional(),
+  effectiveFrom: isoDate,
+  notes: z.string().max(500).nullable().optional(),
+});
+
+export const SalaryRunCreateInput = z.object({
+  periodMonth: isoDate,
+});
+
+// =====================================================================
 // SETTINGS
 // =====================================================================
 

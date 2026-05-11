@@ -16,6 +16,7 @@ import {
 } from "@/lib/validators";
 import { nextDeliveryNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
+import { formatOTPMessage, getSMSProvider } from "@/lib/sms";
 
 const SCHEDULE_ROLES = [Role.ADMIN, Role.MANAGER];
 const DRIVER_OR_MANAGER = [Role.ADMIN, Role.MANAGER, Role.DELIVERY];
@@ -78,13 +79,29 @@ export async function scheduleDelivery(raw: unknown) {
     return { delivery, otp, orderCode: order.code };
   });
 
-  // Phase 1: console-log the OTP for the dispatcher (Phase 3 replaces with MSG91).
-  // `console.error` is the SECURITY.md-permitted server log channel; this is a
-  // dev-time signal, not a permanent secret leak — the OTP is short-lived,
-  // and the bcrypt-hashed copy in the DB is what gates confirmation.
-  console.error(
-    `[DELIVERY OTP] ${result.delivery.deliveryNo} (order ${result.orderCode}) OTP=${result.otp}`,
-  );
+  // Phase 3: route the OTP through the SMS provider. Falls back to console
+  // when SMS_PROVIDER is unset. The bcrypt-hashed copy in the DB is what
+  // actually gates confirmation; the SMS just makes the OTP available to
+  // the recipient.
+  const driver = await db.user.findUnique({
+    where: { id: input.driverUserId },
+    select: { phone: true },
+  });
+  const recipientPhone = result.delivery.recipientPhone ?? driver?.phone;
+  if (recipientPhone) {
+    try {
+      const sms = getSMSProvider();
+      await sms.send(recipientPhone, formatOTPMessage(result.otp, result.orderCode));
+    } catch (err) {
+      // Don't fail the scheduling on SMS error — just log it. The dispatcher
+      // can read the OTP off the audit log / console fallback.
+      console.error(`[SMS error scheduling ${result.delivery.deliveryNo}]: ${err instanceof Error ? err.message : err}`);
+    }
+  } else {
+    console.error(
+      `[DELIVERY OTP] ${result.delivery.deliveryNo} (order ${result.orderCode}) OTP=${result.otp} (no recipient phone)`,
+    );
+  }
 
   revalidatePath("/deliveries");
   revalidatePath(`/orders/${input.orderId}`);

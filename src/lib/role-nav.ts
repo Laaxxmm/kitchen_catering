@@ -12,12 +12,12 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   ADMIN: new Set([
     "dashboard", "customers", "quotes", "orders", "dishes",
     "kitchen", "requisitions", "deliveries", "inventory",
-    "procurement", "invoices", "payments", "reports", "admin",
+    "procurement", "invoices", "payments", "pettycash", "salary", "reports", "admin",
   ]),
   MANAGER: new Set([
     "dashboard", "customers", "quotes", "orders", "dishes",
     "kitchen", "requisitions", "deliveries", "inventory",
-    "procurement", "invoices", "payments", "reports",
+    "procurement", "invoices", "payments", "pettycash", "salary", "reports",
   ]),
   SALES: new Set([
     "dashboard", "customers", "quotes", "orders", "dishes",
@@ -32,7 +32,7 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
     "dashboard", "deliveries",
   ]),
   ACCOUNTS: new Set([
-    "dashboard", "customers", "orders", "invoices", "payments", "reports",
+    "dashboard", "customers", "orders", "invoices", "payments", "pettycash", "salary", "reports",
   ]),
 };
 

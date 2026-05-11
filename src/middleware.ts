@@ -59,6 +59,8 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Finance
   { pattern: /^\/invoices(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "SALES"] },
   { pattern: /^\/payments(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  { pattern: /^\/petty-cash(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  { pattern: /^\/salary(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   { pattern: /^\/reports(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
 ];
 

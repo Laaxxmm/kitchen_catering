@@ -39,6 +39,8 @@ const NAV: NavNode[] = [
   { kind: "sep", label: "Finance" },
   { kind: "item", key: "invoices", label: "Tax invoices", icon: "invoice", href: "/invoices" },
   { kind: "item", key: "payments", label: "Payments", icon: "pie", href: "/payments" },
+  { kind: "item", key: "pettycash", label: "Petty cash", icon: "pie", href: "/petty-cash" },
+  { kind: "item", key: "salary", label: "Salary", icon: "user", href: "/salary" },
   { kind: "item", key: "reports", label: "Reports", icon: "report", href: "/reports" },
 
   { kind: "sep", label: "Admin" },
