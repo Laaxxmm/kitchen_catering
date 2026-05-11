@@ -1,0 +1,265 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Indefine Kitchen — Fresh basil editorial theme.
+ * Deep teal-green accent (#0F6E56) on warm paper-cream canvas.
+ * Token map is documented in docs/DESIGN-TOKENS.md.
+ * HSL fallbacks below match the oklch / hex values as closely as sRGB allows
+ * for shadcn/ui shared classes.
+ */
+
+@layer base {
+  :root {
+    /* ─── Surface: paper-cream ────────────────────────────────── */
+    --background: 60 40% 97%;            /* paper */
+    --foreground: 60 5% 18%;             /* ink */
+
+    --card: 0 0% 100%;
+    --card-foreground: 60 5% 18%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 60 5% 18%;
+
+    /* ─── Primary = Fresh basil (#0F6E56) ─────────────────────── */
+    --primary: 165 76% 25%;
+    --primary-foreground: 0 0% 100%;
+
+    /* ─── Secondary = paper-alt surface ───────────────────────── */
+    --secondary: 60 30% 95%;
+    --secondary-foreground: 60 5% 18%;
+
+    /* ─── Muted ink scale ─────────────────────────────────────── */
+    --muted: 60 30% 95%;
+    --muted-foreground: 60 5% 38%;
+
+    /* ─── Accent wash (light teal-green for hovers/active rows) ── */
+    --accent: 165 35% 92%;               /* accentWash */
+    --accent-foreground: 165 76% 18%;    /* accentInk */
+
+    /* ─── Destructive ─────────────────────────────────────────── */
+    --destructive: 0 57% 41%;            /* #A32D2D */
+    --destructive-foreground: 0 0% 100%;
+
+    /* ─── Rules + rings ───────────────────────────────────────── */
+    --border: 60 12% 88%;
+    --input: 60 12% 88%;
+    --ring: 165 76% 25%;
+
+    --radius: 0.5rem;
+
+    /* ─── Explicit brand channels ────────────────────────────── */
+    --brand: 165 76% 25%;
+    --brand-hover: 165 78% 18%;
+    --brand-foreground: 0 0% 100%;
+
+    /* ─── Semantic status colours ────────────────────────────── */
+    --success: 95 73% 24%;               /* #3B6D11 */
+    --success-wash: 80 50% 91%;          /* #EAF3DE */
+    --warning: 32 79% 41%;               /* #BA7517 amber */
+    --warning-wash: 36 78% 92%;          /* #FAEEDA */
+    --info: 210 75% 37%;                 /* #185FA5 */
+    --info-wash: 210 80% 95%;             /* #E6F1FB */
+
+    /* ─── Raw IK tokens for inline styles (SVGs, dynamic) ────── */
+    --ik-paper: oklch(0.985 0.003 95);
+    --ik-paper-alt: oklch(0.975 0.005 95);
+    --ik-ink: oklch(0.22 0.012 80);
+    --ik-ink2: oklch(0.38 0.012 80);
+    --ik-ink3: oklch(0.55 0.012 80);
+    --ik-ink4: oklch(0.72 0.010 80);
+    --ik-rule: oklch(0.92 0.006 95);
+    --ik-rule-strong: oklch(0.86 0.008 95);
+    --ik-accent: #0F6E56;
+    --ik-accent-hover: #0B5440;
+    --ik-accent-ink: #085041;
+    --ik-accent-wash: #E1F5EE;
+    --ik-positive: #3B6D11;
+    --ik-positive-wash: #EAF3DE;
+    --ik-alert: #A32D2D;
+    --ik-alert-wash: #FCEBEB;
+    --ik-amber: #BA7517;
+    --ik-amber-wash: #FAEEDA;
+    --ik-info: #185FA5;
+    --ik-info-wash: #E6F1FB;
+  }
+
+  .dark {
+    --background: 60 5% 14%;
+    --foreground: 60 8% 96%;
+    --card: 60 5% 18%;
+    --card-foreground: 60 8% 96%;
+    --popover: 60 5% 18%;
+    --popover-foreground: 60 8% 96%;
+    --primary: 162 70% 37%;
+    --primary-foreground: 162 100% 8%;
+    --secondary: 60 5% 22%;
+    --secondary-foreground: 60 8% 96%;
+    --muted: 60 5% 22%;
+    --muted-foreground: 60 5% 68%;
+    --accent: 162 80% 11%;
+    --accent-foreground: 162 60% 88%;
+    --destructive: 0 73% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 60 5% 28%;
+    --input: 60 5% 28%;
+    --ring: 162 70% 37%;
+    --brand: 162 70% 37%;
+    --brand-hover: 162 75% 30%;
+    --brand-foreground: 162 100% 8%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html,
+  body {
+    background-color: var(--ik-paper);
+    color: var(--ik-ink);
+  }
+
+  body {
+    font-family: var(--font-ik-sans), "Inter Tight", "Inter", system-ui, sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1, "tnum" 1, "ss01" 1;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.005em;
+  }
+
+  /* Editorial headings — tighter tracking, closer to display behaviour */
+  h1, h2, h3, h4 {
+    font-family: var(--font-ik-sans), "Inter Tight", system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+
+  /* Data-heavy tables default to tabular numerics */
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Mono for codes, IDs, dates, keyboard shortcuts */
+  code, kbd, samp, pre {
+    font-family: var(--font-ik-mono), "IBM Plex Mono", ui-monospace, monospace;
+  }
+}
+
+@layer utilities {
+  /* ─── Brand shortcuts ────────────────────────────────────────── */
+  .text-brand { color: hsl(var(--brand)); }
+  .bg-brand { background-color: hsl(var(--brand)); }
+  .bg-brand-hover:hover { background-color: hsl(var(--brand-hover)); }
+  .border-brand { border-color: hsl(var(--brand)); }
+  .ring-brand { --tw-ring-color: hsl(var(--brand)); }
+
+  /* ─── Semantic colour utilities ──────────────────────────────── */
+  .text-success { color: hsl(var(--success)); }
+  .text-warning { color: hsl(var(--warning)); }
+  .text-danger  { color: hsl(var(--destructive)); }
+
+  /* ─── IK editorial primitives ────────────────────────────────── */
+  .ik-eyebrow {
+    font-family: var(--font-ik-mono), ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ik-ink3);
+  }
+
+  .ik-caps {
+    font-family: var(--font-ik-mono), ui-monospace, monospace;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ik-ink3);
+  }
+
+  .ik-code {
+    font-family: var(--font-ik-mono), ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    color: var(--ik-accent-ink);
+  }
+
+  .ik-tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Old aliases kept so existing utilities survive the palette swap */
+  .eyebrow {
+    font-family: var(--font-ik-mono), ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ik-ink3);
+  }
+
+  .code-chip {
+    font-family: var(--font-ik-mono), ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ik-accent-ink);
+  }
+
+  /* ─── Shell rules (1px hairlines) ────────────────────────────── */
+  .ik-rule-t { border-top: 1px solid var(--ik-rule); }
+  .ik-rule-b { border-bottom: 1px solid var(--ik-rule); }
+  .ik-rule-l { border-left: 1px solid var(--ik-rule); }
+  .ik-rule-r { border-right: 1px solid var(--ik-rule); }
+  .ik-rule-strong-b { border-bottom: 1px solid var(--ik-rule-strong); }
+
+  /* ─── Pulse for live indicators ──────────────────────────────── */
+  @keyframes ikPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .ik-pulse {
+    animation: ikPulse 1.4s infinite;
+  }
+}
+
+/* ─── Mobile-responsive helpers ─────────────────────────────────────
+ * These rules patch up patterns that pre-date the responsive shell
+ * without forcing every page to be rewritten with breakpoint classes.
+ */
+@layer utilities {
+  @media (max-width: 767px) {
+    /* Push the dashboard shell content below the Android system status
+       bar. Capacitor's overlaysWebView=false setting isn't reliable on
+       all Android versions, so we guarantee the inset in CSS too. */
+    .ik-dashboard-shell {
+      padding-top: max(env(safe-area-inset-top), 28px);
+    }
+
+    /* Shrink the editorial page title on mobile. The desktop 26px is too
+       big for ~360px viewports — common 2-word greetings wrap to 3 lines. */
+    .ik-page-title {
+      font-size: 20px !important;
+      line-height: 1.2 !important;
+    }
+
+    /* Scroll any wide table inside main content. */
+    main table {
+      display: block;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      max-width: 100%;
+    }
+    main table > thead,
+    main table > tbody,
+    main table > tfoot {
+      width: max-content;
+      min-width: 100%;
+      display: table;
+    }
+
+    /* Inline-style 2 / 3 / 4-col grids stack on small screens. */
+    main [style*="display: grid"][style*="repeat("],
+    main [style*="display:grid"][style*="repeat("] {
+      grid-template-columns: 1fr !important;
+    }
+  }
+}

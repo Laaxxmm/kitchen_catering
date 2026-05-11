@@ -1,0 +1,1668 @@
+// Indefine Kitchen — Prisma schema
+// All money uses Decimal; timestamps are UTC in DB and rendered in IST at the edge.
+// Lifted from SAB India Tracker (installation_industry_tracker-main), with vocabulary
+// remapped for catering (Client → Customer, Material → Ingredient, Project → Order,
+// MaterialIndent → PurchaseRequisition) and SAB-specific entities removed
+// (AMC, ServiceIssue, MaterialTransfer, MaterialVerification, ProjectStage, ProjectMilestone).
+// New catering-specific entities added: Dish, Recipe, RecipeIngredient, RecipeSubRecipe,
+// OrderItem, ProductionJob, ProductionJobItem, Delivery, DeliveryAttempt, PettyCash*,
+// Salary*, EInvoiceLog, Settings.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =====================================================================
+// ENUMS
+// =====================================================================
+
+enum Role {
+  ADMIN
+  MANAGER
+  KITCHEN_HEAD
+  STORE_KEEPER
+  SALES
+  DELIVERY
+  ACCOUNTS
+}
+
+enum EmploymentType {
+  HOURLY
+  SALARIED
+}
+
+// ---------- Quote ----------
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  CHANGES_REQUESTED
+  REVISED
+  NEGOTIATING
+  ACCEPTED
+  CONVERTED
+  LOST
+  EXPIRED
+}
+
+enum QuoteEventKind {
+  SENT
+  CUSTOMER_VIEWED
+  CHANGES_REQUESTED
+  REVISION_ISSUED
+  NEGOTIATION
+  ACCEPTED
+  REJECTED
+  NOTE
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACKS
+  CUSTOM
+}
+
+// ---------- Order ----------
+
+enum OrderStatus {
+  DRAFT
+  PENDING_STORE_APPROVAL // sales submitted; store keeper to review stock-availability first
+  PENDING_MANAGER_APPROVAL // store approved; manager to review price + business
+  REJECTED_BY_STORE // store rejected; terminal unless manager overrides
+  REJECTED_BY_MANAGER // manager rejected; terminal
+  APPROVED // both approvals (or manager override) cleared
+  CHEF_REQUISITION_PENDING // assigned to chef; chef to raise requisition
+  ISSUING // chef raised requisition; store fulfilling line-by-line
+  READY_FOR_PRODUCTION // all requisition lines issued (shortages procured + restocked)
+  IN_PREP // production job created and started
+  READY // chef marked all dishes ready
+  OUT_FOR_DELIVERY
+  DELIVERED
+  INVOICED
+  PAID
+  COMPLETED
+  CANCELLED
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+  OVERRIDDEN // manager override of a store rejection
+}
+
+enum BudgetCategory {
+  INGREDIENT
+  LABOUR
+  OVERHEAD
+  OTHER
+}
+
+// ---------- Production ----------
+
+enum ProductionJobStatus {
+  QUEUED
+  PREP
+  COOKING
+  READY
+  CANCELLED
+}
+
+enum ProductionJobItemStatus {
+  QUEUED
+  IN_PROGRESS
+  READY
+  CANCELLED
+}
+
+// ---------- Chef Requisition (chef → store internal request) ----------
+
+enum ChefRequisitionStatus {
+  DRAFT // chef is composing
+  SUBMITTED // sent to store
+  PARTIALLY_ISSUED // some lines issued, others pending stock or PR
+  FULLY_ISSUED // all lines satisfied
+  CANCELLED
+}
+
+enum ChefRequisitionLineStatus {
+  PENDING // not yet looked at
+  ISSUED // store issued the full requested qty
+  PARTIALLY_ISSUED // store issued some, awaiting more
+  AWAITING_PROCUREMENT // store created a PR for the shortfall
+  CANCELLED
+}
+
+// ---------- Delivery ----------
+
+enum DeliveryStatus {
+  SCHEDULED
+  DISPATCHED
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+  CANCELLED
+}
+
+// ---------- Inventory / Procurement ----------
+
+enum PurchaseRequisitionStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  PARTIALLY_ISSUED
+  ISSUED
+  CANCELLED
+}
+
+enum VendorCategory {
+  VEGETABLES
+  MEAT
+  DAIRY
+  GROCERY
+  SPICES
+  BAKERY
+  BEVERAGES
+  PACKAGING
+  GAS_FUEL
+  SERVICES
+  OTHER
+}
+
+enum VendorPaymentTerms {
+  ADVANCE
+  NET_7
+  NET_15
+  NET_30
+  NET_45
+  NET_60
+}
+
+enum VendorPOStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CLOSED
+  CANCELLED
+}
+
+enum GRNStatus {
+  DRAFT
+  ACCEPTED
+  PARTIALLY_ACCEPTED
+  REJECTED
+}
+
+enum VendorBillStatus {
+  DRAFT
+  PENDING_MATCH
+  MATCHED
+  DISCREPANCY
+  APPROVED
+  PAID
+  OVERDUE
+}
+
+// ---------- Invoicing ----------
+
+enum CustomerInvoiceKind {
+  ORDER // standard catering order invoice
+  ADVANCE // advance against an order
+  ADHOC // miscellaneous invoice
+  CREDIT_NOTE
+}
+
+enum CustomerInvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
+enum EInvoiceStatus {
+  NOT_REQUIRED // turnover below threshold or invoice kind exempt
+  PENDING // queued for GSP submission
+  GENERATED // IRN + signed QR received
+  CANCELLED // cancelled within 24h via GSP
+  FAILED // GSP call failed; see EInvoiceLog
+}
+
+// ---------- Payments ----------
+
+enum PaymentMethod {
+  CASH
+  CHEQUE
+  NEFT
+  RTGS
+  IMPS
+  UPI
+  BANK_TRANSFER
+  CREDIT_NOTE
+  WAIVER
+  ADJUSTMENT
+  OTHER
+}
+
+// ---------- Time entries ----------
+
+enum TimeEntryStatus {
+  OPEN
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+// ---------- Petty cash / Salary ----------
+
+enum PettyCashVoucherStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+enum SalaryRunStatus {
+  DRAFT
+  APPROVED
+  POSTED
+}
+
+// ---------- Documents ----------
+
+enum DocumentEntityType {
+  ORDER
+  QUOTE
+  CUSTOMER_INVOICE
+  VENDOR_PO
+  VENDOR_BILL
+  DELIVERY
+  PETTY_CASH_VOUCHER
+  PURCHASE_REQUISITION
+}
+
+enum DocumentKind {
+  ORIGINAL
+  SIGNED_COPY
+  ATTACHMENT
+  PHOTO
+  PROOF_OF_DELIVERY
+}
+
+// =====================================================================
+// IDENTITY
+// =====================================================================
+
+model User {
+  id             String          @id @default(cuid())
+  email          String          @unique
+  name           String
+  passwordHash   String
+  role           Role
+  employmentType EmploymentType?
+  phone          String?
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  rateCards EmployeeRateCard[]
+
+  // Time / labour
+  timeEntries     TimeEntry[] @relation("EmployeeEntries")
+  approvedEntries TimeEntry[] @relation("ApproverEntries")
+
+  // Operational ownership
+  kitchenSupervisedOrders Order[]             @relation("KitchenSupervisor")
+  productionJobsAssigned  ProductionJobItem[] @relation("ChefAssignedTo")
+  deliveriesAssigned      Delivery[]          @relation("DriverAssignedTo")
+
+  // Audit / mutations
+  auditLogs                       AuditLog[]
+  ingredientIssues                IngredientIssue[]
+  quotesCreated                   Quote[]                  @relation("QuoteCreatedBy")
+  quoteEvents                     QuoteEvent[]             @relation("QuoteEventActor")
+  customerInvoicesCreated         CustomerInvoice[]        @relation("CustomerInvoiceCreatedBy")
+  ordersCreated                   Order[]                  @relation("OrderCreatedBy")
+  ordersStoreReviewed             Order[]                  @relation("OrderStoreReviewedBy")
+  ordersManagerReviewed           Order[]                  @relation("OrderManagerReviewedBy")
+  chefRequisitionsCreated         ChefRequisition[]        @relation("ChefRequisitionCreatedBy")
+  chefRequisitionsFulfilled       ChefRequisition[]        @relation("ChefRequisitionFulfilledBy")
+  prRequested                     PurchaseRequisition[]    @relation("PRRequester")
+  prApproved                      PurchaseRequisition[]    @relation("PRApprover")
+  vendorPosApproved               VendorPO[]               @relation("VendorPOApprovedBy")
+  grnsReceived                    GRN[]                    @relation("GRNReceivedBy")
+  vendorBillsMatched              VendorBill[]             @relation("VendorBillMatchedBy")
+  customerInvoicePaymentsRecorded CustomerInvoicePayment[] @relation("CustomerInvoicePaymentRecordedBy")
+  customerInvoicePaymentsReversed CustomerInvoicePayment[] @relation("CustomerInvoicePaymentReversedBy")
+  vendorBillPaymentsRecorded      VendorBillPayment[]      @relation("VendorBillPaymentRecordedBy")
+  vendorBillPaymentsReversed      VendorBillPayment[]      @relation("VendorBillPaymentReversedBy")
+  documentsUploaded               Document[]               @relation("DocumentUploadedBy")
+  pettyCashFloats                 PettyCashFloat[]
+  pettyCashVouchersCreated        PettyCashVoucher[]       @relation("PettyCashVoucherCreatedBy")
+  pettyCashVouchersApproved       PettyCashVoucher[]       @relation("PettyCashVoucherApprovedBy")
+  pettyCashTopUpsApproved         PettyCashTopUp[]         @relation("PettyCashTopUpApprovedBy")
+  salaryStructures                SalaryStructure[]        @relation("SalaryStructureEmployee")
+  salaryRunsCreated               SalaryRun[]              @relation("SalaryRunCreatedBy")
+  salaryRunsApproved              SalaryRun[]              @relation("SalaryRunApprovedBy")
+
+  // Mobile
+  mobileSessions MobileSession[] @relation("MobileSessions")
+  mobileOps      MobileOp[]      @relation("MobileOps")
+  mobileDevices  MobileDevice[]  @relation("MobileDevices")
+}
+
+model EmployeeRateCard {
+  id            String         @id @default(cuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type          EmploymentType
+  hourlyRate    Decimal?       @db.Decimal(10, 2)
+  monthlySalary Decimal?       @db.Decimal(12, 2)
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  createdAt     DateTime       @default(now())
+
+  @@index([userId, effectiveFrom])
+}
+
+// =====================================================================
+// CUSTOMER (CRM)
+// =====================================================================
+
+model CustomerGroup {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String?
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customers Customer[]
+
+  @@index([active])
+}
+
+model Customer {
+  id              String         @id @default(cuid())
+  name            String
+  gstin           String?
+  pan             String?
+  billingAddress  String
+  shippingAddress String?
+  stateCode       String // 2-digit GST state code, e.g. "29" for Karnataka
+  contactName     String?
+  email           String?
+  phone           String?
+  notes           String?
+  active          Boolean        @default(true)
+  groupId         String?
+  group           CustomerGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  // TDS defaults: pre-fill the payment form when this customer typically
+  // deducts tax at source. Both nullable; null = no default.
+  defaultTdsRatePct Decimal? @db.Decimal(5, 2)
+  defaultTdsSection String?
+
+  // Credit & terms
+  creditLimit  Decimal            @default(0) @db.Decimal(14, 2)
+  paymentTerms VendorPaymentTerms @default(NET_30)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders   Order[]
+  quotes   Quote[]
+  invoices CustomerInvoice[]
+
+  @@unique([name, gstin])
+  @@index([name])
+  @@index([active])
+  @@index([groupId])
+}
+
+// =====================================================================
+// DISH + RECIPE (BOM)
+// =====================================================================
+
+model Dish {
+  id          String   @id @default(cuid())
+  code        String?  @unique // optional human-friendly code, e.g. "PBM-01"
+  name        String
+  category    String? // free-text for now; categorise in Settings later
+  description String?
+  unitPrice   Decimal  @db.Decimal(12, 2) // default selling price per portion
+  unit        String   @default("portion") // 'portion' | 'plate' | 'kg' etc.
+  hsnSac      String? // for GST invoicing
+  gstRatePct  Decimal  @default(5) @db.Decimal(5, 2) // catering services in India ~5%
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  recipe             Recipe?
+  orderItems         OrderItem[]
+  quoteLines         QuoteLine[]
+  productionJobItems ProductionJobItem[]
+
+  @@index([active])
+  @@index([category])
+}
+
+// A Recipe is the BOM for either:
+//   - a Dish (recipe.dishId set, recipe.isSubRecipe = false)
+//   - a reusable sub-preparation (dishId null, isSubRecipe = true), used by other recipes
+model Recipe {
+  id                   String   @id @default(cuid())
+  name                 String // for sub-recipes only; for dish recipes derived from dish.name
+  dishId               String?  @unique
+  dish                 Dish?    @relation(fields: [dishId], references: [id])
+  isSubRecipe          Boolean  @default(false)
+  yieldQty             Decimal  @default(1) @db.Decimal(12, 3)
+  yieldUnit            String   @default("portion")
+  standardYieldPercent Decimal  @default(100) @db.Decimal(5, 2) // shrinkage between input and output
+  notes                String?
+  active               Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  ingredients RecipeIngredient[]
+
+  // Sub-recipe relations
+  parentLinks RecipeSubRecipe[] @relation("ParentRecipe") // recipes that *use* this as a sub-recipe
+  childLinks  RecipeSubRecipe[] @relation("ChildRecipe") // sub-recipes that *this recipe* uses
+
+  @@index([isSubRecipe])
+  @@index([active])
+}
+
+model RecipeIngredient {
+  id             String     @id @default(cuid())
+  recipeId       String
+  recipe         Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  ingredientId   String
+  ingredient     Ingredient @relation(fields: [ingredientId], references: [id])
+  qty            Decimal    @db.Decimal(14, 3)
+  unit           String // free text — display only; the canonical unit is ingredient.unit
+  wastagePercent Decimal    @default(0) @db.Decimal(5, 2)
+  notes          String?
+
+  @@index([recipeId])
+  @@index([ingredientId])
+}
+
+model RecipeSubRecipe {
+  id       String  @id @default(cuid())
+  parentId String
+  parent   Recipe  @relation("ParentRecipe", fields: [parentId], references: [id], onDelete: Cascade)
+  childId  String
+  child    Recipe  @relation("ChildRecipe", fields: [childId], references: [id])
+  quantity Decimal @db.Decimal(14, 3) // how many yieldQty units of the child are needed
+  notes    String?
+
+  @@unique([parentId, childId])
+  @@index([childId])
+}
+
+// =====================================================================
+// INGREDIENT (renamed from Material) + INVENTORY
+// =====================================================================
+
+model Ingredient {
+  id                String   @id @default(cuid())
+  sku               String   @unique
+  name              String
+  category          String? // produce/dairy/grocery/...
+  unit              String // 'kg' | 'g' | 'L' | 'mL' | 'pcs' | 'pkt' ...
+  openingQty        Decimal  @default(0) @db.Decimal(14, 3)
+  openingAvgCost    Decimal  @default(0) @db.Decimal(12, 4)
+  onHandQty         Decimal  @default(0) @db.Decimal(14, 3)
+  avgUnitCost       Decimal  @default(0) @db.Decimal(12, 4)
+  reorderLevel      Decimal  @default(0) @db.Decimal(14, 3)
+  preferredVendorId String?
+  preferredVendor   Vendor?  @relation("PreferredVendor", fields: [preferredVendorId], references: [id])
+  hsnSac            String?
+  gstRatePct        Decimal  @default(0) @db.Decimal(5, 2)
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  receipts             IngredientReceipt[]
+  issues               IngredientIssue[]
+  recipeIngredients    RecipeIngredient[]
+  prLines              PurchaseRequisitionLine[]
+  orderBudgetLines     OrderBudgetLine[]         @relation("OrderBudgetLineToIngredient")
+  vendorPOLines        VendorPOLine[]            @relation("VendorPOLineToIngredient")
+  chefRequisitionLines ChefRequisitionLine[]
+
+  @@index([active])
+  @@index([category])
+  @@index([preferredVendorId])
+}
+
+model IngredientReceipt {
+  id           String     @id @default(cuid())
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  qty          Decimal    @db.Decimal(14, 3)
+  unitCost     Decimal    @db.Decimal(12, 4)
+  supplier     String? // free text when not tied to a GRN
+  receivedAt   DateTime
+  note         String?
+  // Backref when this receipt was created from a GRN (one GRN line → one
+  // IngredientReceipt). Nullable for direct/manual receipts.
+  grnLineId    String?    @unique
+  grnLine      GRNLine?   @relation(fields: [grnLineId], references: [id])
+  createdAt    DateTime   @default(now())
+
+  @@index([ingredientId, receivedAt])
+}
+
+model IngredientIssue {
+  id                    String                   @id @default(cuid())
+  ingredientId          String
+  ingredient            Ingredient               @relation(fields: [ingredientId], references: [id])
+  orderId               String
+  order                 Order                    @relation(fields: [orderId], references: [id])
+  productionJobId       String?
+  productionJob         ProductionJob?           @relation(fields: [productionJobId], references: [id])
+  qty                   Decimal                  @db.Decimal(14, 3)
+  unitCostAtIssue       Decimal                  @db.Decimal(12, 4)
+  issuedById            String
+  issuedBy              User                     @relation(fields: [issuedById], references: [id])
+  issuedAt              DateTime
+  note                  String?
+  // Backref when this issue was created to fulfill a PR line.
+  prLineId              String?
+  prLine                PurchaseRequisitionLine? @relation(fields: [prLineId], references: [id])
+  // Backref when this issue was created to fulfill a chef requisition
+  // line. Most production issues will have this set; only direct
+  // emergency issues (no requisition) leave it null.
+  chefRequisitionLineId String?
+  chefRequisitionLine   ChefRequisitionLine?     @relation(fields: [chefRequisitionLineId], references: [id])
+  createdAt             DateTime                 @default(now())
+
+  @@index([orderId, issuedAt])
+  @@index([ingredientId, issuedAt])
+  @@index([prLineId])
+  @@index([chefRequisitionLineId])
+}
+
+// =====================================================================
+// QUOTE
+// =====================================================================
+
+model Quote {
+  id         String   @id @default(cuid())
+  quoteNo    String   @unique
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  orderId    String?  @unique
+  order      Order?   @relation("QuoteConvertedOrder", fields: [orderId], references: [id])
+  title      String
+
+  // Catering-specific
+  eventDate       DateTime?
+  headcount       Int?
+  mealType        MealType?
+  deliveryAddress String?
+
+  status                 QuoteStatus @default(DRAFT)
+  version                Int         @default(1)
+  parentQuoteId          String?
+  parentQuote            Quote?      @relation("QuoteRevisions", fields: [parentQuoteId], references: [id])
+  revisions              Quote[]     @relation("QuoteRevisions")
+  validUntil             DateTime?
+  placeOfSupplyStateCode String
+  subtotal               Decimal     @default(0) @db.Decimal(14, 2)
+  taxTotal               Decimal     @default(0) @db.Decimal(14, 2)
+  grandTotal             Decimal     @default(0) @db.Decimal(14, 2)
+  notes                  String?
+  termsMd                String?
+  createdById            String
+  createdBy              User        @relation("QuoteCreatedBy", fields: [createdById], references: [id])
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+  sentAt                 DateTime?
+  acceptedAt             DateTime?
+  convertedAt            DateTime?
+  shareToken             String      @unique
+
+  lines  QuoteLine[]
+  events QuoteEvent[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([createdAt])
+}
+
+model QuoteLine {
+  id           String  @id @default(cuid())
+  quoteId      String
+  quote        Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  sortOrder    Int
+  dishId       String?
+  dish         Dish?   @relation(fields: [dishId], references: [id])
+  description  String // freeform line if no dish (e.g. "Setup + service staff")
+  hsnSac       String?
+  quantity     Decimal @db.Decimal(12, 3)
+  unit         String
+  unitPrice    Decimal @db.Decimal(12, 2)
+  discountPct  Decimal @default(0) @db.Decimal(5, 2)
+  gstRatePct   Decimal @default(0) @db.Decimal(5, 2)
+  lineSubtotal Decimal @db.Decimal(14, 2)
+  lineTax      Decimal @db.Decimal(14, 2)
+  lineTotal    Decimal @db.Decimal(14, 2)
+
+  @@index([quoteId, sortOrder])
+}
+
+model QuoteEvent {
+  id          String         @id @default(cuid())
+  quoteId     String
+  quote       Quote          @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  kind        QuoteEventKind
+  note        String?
+  fromStatus  QuoteStatus?
+  toStatus    QuoteStatus?
+  actorUserId String?
+  actor       User?          @relation("QuoteEventActor", fields: [actorUserId], references: [id])
+  at          DateTime       @default(now())
+
+  @@index([quoteId, at])
+}
+
+// =====================================================================
+// ORDER (renamed from Project)
+// =====================================================================
+
+model Order {
+  id         String   @id @default(cuid())
+  code       String   @unique // ORD-26-27-0001
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  // Catering-specific
+  eventDate           DateTime
+  headcount           Int
+  mealType            MealType
+  deliveryAddress     String
+  deliveryWindowStart DateTime
+  deliveryWindowEnd   DateTime
+
+  status                 OrderStatus @default(DRAFT)
+  contractValue          Decimal     @db.Decimal(14, 2)
+  placeOfSupplyStateCode String
+  notes                  String?
+
+  // Recipe-derived suggestion snapshot (only populated when Settings
+  // `recipe.suggestionsEnabled` is on AND the dishes on this order have
+  // recipes). Used to PRE-FILL the chef's requisition screen. Never the
+  // source of truth for "planned cost" — that lives in ChefRequisition.
+  // Shape: { ingredients: [{ ingredientId, qty, unitCostSnapshot }], totalCost }
+  recipeSuggestionSnapshot Json?
+
+  // ---------- Two-stage approval ----------
+  // Stage 1: Store keeper signs off stock-availability. Required, with a note.
+  // Stage 2: Manager signs off price + business.
+  // Manager may OVERRIDE a store rejection (sets storeOverriddenAt + reason).
+
+  // Submission
+  submittedAt DateTime?
+
+  // Store approval (stage 1)
+  storeReviewedById String?
+  storeReviewedBy   User?             @relation("OrderStoreReviewedBy", fields: [storeReviewedById], references: [id])
+  storeReviewedAt   DateTime?
+  storeDecision     ApprovalDecision?
+  storeApprovalNote String? // Store MUST write a note. Free-text flags concerns about specific dishes / ingredients.
+
+  // Manager approval (stage 2)
+  managerReviewedById String?
+  managerReviewedBy   User?             @relation("OrderManagerReviewedBy", fields: [managerReviewedById], references: [id])
+  managerReviewedAt   DateTime?
+  managerDecision     ApprovalDecision?
+  managerApprovalNote String?
+
+  // Manager override of a store rejection. When set, managerDecision is
+  // OVERRIDDEN and the order resumes from APPROVED. The override reason is
+  // captured separately so the audit trail can show "Store said X, Manager
+  // overrode because Y".
+  managerOverrideReason String?
+
+  // Workflow
+  kitchenSupervisorId String?
+  kitchenSupervisor   User?     @relation("KitchenSupervisor", fields: [kitchenSupervisorId], references: [id])
+  cancelledAt         DateTime?
+  cancellationReason  String?
+
+  createdById String
+  createdBy   User     @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items            OrderItem[]
+  budgetLines      OrderBudgetLine[]
+  overheadAllocs   OrderOverheadAllocation[]
+  ingredientIssues IngredientIssue[]
+  quote            Quote?                    @relation("QuoteConvertedOrder")
+  productionJobs   ProductionJob[]
+  deliveries       Delivery[]
+  invoices         CustomerInvoice[]
+  prs              PurchaseRequisition[]
+  vendorPos        VendorPO[]                @relation("VendorPOToOrder")
+  timeEntries      TimeEntry[]               @relation("TimeEntryToOrder")
+  chefRequisitions ChefRequisition[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([eventDate])
+  @@index([kitchenSupervisorId])
+  @@index([storeReviewedById])
+  @@index([managerReviewedById])
+}
+
+model OrderItem {
+  id           String  @id @default(cuid())
+  orderId      String
+  order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  dishId       String
+  dish         Dish    @relation(fields: [dishId], references: [id])
+  sortOrder    Int
+  portions     Decimal @db.Decimal(12, 3)
+  unitPrice    Decimal @db.Decimal(12, 2)
+  discountPct  Decimal @default(0) @db.Decimal(5, 2)
+  gstRatePct   Decimal @default(0) @db.Decimal(5, 2)
+  lineSubtotal Decimal @db.Decimal(14, 2)
+  lineTax      Decimal @db.Decimal(14, 2)
+  lineTotal    Decimal @db.Decimal(14, 2)
+  notes        String?
+
+  chefRequisitionLines ChefRequisitionLine[]
+
+  @@index([orderId, sortOrder])
+  @@index([dishId])
+}
+
+model OrderBudgetLine {
+  id           String         @id @default(cuid())
+  orderId      String
+  order        Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  category     BudgetCategory
+  description  String
+  ingredientId String?
+  ingredient   Ingredient?    @relation(fields: [ingredientId], references: [id], name: "OrderBudgetLineToIngredient")
+  quantity     Decimal        @db.Decimal(12, 3)
+  unitCost     Decimal        @db.Decimal(12, 2)
+  total        Decimal        @db.Decimal(14, 2)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([orderId, category])
+}
+
+model OrderOverheadAllocation {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  periodMonth DateTime
+  amount      Decimal  @db.Decimal(14, 2)
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([orderId, periodMonth])
+  @@index([periodMonth])
+}
+
+// =====================================================================
+// CHEF REQUISITION (chef → store internal request, scoped to one order)
+// =====================================================================
+// The chef raises a requisition stating what they actually need for a
+// specific order. The store fulfills line-by-line: any line that can't
+// be issued from stock spawns a PurchaseRequisition. When ALL lines are
+// FULLY_ISSUED, the order auto-advances to READY_FOR_PRODUCTION.
+//
+// Distinct from PurchaseRequisition (which is store → vendor). The
+// vocabulary is intentional: "requisition" inside the kitchen, "purchase
+// requisition" to vendors.
+
+model ChefRequisition {
+  id                String                @id @default(cuid())
+  requisitionNo     String                @unique // CR-26-27-0001
+  orderId           String
+  order             Order                 @relation(fields: [orderId], references: [id])
+  status            ChefRequisitionStatus @default(DRAFT)
+  notes             String?
+  createdById       String // the chef
+  createdBy         User                  @relation("ChefRequisitionCreatedBy", fields: [createdById], references: [id])
+  submittedAt       DateTime?
+  // Last storekeeper to act on this requisition (issue or create PR).
+  // Updated each time the store touches a line; not a single authoritative
+  // owner.
+  lastFulfilledById String?
+  lastFulfilledBy   User?                 @relation("ChefRequisitionFulfilledBy", fields: [lastFulfilledById], references: [id])
+  closedAt          DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  lines ChefRequisitionLine[]
+  // PRs auto-created from shortages on this requisition (one PR may cover
+  // multiple ChefRequisitionLines; one ChefRequisitionLine may be split
+  // across multiple PRs in degenerate cases — the link is via the line).
+  prs   PurchaseRequisition[]
+
+  @@index([status])
+  @@index([orderId])
+  @@index([createdById])
+}
+
+model ChefRequisitionLine {
+  id               String                    @id @default(cuid())
+  requisitionId    String
+  requisition      ChefRequisition           @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
+  ingredientId     String
+  ingredient       Ingredient                @relation(fields: [ingredientId], references: [id])
+  // Optional reference to which dish on the order this line is for.
+  // Nullable because chef may bundle ingredients (e.g. 5kg onion for
+  // 3 different dishes). Useful for production analytics, not enforced.
+  orderItemId      String?
+  orderItem        OrderItem?                @relation(fields: [orderItemId], references: [id])
+  requestedQty     Decimal                   @db.Decimal(14, 3)
+  unit             String // display unit; canonical = ingredient.unit
+  issuedQty        Decimal                   @default(0) @db.Decimal(14, 3)
+  // Snapshot of ingredient avgUnitCost at requisition-submit time. This is
+  // the "planned cost" baseline for budget-vs-actual on the order.
+  unitCostSnapshot Decimal                   @db.Decimal(12, 4)
+  status           ChefRequisitionLineStatus @default(PENDING)
+  notes            String?
+
+  ingredientIssues IngredientIssue[]
+
+  @@index([requisitionId])
+  @@index([ingredientId])
+  @@index([status])
+  @@index([orderItemId])
+}
+
+// =====================================================================
+// PRODUCTION (kitchen board)
+// =====================================================================
+
+model ProductionJob {
+  id             String              @id @default(cuid())
+  jobNo          String              @unique // PJ-26-27-0001
+  orderId        String
+  order          Order               @relation(fields: [orderId], references: [id])
+  status         ProductionJobStatus @default(QUEUED)
+  scheduledStart DateTime
+  scheduledReady DateTime
+  actualStart    DateTime?
+  actualReady    DateTime?
+  notes          String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  items            ProductionJobItem[]
+  ingredientIssues IngredientIssue[]
+
+  @@index([status])
+  @@index([orderId])
+  @@index([scheduledReady])
+}
+
+model ProductionJobItem {
+  id         String                  @id @default(cuid())
+  jobId      String
+  job        ProductionJob           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  dishId     String
+  dish       Dish                    @relation(fields: [dishId], references: [id])
+  portions   Decimal                 @db.Decimal(12, 3)
+  status     ProductionJobItemStatus @default(QUEUED)
+  chefUserId String?
+  chef       User?                   @relation("ChefAssignedTo", fields: [chefUserId], references: [id])
+  startedAt  DateTime?
+  readyAt    DateTime?
+  notes      String?
+
+  @@index([jobId])
+  @@index([dishId])
+  @@index([chefUserId])
+}
+
+// =====================================================================
+// DELIVERY
+// =====================================================================
+
+model Delivery {
+  id             String         @id @default(cuid())
+  deliveryNo     String         @unique // DLV-26-27-0001
+  orderId        String
+  order          Order          @relation(fields: [orderId], references: [id])
+  status         DeliveryStatus @default(SCHEDULED)
+  driverUserId   String?
+  driver         User?          @relation("DriverAssignedTo", fields: [driverUserId], references: [id])
+  vehicleNo      String?
+  scheduledAt    DateTime
+  dispatchedAt   DateTime?
+  arrivedAt      DateTime?
+  deliveredAt    DateTime?
+  otpHash        String? // bcrypt-hashed 4-digit OTP
+  otpAttempts    Int            @default(0)
+  recipientName  String?
+  recipientPhone String?
+  proofPhotoUrls String[]       @default([])
+  signatureUrl   String?
+  failureReason  String?
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  attempts DeliveryAttempt[]
+
+  @@index([status])
+  @@index([orderId])
+  @@index([scheduledAt])
+  @@index([driverUserId])
+}
+
+model DeliveryAttempt {
+  id          String   @id @default(cuid())
+  deliveryId  String
+  delivery    Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  attemptedAt DateTime @default(now())
+  outcome     String // 'OTP_MATCH' | 'OTP_MISMATCH' | 'CUSTOMER_UNAVAILABLE' | 'WRONG_ADDRESS' | 'OTHER'
+  notes       String?
+
+  @@index([deliveryId, attemptedAt])
+}
+
+// =====================================================================
+// PROCUREMENT — PurchaseRequisition → VendorPO → GRN → VendorBill
+// =====================================================================
+
+model Vendor {
+  id                String             @id @default(cuid())
+  code              String             @unique // V-0001
+  name              String
+  gstin             String?
+  pan               String?
+  stateCode         String
+  category          VendorCategory     @default(OTHER)
+  msme              Boolean            @default(false)
+  contactName       String?
+  phone             String?
+  email             String?
+  address           String?
+  paymentTerms      VendorPaymentTerms @default(NET_30)
+  creditLimit       Decimal            @default(0) @db.Decimal(14, 2)
+  notes             String?
+  active            Boolean            @default(true)
+  defaultTdsRatePct Decimal?           @db.Decimal(5, 2)
+  defaultTdsSection String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  purchaseOrders        VendorPO[]
+  bills                 VendorBill[]
+  preferredByIngredient Ingredient[] @relation("PreferredVendor")
+
+  @@index([active])
+  @@index([category])
+  @@index([name])
+}
+
+model PurchaseRequisition {
+  id                String                    @id @default(cuid())
+  prNo              String                    @unique // PR-26-27-0001
+  orderId           String? // optional link to the catering order that triggered the shortage
+  order             Order?                    @relation(fields: [orderId], references: [id])
+  // When this PR was auto-created from a chef requisition shortage,
+  // link back so the chef can see "your line is being procured".
+  chefRequisitionId String?
+  chefRequisition   ChefRequisition?          @relation(fields: [chefRequisitionId], references: [id])
+  requestedById     String
+  requestedBy       User                      @relation("PRRequester", fields: [requestedById], references: [id])
+  status            PurchaseRequisitionStatus @default(DRAFT)
+  needsApproval     Boolean                   @default(false) // computed at submit
+  approvedById      String?
+  approvedBy        User?                     @relation("PRApprover", fields: [approvedById], references: [id])
+  approvedAt        DateTime?
+  rejectionReason   String?
+  notes             String?
+  submittedAt       DateTime?
+  closedAt          DateTime?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  lines PurchaseRequisitionLine[]
+
+  @@index([status])
+  @@index([orderId, status])
+  @@index([requestedById])
+  @@index([chefRequisitionId])
+}
+
+model PurchaseRequisitionLine {
+  id                String              @id @default(cuid())
+  prId              String
+  pr                PurchaseRequisition @relation(fields: [prId], references: [id], onDelete: Cascade)
+  ingredientId      String
+  ingredient        Ingredient          @relation(fields: [ingredientId], references: [id])
+  requestedQty      Decimal             @db.Decimal(14, 3)
+  unitCostSnapshot  Decimal             @db.Decimal(12, 4)
+  isInBudget        Boolean             @default(true)
+  reasonOutOfBudget String?
+  issuedQty         Decimal             @default(0) @db.Decimal(14, 3)
+  notes             String?
+
+  ingredientIssues IngredientIssue[]
+
+  @@index([prId])
+  @@index([ingredientId])
+}
+
+model VendorPO {
+  id                     String         @id @default(cuid())
+  poNo                   String         @unique // VPO-26-27-0001
+  vendorId               String
+  vendor                 Vendor         @relation(fields: [vendorId], references: [id])
+  orderId                String? // optional link to the catering order being procured for
+  order                  Order?         @relation(fields: [orderId], references: [id], name: "VendorPOToOrder")
+  status                 VendorPOStatus @default(DRAFT)
+  issueDate              DateTime       @default(now())
+  expectedDate           DateTime?
+  placeOfSupplyStateCode String
+  subtotal               Decimal        @default(0) @db.Decimal(14, 2)
+  taxTotal               Decimal        @default(0) @db.Decimal(14, 2)
+  grandTotal             Decimal        @default(0) @db.Decimal(14, 2)
+  approvalTier           String // 'auto' | 'manager' | 'admin'
+  approvedByUserId       String?
+  approvedBy             User?          @relation("VendorPOApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedAt             DateTime?
+  sentAt                 DateTime?
+  closedAt               DateTime?
+  notes                  String?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  lines VendorPOLine[]
+  grns  GRN[]
+  bills VendorBill[]
+
+  @@index([status])
+  @@index([vendorId, issueDate])
+  @@index([orderId])
+}
+
+model VendorPOLine {
+  id           String      @id @default(cuid())
+  poId         String
+  po           VendorPO    @relation(fields: [poId], references: [id], onDelete: Cascade)
+  sortOrder    Int
+  // Either link to an Ingredient or stand alone as free text (e.g. one-off purchase)
+  ingredientId String?
+  ingredient   Ingredient? @relation("VendorPOLineToIngredient", fields: [ingredientId], references: [id])
+  sku          String
+  description  String
+  unit         String
+  quantity     Decimal     @db.Decimal(14, 3)
+  unitPrice    Decimal     @db.Decimal(12, 2)
+  gstRatePct   Decimal     @default(0) @db.Decimal(5, 2)
+  lineSubtotal Decimal     @db.Decimal(14, 2)
+  lineTax      Decimal     @db.Decimal(14, 2)
+  lineTotal    Decimal     @db.Decimal(14, 2)
+  receivedQty  Decimal     @default(0) @db.Decimal(14, 3)
+
+  grnLines GRNLine[] @relation("GRNLineToPOLine")
+
+  @@index([poId, sortOrder])
+}
+
+model GRN {
+  id               String    @id @default(cuid())
+  grnNo            String    @unique // GRN-26-27-0001
+  poId             String
+  po               VendorPO  @relation(fields: [poId], references: [id])
+  status           GRNStatus @default(DRAFT)
+  receivedAt       DateTime  @default(now())
+  receivedByUserId String?
+  receivedBy       User?     @relation("GRNReceivedBy", fields: [receivedByUserId], references: [id])
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  lines GRNLine[]
+
+  @@index([poId, receivedAt])
+  @@index([status])
+}
+
+model GRNLine {
+  id          String       @id @default(cuid())
+  grnId       String
+  grn         GRN          @relation(fields: [grnId], references: [id], onDelete: Cascade)
+  poLineId    String
+  poLine      VendorPOLine @relation("GRNLineToPOLine", fields: [poLineId], references: [id])
+  sortOrder   Int
+  orderedQty  Decimal      @db.Decimal(14, 3)
+  acceptedQty Decimal      @db.Decimal(14, 3)
+  rejectedQty Decimal      @default(0) @db.Decimal(14, 3)
+  reason      String?
+
+  ingredientReceipt IngredientReceipt?
+
+  @@index([grnId, sortOrder])
+  @@index([poLineId])
+}
+
+model VendorBill {
+  id              String           @id @default(cuid())
+  billNo          String           @unique // internal: VB-26-27-0001
+  vendorBillNo    String? // vendor's printed invoice number
+  vendorId        String
+  vendor          Vendor           @relation(fields: [vendorId], references: [id])
+  poId            String?
+  po              VendorPO?        @relation(fields: [poId], references: [id])
+  status          VendorBillStatus @default(DRAFT)
+  issueDate       DateTime         @default(now())
+  dueDate         DateTime?
+  subtotal        Decimal          @default(0) @db.Decimal(14, 2)
+  taxTotal        Decimal          @default(0) @db.Decimal(14, 2)
+  grandTotal      Decimal          @default(0) @db.Decimal(14, 2)
+  amountPaid      Decimal          @default(0) @db.Decimal(14, 2)
+  paidAt          DateTime?
+  matchedByUserId String?
+  matchedBy       User?            @relation("VendorBillMatchedBy", fields: [matchedByUserId], references: [id])
+  matchedAt       DateTime?
+  discrepancyNote String?
+  notes           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  lines    VendorBillLine[]
+  payments VendorBillPayment[]
+
+  @@index([status])
+  @@index([vendorId, issueDate])
+  @@index([dueDate])
+}
+
+model VendorBillLine {
+  id           String     @id @default(cuid())
+  billId       String
+  bill         VendorBill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  sortOrder    Int
+  description  String
+  quantity     Decimal    @db.Decimal(14, 3)
+  unit         String
+  unitPrice    Decimal    @db.Decimal(12, 2)
+  gstRatePct   Decimal    @default(0) @db.Decimal(5, 2)
+  lineSubtotal Decimal    @db.Decimal(14, 2)
+  lineTax      Decimal    @db.Decimal(14, 2)
+  lineTotal    Decimal    @db.Decimal(14, 2)
+
+  @@index([billId, sortOrder])
+}
+
+// =====================================================================
+// CUSTOMER INVOICE + E-INVOICE
+// =====================================================================
+
+model CustomerInvoice {
+  id                     String                @id @default(cuid())
+  invoiceNo              String                @unique // INV-26-27-0001
+  kind                   CustomerInvoiceKind   @default(ORDER)
+  status                 CustomerInvoiceStatus @default(DRAFT)
+  orderId                String?
+  order                  Order?                @relation(fields: [orderId], references: [id])
+  customerId             String
+  customer               Customer              @relation(fields: [customerId], references: [id])
+  placeOfSupplyStateCode String
+  issuedAt               DateTime?
+  dueAt                  DateTime?
+
+  // Money
+  subtotal   Decimal   @default(0) @db.Decimal(14, 2)
+  cgst       Decimal   @default(0) @db.Decimal(14, 2)
+  sgst       Decimal   @default(0) @db.Decimal(14, 2)
+  igst       Decimal   @default(0) @db.Decimal(14, 2)
+  taxTotal   Decimal   @default(0) @db.Decimal(14, 2)
+  grandTotal Decimal   @default(0) @db.Decimal(14, 2)
+  amountPaid Decimal   @default(0) @db.Decimal(14, 2)
+  paidAt     DateTime?
+
+  // E-invoice (Phase 3)
+  eInvoiceStatus    EInvoiceStatus @default(NOT_REQUIRED)
+  irn               String?        @unique
+  ackNo             String?
+  ackDate           DateTime?
+  signedQrPayload   String?        @db.Text // signed QR payload string returned by IRP
+  signedInvoiceJson Json? // full signed invoice JSON from IRP
+
+  notes       String?
+  termsMd     String?
+  poRef       String?
+  createdById String
+  createdBy   User     @relation("CustomerInvoiceCreatedBy", fields: [createdById], references: [id])
+  shareToken  String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lines        CustomerInvoiceLine[]
+  payments     CustomerInvoicePayment[]
+  eInvoiceLogs EInvoiceLog[]
+
+  @@index([orderId, issuedAt])
+  @@index([status])
+  @@index([eInvoiceStatus])
+  @@index([customerId])
+  @@index([createdAt])
+}
+
+model CustomerInvoiceLine {
+  id           String          @id @default(cuid())
+  invoiceId    String
+  invoice      CustomerInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  sortOrder    Int
+  description  String
+  hsnSac       String?
+  quantity     Decimal         @db.Decimal(12, 3)
+  unit         String
+  unitPrice    Decimal         @db.Decimal(12, 2)
+  discountPct  Decimal         @default(0) @db.Decimal(5, 2)
+  gstRatePct   Decimal         @default(0) @db.Decimal(5, 2)
+  lineSubtotal Decimal         @db.Decimal(14, 2)
+  lineTax      Decimal         @db.Decimal(14, 2)
+  lineTotal    Decimal         @db.Decimal(14, 2)
+
+  @@index([invoiceId, sortOrder])
+}
+
+model EInvoiceLog {
+  id           String          @id @default(cuid())
+  invoiceId    String
+  invoice      CustomerInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  action       String // 'GENERATE' | 'CANCEL' | 'RETRY'
+  provider     String // 'CLEARTAX' | 'IRIS' | 'NIC_DIRECT' etc.
+  requestJson  Json?
+  responseJson Json?
+  success      Boolean
+  errorMessage String?
+  at           DateTime        @default(now())
+
+  @@index([invoiceId, at])
+}
+
+// =====================================================================
+// PAYMENTS
+// =====================================================================
+
+model CustomerInvoicePayment {
+  id               String          @id @default(cuid())
+  invoiceId        String
+  invoice          CustomerInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount           Decimal         @db.Decimal(14, 2) // total credit (cash + TDS)
+  paidAt           DateTime
+  method           PaymentMethod   @default(OTHER)
+  reference        String?
+  notes            String?
+  // TDS — populated only when the customer deducted tax at source.
+  tdsAmount        Decimal?        @db.Decimal(14, 2)
+  tdsRatePct       Decimal?        @db.Decimal(5, 2)
+  tdsSection       String?
+  tdsCertificateNo String?
+  recordedById     String
+  recordedBy       User            @relation("CustomerInvoicePaymentRecordedBy", fields: [recordedById], references: [id])
+  createdAt        DateTime        @default(now())
+  reversedAt       DateTime?
+  reversedReason   String?
+  reversedById     String?
+  reversedBy       User?           @relation("CustomerInvoicePaymentReversedBy", fields: [reversedById], references: [id])
+
+  @@index([invoiceId, paidAt])
+  @@index([paidAt])
+}
+
+model VendorBillPayment {
+  id               String        @id @default(cuid())
+  vendorBillId     String
+  vendorBill       VendorBill    @relation(fields: [vendorBillId], references: [id], onDelete: Cascade)
+  amount           Decimal       @db.Decimal(14, 2)
+  paidAt           DateTime
+  method           PaymentMethod @default(OTHER)
+  reference        String?
+  notes            String?
+  tdsAmount        Decimal?      @db.Decimal(14, 2)
+  tdsRatePct       Decimal?      @db.Decimal(5, 2)
+  tdsSection       String?
+  tdsCertificateNo String?
+  recordedById     String
+  recordedBy       User          @relation("VendorBillPaymentRecordedBy", fields: [recordedById], references: [id])
+  createdAt        DateTime      @default(now())
+  reversedAt       DateTime?
+  reversedReason   String?
+  reversedById     String?
+  reversedBy       User?         @relation("VendorBillPaymentReversedBy", fields: [reversedById], references: [id])
+
+  @@index([vendorBillId, paidAt])
+  @@index([paidAt])
+}
+
+// =====================================================================
+// PETTY CASH
+// =====================================================================
+
+model PettyCashFloat {
+  id             String   @id @default(cuid())
+  custodianId    String
+  custodian      User     @relation(fields: [custodianId], references: [id])
+  name           String // e.g. "Main kitchen float"
+  openingBalance Decimal  @db.Decimal(14, 2)
+  currentBalance Decimal  @default(0) @db.Decimal(14, 2)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  vouchers PettyCashVoucher[]
+  topUps   PettyCashTopUp[]
+
+  @@index([custodianId])
+  @@index([active])
+}
+
+model PettyCashVoucher {
+  id             String                 @id @default(cuid())
+  voucherNo      String                 @unique // PCV-26-27-0001
+  floatId        String
+  float          PettyCashFloat         @relation(fields: [floatId], references: [id])
+  amount         Decimal                @db.Decimal(14, 2)
+  category       String // e.g. 'fuel' | 'subzi-mandi' | 'tea-coffee'
+  paidTo         String
+  reason         String
+  paidAt         DateTime
+  status         PettyCashVoucherStatus @default(DRAFT)
+  approvedById   String?
+  approvedBy     User?                  @relation("PettyCashVoucherApprovedBy", fields: [approvedById], references: [id])
+  createdById    String
+  createdBy      User                   @relation("PettyCashVoucherCreatedBy", fields: [createdById], references: [id])
+  attachmentUrl  String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  reversedAt     DateTime?
+  reversedReason String?
+
+  @@index([floatId, paidAt])
+  @@index([status])
+}
+
+model PettyCashTopUp {
+  id               String         @id @default(cuid())
+  floatId          String
+  float            PettyCashFloat @relation(fields: [floatId], references: [id])
+  amount           Decimal        @db.Decimal(14, 2)
+  source           String // 'BANK_TRANSFER' | 'OWNER_CONTRIB' | 'OTHER'
+  reference        String?
+  approvedByUserId String?
+  approvedBy       User?          @relation("PettyCashTopUpApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedAt       DateTime?
+  createdAt        DateTime       @default(now())
+
+  @@index([floatId, createdAt])
+}
+
+// =====================================================================
+// SALARY
+// =====================================================================
+
+model SalaryStructure {
+  id            String         @id @default(cuid())
+  employeeId    String
+  employee      User           @relation("SalaryStructureEmployee", fields: [employeeId], references: [id])
+  type          EmploymentType
+  hourlyRate    Decimal?       @db.Decimal(10, 2)
+  monthlySalary Decimal?       @db.Decimal(12, 2)
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  notes         String?
+  createdAt     DateTime       @default(now())
+
+  @@index([employeeId, effectiveFrom])
+}
+
+model SalaryRun {
+  id           String          @id @default(cuid())
+  runNo        String          @unique // SR-26-27-04 (FY + month)
+  periodMonth  DateTime // first day of the month
+  status       SalaryRunStatus @default(DRAFT)
+  totalAmount  Decimal         @default(0) @db.Decimal(14, 2)
+  createdById  String
+  createdBy    User            @relation("SalaryRunCreatedBy", fields: [createdById], references: [id])
+  approvedById String?
+  approvedBy   User?           @relation("SalaryRunApprovedBy", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
+  postedAt     DateTime?
+  notes        String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  lines SalaryRunLine[]
+
+  @@unique([periodMonth])
+  @@index([status])
+}
+
+model SalaryRunLine {
+  id           String    @id @default(cuid())
+  runId        String
+  run          SalaryRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  employeeName String // snapshot at time of run
+  employeeId   String
+  hoursWorked  Decimal?  @db.Decimal(8, 2)
+  hourlyRate   Decimal?  @db.Decimal(10, 2)
+  monthlyBase  Decimal?  @db.Decimal(12, 2)
+  daysAbsent   Decimal?  @db.Decimal(5, 2)
+  grossPay     Decimal   @db.Decimal(12, 2)
+  deductions   Decimal   @default(0) @db.Decimal(12, 2)
+  netPay       Decimal   @db.Decimal(12, 2)
+  notes        String?
+
+  @@index([runId])
+  @@index([employeeId])
+}
+
+// =====================================================================
+// TIME ENTRIES (chef hours, etc. — labour cost source)
+// =====================================================================
+
+model TimeEntry {
+  id         String          @id @default(cuid())
+  employeeId String
+  employee   User            @relation("EmployeeEntries", fields: [employeeId], references: [id])
+  orderId    String?
+  order      Order?          @relation(fields: [orderId], references: [id], name: "TimeEntryToOrder")
+  clockIn    DateTime
+  clockOut   DateTime?
+  minutes    Int?
+  note       String?
+  status     TimeEntryStatus @default(OPEN)
+  approverId String?
+  approver   User?           @relation("ApproverEntries", fields: [approverId], references: [id])
+  approvedAt DateTime?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([employeeId, clockIn])
+  @@index([orderId, clockIn])
+  @@index([status])
+}
+
+// =====================================================================
+// MOBILE (lifted as-is from SAB)
+// =====================================================================
+
+model MobileSession {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation("MobileSessions", fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String   @unique
+  deviceId         String
+  expiresAt        DateTime
+  lastUsedAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  @@index([userId])
+  @@index([deviceId])
+}
+
+model MobileOp {
+  id        String   @id // clientOpId (UUID)
+  userId    String
+  user      User     @relation("MobileOps", fields: [userId], references: [id], onDelete: Cascade)
+  kind      String
+  result    Json
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model MobileDevice {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation("MobileDevices", fields: [userId], references: [id], onDelete: Cascade)
+  token      String   @unique
+  platform   String
+  appVersion String?
+  lastSeen   DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+}
+
+// =====================================================================
+// AUDIT, DOCUMENTS, SETTINGS
+// =====================================================================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  action      String
+  entity      String
+  entityId    String
+  payloadHash String?
+  at          DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([at])
+}
+
+model Document {
+  id           String             @id @default(cuid())
+  entityType   DocumentEntityType
+  entityId     String // polymorphic — the FK to the entity, not enforced at DB level
+  kind         DocumentKind       @default(ATTACHMENT)
+  fileName     String
+  fileSize     Int
+  mimeType     String
+  storagePath  String
+  description  String?
+  uploadedById String
+  uploadedBy   User               @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
+  uploadedAt   DateTime           @default(now())
+
+  @@index([entityType, entityId])
+  @@index([uploadedAt])
+}
+
+// Runtime-editable settings. Keyed by `key`, value is JSON.
+// Examples:
+//   key: "po.approvalTiers" → {"auto": 100000, "manager": 1000000}
+//   key: "recipe.defaultWastagePercent" → 5
+//   key: "eInvoice.enabled" → true
+//   key: "eInvoice.provider" → "CLEARTAX"
+//   key: "branding.companyName" → "Indefine Kitchen Catering Co"
+//   key: "delivery.otpProvider" → "MSG91"
+model Settings {
+  key       String   @id
+  value     Json
+  notes     String?
+  updatedAt DateTime @updatedAt
+}
+
+// =====================================================================
+// NUMBER SEQUENCES (FY-scoped, atomic increment)
+// =====================================================================
+
+model OrderCodeSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model QuoteNumberSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model CustomerInvoiceNumberSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model RequisitionNumberSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model VendorCodeSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model VendorPONumberSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model GRNNumberSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model VendorBillNumberSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model ProductionJobNumberSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model DeliveryNumberSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model PettyCashVoucherNumberSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model SalaryRunNumberSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model ChefRequisitionNumberSequence {
+  year Int @id
+  next Int @default(1)
+}

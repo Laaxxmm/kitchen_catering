@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+
+# Secret scanner — runs only if `gitleaks` is on PATH. Install per docs/SECURITY.md
+# (Windows: `scoop install gitleaks` or `choco install gitleaks`; macOS: `brew install
+# gitleaks`; Linux: download from https://github.com/gitleaks/gitleaks/releases).
+# Without gitleaks installed the hook prints a loud warning but still allows commits
+# so a dev who hasn't yet installed it isn't blocked from working on documentation;
+# CI runs `gitleaks detect --no-git` on every PR and that check IS blocking.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --config .gitleaks.toml || exit $?
+else
+  echo "⚠  gitleaks not found on PATH — secret scan skipped. Install it before pushing."
+  echo "   Windows: scoop install gitleaks  |  macOS: brew install gitleaks"
+fi
+
+npx lint-staged

@@ -1,0 +1,33 @@
+# gitleaks configuration — see https://github.com/gitleaks/gitleaks
+# Pre-commit hook redacts and rejects commits containing secrets; CI runs
+# `gitleaks detect --no-git` on the full tree for every PR.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "indefine-kitchen-auth-secret"
+description = "AUTH_SECRET value (NextAuth signing key)"
+regex = '''AUTH_SECRET\s*=\s*['"]?[A-Za-z0-9+/=]{32,}['"]?'''
+
+[[rules]]
+id = "indefine-kitchen-msg91"
+description = "MSG91 authkey"
+regex = '''MSG91_AUTHKEY\s*=\s*['"]?[0-9]{6}A[A-Za-z0-9]{20,}['"]?'''
+
+[[rules]]
+id = "indefine-kitchen-database-url"
+description = "Postgres DATABASE_URL with embedded credentials"
+regex = '''postgres(ql)?://[^:\s]+:[^@\s]+@[^/\s]+/\S+'''
+
+[allowlist]
+description = "Files allowed to contain placeholder credentials"
+paths = [
+    '''\.env\.example$''',
+    '''\.gitleaks\.toml$''',
+    '''(^|/)docs?/.*\.md$''',
+    '''(^|/)CLAUDE\.md$''',
+    '''(^|/)SECURITY\.md$''',
+    '''(^|/)PHASE-\d+-.*\.md$''',
+    '''(^|/)README\.md$''',
+]

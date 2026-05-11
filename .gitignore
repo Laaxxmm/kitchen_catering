@@ -1,0 +1,77 @@
+# deps
+node_modules/
+.pnp
+.pnp.js
+
+# testing
+coverage/
+test-results/
+playwright-report/
+
+# next.js
+.next/
+out/
+build/
+dist/
+# Note: dist-mobile/ is intentionally NOT ignored — it holds the
+# Capacitor offline-start fallback (index.html) and is version-controlled.
+
+# env
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# secrets / keys / certs
+*.pem
+*.key
+*.keystore
+android/key.properties
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+firebase-adminsdk-*.json
+
+# Claude Code workspace settings (local)
+.claude/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# prisma
+prisma/*.db
+prisma/*.db-journal
+
+# runtime uploads
+public/uploads/
+
+# local DB dumps (contain real data, never commit)
+backups/
+
+# Claude Design handoff — extracted locally only, not committed
+design-preview/
+
+# Capacitor / Android build artifacts (gradle output, not source)
+android/app/build/
+android/build/
+android/.gradle/
+android/captures/
+android/local.properties
+android/app/release/
+android/app/debug/
+*.iml
+.gradle/
