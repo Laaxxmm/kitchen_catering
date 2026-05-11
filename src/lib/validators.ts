@@ -366,6 +366,114 @@ export const PaymentReversalInput = z.object({
 });
 
 // =====================================================================
+// PROCUREMENT (Phase 2)
+// =====================================================================
+
+export const VendorInput = z.object({
+  name: z.string().min(1).max(200),
+  gstin: gstin.nullable().optional(),
+  pan: z.string().max(20).nullable().optional(),
+  stateCode,
+  category: z.string().max(40).optional(),
+  msme: z.boolean().optional(),
+  contactName: z.string().max(120).nullable().optional(),
+  phone: z.string().max(20).nullable().optional(),
+  email: z.string().email().nullable().optional(),
+  address: z.string().max(500).nullable().optional(),
+  paymentTerms: z.string().max(40).optional(),
+  creditLimit: decimalString.optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  defaultTdsRatePct: decimalString.nullable().optional(),
+  defaultTdsSection: z.string().max(20).nullable().optional(),
+});
+export type VendorInputT = z.infer<typeof VendorInput>;
+
+export const PRLineInput = z.object({
+  id: z.string().optional(),
+  ingredientId: z.string(),
+  requestedQty: decimalString,
+  notes: z.string().max(500).nullable().optional(),
+});
+export type PRLineInputT = z.infer<typeof PRLineInput>;
+
+export const PurchaseRequisitionInput = z.object({
+  orderId: z.string().nullable().optional(),
+  chefRequisitionId: z.string().nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  lines: z.array(PRLineInput).optional(),
+});
+export type PurchaseRequisitionInputT = z.infer<typeof PurchaseRequisitionInput>;
+
+export const VendorPOLineInput = z.object({
+  id: z.string().optional(),
+  ingredientId: z.string().nullable().optional(),
+  sku: z.string().min(1).max(40),
+  description: z.string().min(1).max(500),
+  unit: z.string().min(1).max(20),
+  quantity: decimalString,
+  unitPrice: decimalString,
+  gstRatePct: decimalString.optional(),
+});
+export type VendorPOLineInputT = z.infer<typeof VendorPOLineInput>;
+
+export const VendorPOCreateInput = z.object({
+  vendorId: z.string(),
+  orderId: z.string().nullable().optional(),
+  placeOfSupplyStateCode: stateCode,
+  expectedDate: isoDate.optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  lines: z.array(VendorPOLineInput).min(1),
+});
+export type VendorPOCreateInputT = z.infer<typeof VendorPOCreateInput>;
+
+export const GRNLineInput = z.object({
+  poLineId: z.string(),
+  acceptedQty: decimalString,
+  rejectedQty: decimalString.optional(),
+  reason: z.string().max(500).nullable().optional(),
+});
+export type GRNLineInputT = z.infer<typeof GRNLineInput>;
+
+export const GRNCreateInput = z.object({
+  poId: z.string(),
+  notes: z.string().max(2000).nullable().optional(),
+  lines: z.array(GRNLineInput).min(1),
+});
+export type GRNCreateInputT = z.infer<typeof GRNCreateInput>;
+
+export const VendorBillLineInput = z.object({
+  id: z.string().optional(),
+  description: z.string().min(1).max(500),
+  quantity: decimalString,
+  unit: z.string().min(1).max(20),
+  unitPrice: decimalString,
+  gstRatePct: decimalString.optional(),
+});
+export type VendorBillLineInputT = z.infer<typeof VendorBillLineInput>;
+
+export const VendorBillCreateInput = z.object({
+  vendorId: z.string(),
+  poId: z.string().nullable().optional(),
+  vendorBillNo: z.string().max(60).nullable().optional(),
+  issueDate: isoDate.optional(),
+  dueDate: isoDate.nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  lines: z.array(VendorBillLineInput).min(1),
+});
+export type VendorBillCreateInputT = z.infer<typeof VendorBillCreateInput>;
+
+export const InventoryAuditLineInput = z.object({
+  ingredientId: z.string(),
+  physicalCount: decimalString,
+});
+export type InventoryAuditLineInputT = z.infer<typeof InventoryAuditLineInput>;
+
+export const InventoryAuditPostInput = z.object({
+  lines: z.array(InventoryAuditLineInput).min(1),
+  notes: z.string().max(500).nullable().optional(),
+});
+
+// =====================================================================
 // SETTINGS
 // =====================================================================
 

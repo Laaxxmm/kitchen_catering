@@ -78,3 +78,53 @@ export async function nextProductionJobNo(tx: Tx): Promise<string> {
   const n = await nextSequenceValue(tx, seq, fy.storageYear);
   return `PJ-${fy.label}-${String(n).padStart(4, "0")}`;
 }
+
+// ─── Procurement (Phase 2) ───────────────────────────────────────────────
+
+export async function nextPRNumber(tx: Tx): Promise<string> {
+  const fy = getFyForDate(new Date());
+  const seq = (tx as unknown as { requisitionNumberSequence?: typeof tx.orderCodeSequence })
+    .requisitionNumberSequence;
+  if (!seq) throw new Error("requisitionNumberSequence not present in Prisma client");
+  const n = await nextSequenceValue(tx, seq, fy.storageYear);
+  return `PR-${fy.label}-${String(n).padStart(4, "0")}`;
+}
+
+export async function nextVendorPONumber(tx: Tx): Promise<string> {
+  const fy = getFyForDate(new Date());
+  const seq = (tx as unknown as { vendorPONumberSequence?: typeof tx.orderCodeSequence })
+    .vendorPONumberSequence;
+  if (!seq) throw new Error("vendorPONumberSequence not present in Prisma client");
+  const n = await nextSequenceValue(tx, seq, fy.storageYear);
+  return `VPO-${fy.label}-${String(n).padStart(4, "0")}`;
+}
+
+export async function nextGRNNumber(tx: Tx): Promise<string> {
+  const fy = getFyForDate(new Date());
+  const seq = (tx as unknown as { gRNNumberSequence?: typeof tx.orderCodeSequence })
+    .gRNNumberSequence;
+  if (!seq) throw new Error("gRNNumberSequence not present in Prisma client");
+  const n = await nextSequenceValue(tx, seq, fy.storageYear);
+  return `GRN-${fy.label}-${String(n).padStart(4, "0")}`;
+}
+
+export async function nextVendorBillNumber(tx: Tx): Promise<string> {
+  const fy = getFyForDate(new Date());
+  const seq = (tx as unknown as { vendorBillNumberSequence?: typeof tx.orderCodeSequence })
+    .vendorBillNumberSequence;
+  if (!seq) throw new Error("vendorBillNumberSequence not present in Prisma client");
+  const n = await nextSequenceValue(tx, seq, fy.storageYear);
+  return `VB-${fy.label}-${String(n).padStart(4, "0")}`;
+}
+
+/**
+ * Vendor code is not FY-scoped — vendors persist across years. Uses
+ * VendorCodeSequence with year=0 as a single global counter slot.
+ */
+export async function nextVendorCode(tx: Tx): Promise<string> {
+  const seq = (tx as unknown as { vendorCodeSequence?: typeof tx.orderCodeSequence })
+    .vendorCodeSequence;
+  if (!seq) throw new Error("vendorCodeSequence not present in Prisma client");
+  const n = await nextSequenceValue(tx, seq, 0);
+  return `V-${String(n).padStart(4, "0")}`;
+}

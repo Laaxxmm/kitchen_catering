@@ -7,6 +7,7 @@ import {
   OrderStatus,
   PaymentMethod,
   Role,
+  VendorBillStatus,
 } from "@prisma/client";
 import { db } from "@/server/db";
 import {
@@ -16,6 +17,7 @@ import {
 import {
   CustomerInvoicePaymentInput,
   PaymentReversalInput,
+  VendorBillPaymentInput,
 } from "@/lib/validators";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
@@ -197,6 +199,134 @@ export async function listReceivablePayments(limit = 100) {
     take: limit,
     include: {
       invoice: { select: { invoiceNo: true, customerId: true, customer: { select: { name: true } } } },
+      recordedBy: { select: { name: true } },
+    },
+  });
+}
+
+// =====================================================================
+// VENDOR BILL PAYMENTS (AP) — Phase 2 wires this up
+// =====================================================================
+
+export async function recordVendorBillPayment(raw: unknown) {
+  const session = await requireRole(WRITE_ROLES);
+  const input = VendorBillPaymentInput.parse(raw);
+  if (toDecimal(input.amount).lte(0)) throw new Error("Amount must be positive");
+
+  const result = await db.$transaction(async (tx) => {
+    const bill = await tx.vendorBill.findUnique({
+      where: { id: input.billId },
+      select: { id: true, status: true, grandTotal: true },
+    });
+    if (!bill) throw new Error("Bill not found");
+    if (bill.status !== VendorBillStatus.APPROVED && bill.status !== VendorBillStatus.MATCHED) {
+      throw new AuthorizationError(`Cannot pay a bill in status ${bill.status}`);
+    }
+    const payment = await tx.vendorBillPayment.create({
+      data: {
+        vendorBillId: bill.id,
+        amount: input.amount,
+        paidAt: input.paidAt ? new Date(input.paidAt) : new Date(),
+        method: methodCanonical(input.method),
+        reference: input.reference ?? null,
+        notes: input.notes ?? null,
+        recordedById: session.user.id,
+      },
+    });
+    const liveRows = await tx.vendorBillPayment.findMany({
+      where: { vendorBillId: bill.id, reversedAt: null },
+      select: { amount: true },
+    });
+    const paid = liveRows.reduce((s, r) => s.plus(new Decimal(r.amount.toString())), new Decimal(0));
+    const grand = new Decimal(bill.grandTotal.toString());
+    const fullyPaid = paid.gte(grand);
+
+    await tx.vendorBill.update({
+      where: { id: bill.id },
+      data: {
+        amountPaid: paid.toDecimalPlaces(2).toString(),
+        paidAt: fullyPaid ? new Date() : null,
+        status: fullyPaid ? VendorBillStatus.PAID : VendorBillStatus.APPROVED,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "VENDOR_BILL_PAYMENT_RECORDED",
+        entity: "VendorBillPayment",
+        entityId: payment.id,
+        payloadHash: sha256Json({ billId: bill.id, amount: input.amount }),
+      },
+    });
+    return payment;
+  });
+
+  revalidatePath(`/procurement/vendor-bills/${input.billId}`);
+  revalidatePath("/payments/payables");
+  return { id: result.id };
+}
+
+export async function reverseVendorBillPayment(raw: unknown) {
+  const session = await requireRole(WRITE_ROLES);
+  const input = PaymentReversalInput.parse(raw);
+
+  await db.$transaction(async (tx) => {
+    const payment = await tx.vendorBillPayment.findUnique({
+      where: { id: input.paymentId },
+      select: { id: true, vendorBillId: true, reversedAt: true },
+    });
+    if (!payment) throw new Error("Payment not found");
+    if (payment.reversedAt) throw new Error("Payment already reversed");
+    await tx.vendorBillPayment.update({
+      where: { id: payment.id },
+      data: {
+        reversedAt: new Date(),
+        reversedReason: input.reason,
+        reversedById: session.user.id,
+      },
+    });
+    const bill = await tx.vendorBill.findUnique({
+      where: { id: payment.vendorBillId },
+      select: { id: true, grandTotal: true },
+    });
+    if (!bill) throw new Error("Parent bill missing");
+    const liveRows = await tx.vendorBillPayment.findMany({
+      where: { vendorBillId: bill.id, reversedAt: null },
+      select: { amount: true },
+    });
+    const paid = liveRows.reduce((s, r) => s.plus(new Decimal(r.amount.toString())), new Decimal(0));
+    const grand = new Decimal(bill.grandTotal.toString());
+    const fullyPaid = paid.gte(grand);
+    await tx.vendorBill.update({
+      where: { id: bill.id },
+      data: {
+        amountPaid: paid.toDecimalPlaces(2).toString(),
+        paidAt: fullyPaid ? new Date() : null,
+        status: fullyPaid ? VendorBillStatus.PAID : VendorBillStatus.APPROVED,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "VENDOR_BILL_PAYMENT_REVERSED",
+        entity: "VendorBillPayment",
+        entityId: payment.id,
+        payloadHash: sha256Json({ reason: input.reason }),
+      },
+    });
+  });
+  revalidatePath("/payments/payables");
+}
+
+export async function listPayablePayments(limit = 100) {
+  await requireRole(WRITE_ROLES);
+  return db.vendorBillPayment.findMany({
+    where: { reversedAt: null },
+    orderBy: { paidAt: "desc" },
+    take: limit,
+    include: {
+      vendorBill: { select: { id: true, billNo: true, vendor: { select: { name: true } } } },
       recordedBy: { select: { name: true } },
     },
   });

@@ -1,13 +1,14 @@
 import Link from "next/link";
 
 interface Props {
-  active: "ingredients" | "receipts" | "issues";
+  active: "ingredients" | "receipts" | "issues" | "audit";
 }
 
 const TABS = [
   { key: "ingredients", label: "Ingredients", href: "/inventory/ingredients" },
   { key: "receipts", label: "Receipts", href: "/inventory/receipts" },
   { key: "issues", label: "Issues", href: "/inventory/issues" },
+  { key: "audit", label: "Monthly audit", href: "/inventory/audit" },
 ] as const;
 
 export function InventoryNav({ active }: Props) {
