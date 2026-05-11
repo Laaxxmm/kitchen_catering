@@ -107,6 +107,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         actions={
           <div className="flex gap-2">
             <Link href="/orders"><Button variant="outline">Back</Button></Link>
+            <Link href={`/orders/${order.id}/pnl`}><Button variant="outline">P&amp;L</Button></Link>
             {order.status === OrderStatus.DRAFT && isSales && (
               <form action={doSubmit}>
                 <Button type="submit">Submit for approval</Button>
