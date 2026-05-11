@@ -1,0 +1,164 @@
+"use client";
+
+import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { Decimal } from "decimal.js";
+import { Button } from "@/components/ui/button";
+
+interface Ingredient { id: string; name: string; sku: string; unit: string; avgCost: string }
+interface OrderItem { id: string; dishName: string }
+
+interface Props {
+  ingredients: Ingredient[];
+  orderItems: OrderItem[];
+  onSubmit: (lines: Array<{ ingredientId: string; requestedQty: string; orderItemId: string | null; notes: string | null }>) => Promise<void>;
+}
+
+interface DraftLine {
+  ingredientId: string;
+  requestedQty: string;
+  orderItemId: string;
+  notes: string;
+}
+
+function emptyLine(firstIngredientId = ""): DraftLine {
+  return { ingredientId: firstIngredientId, requestedQty: "1", orderItemId: "", notes: "" };
+}
+
+export function RequisitionDraftForm({ ingredients, orderItems, onSubmit }: Props) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  const [lines, setLines] = useState<DraftLine[]>([emptyLine(ingredients[0]?.id ?? "")]);
+
+  function setLine(idx: number, patch: Partial<DraftLine>) {
+    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  }
+
+  const totalCost = useMemo(() => {
+    let sum = new Decimal(0);
+    for (const l of lines) {
+      const ing = ingredients.find((i) => i.id === l.ingredientId);
+      if (!ing) continue;
+      sum = sum.plus(new Decimal(l.requestedQty || "0").times(new Decimal(ing.avgCost || "0")));
+    }
+    return sum.toDecimalPlaces(2);
+  }, [lines, ingredients]);
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const payload = lines
+      .filter((l) => l.ingredientId && Number(l.requestedQty) > 0)
+      .map((l) => ({
+        ingredientId: l.ingredientId,
+        requestedQty: l.requestedQty,
+        orderItemId: l.orderItemId || null,
+        notes: l.notes || null,
+      }));
+    if (payload.length === 0) return toast.error("Add at least one line");
+    startTransition(async () => {
+      try {
+        await onSubmit(payload);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
+    });
+  }
+
+  return (
+    <form onSubmit={submit} className="grid gap-4">
+      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="font-medium text-[14px] text-ik-ink">Lines</h3>
+          <Button type="button" variant="outline" size="sm" onClick={() => setLines((p) => [...p, emptyLine(ingredients[0]?.id ?? "")])}>
+            + Add line
+          </Button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12.5px]">
+            <thead className="border-b border-ik-rule text-left text-ik-ink-3">
+              <tr>
+                <th className="py-1 pr-2">Ingredient</th>
+                <th className="w-24 py-1 pr-2 text-right">Qty</th>
+                <th className="py-1 pr-2">Unit</th>
+                <th className="py-1 pr-2">For dish</th>
+                <th className="w-32 py-1 pr-2 text-right">Avg cost</th>
+                <th className="w-32 py-1 pr-2 text-right">Line ₹</th>
+                <th className="py-1 pr-2">Notes</th>
+                <th className="w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((l, idx) => {
+                const ing = ingredients.find((i) => i.id === l.ingredientId);
+                const lineCost = ing
+                  ? new Decimal(l.requestedQty || "0").times(new Decimal(ing.avgCost)).toDecimalPlaces(2)
+                  : new Decimal(0);
+                return (
+                  <tr key={idx} className="border-b border-ik-rule">
+                    <td className="py-1 pr-2">
+                      <select
+                        value={l.ingredientId}
+                        onChange={(e) => setLine(idx, { ingredientId: e.target.value })}
+                        className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1"
+                      >
+                        {ingredients.map((i) => (
+                          <option key={i.id} value={i.id}>{i.sku} · {i.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="py-1 pr-2">
+                      <input
+                        type="number" step="0.001" min="0.001"
+                        value={l.requestedQty}
+                        onChange={(e) => setLine(idx, { requestedQty: e.target.value })}
+                        className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono"
+                      />
+                    </td>
+                    <td className="py-1 pr-2 text-ik-ink-3">{ing?.unit ?? ""}</td>
+                    <td className="py-1 pr-2">
+                      <select
+                        value={l.orderItemId}
+                        onChange={(e) => setLine(idx, { orderItemId: e.target.value })}
+                        className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1"
+                      >
+                        <option value="">— any —</option>
+                        {orderItems.map((oi) => (
+                          <option key={oi.id} value={oi.id}>{oi.dishName}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="py-1 pr-2 text-right font-mono">{ing ? `₹${ing.avgCost}` : "—"}</td>
+                    <td className="py-1 pr-2 text-right font-mono">₹{lineCost.toString()}</td>
+                    <td className="py-1 pr-2">
+                      <input
+                        value={l.notes}
+                        onChange={(e) => setLine(idx, { notes: e.target.value })}
+                        className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1"
+                      />
+                    </td>
+                    <td className="py-1 text-right">
+                      <button type="button" onClick={() => setLines((p) => p.filter((_, i) => i !== idx))} className="text-alert">×</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot className="font-mono text-ik-ink">
+              <tr>
+                <td colSpan={5} className="py-1 pr-2 text-right text-ik-ink-3">Planned total</td>
+                <td className="py-1 pr-2 text-right font-medium">₹{totalCost.toString()}</td>
+                <td colSpan={2}></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
+
+      <div className="flex gap-2">
+        <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create draft requisition"}</Button>
+        <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
+      </div>
+    </form>
+  );
+}

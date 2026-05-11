@@ -33,5 +33,15 @@ export function hasRole(session: { user: { role: Role } }, roles: Role[]) {
   return roles.includes(session.user.role);
 }
 
-// Module-specific guards (canApproveOrder, canCreateChefRequisition,
-// canFulfilChefRequisition, canIssueInvoice, etc.) arrive in Phase 1.
+// ─── Module-specific guards ──────────────────────────────────────────────
+
+/** Order approval guards. State + role checks happen inside the action's
+ *  transaction; these helpers cover the role-only common case. */
+export const ORDER_SALES_ROLES = [Role.ADMIN, Role.MANAGER, Role.SALES];
+export const ORDER_STORE_ROLES = [Role.ADMIN, Role.STORE_KEEPER];
+export const ORDER_MANAGER_ROLES = [Role.ADMIN, Role.MANAGER];
+export const ORDER_KITCHEN_ROLES = [Role.ADMIN, Role.KITCHEN_HEAD];
+
+/** Chef requisition: chef raises; storekeeper fulfils. */
+export const REQUISITION_CREATE_ROLES = [Role.ADMIN, Role.KITCHEN_HEAD];
+export const REQUISITION_FULFIL_ROLES = [Role.ADMIN, Role.STORE_KEEPER];

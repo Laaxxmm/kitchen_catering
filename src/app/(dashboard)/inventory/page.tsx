@@ -1,14 +1,7 @@
-import { PageHeader } from "@/components/ui/page-header";
+import { redirect } from "next/navigation";
 
+// The Inventory module has three sub-areas (ingredients / receipts / issues).
+// Land directly on the ingredient master since that's the daily-use surface.
 export default function InventoryPage() {
-  return (
-    <>
-      <PageHeader
-        eyebrow="Coming soon"
-        title="Inventory"
-        description="Ingredients, receipts, issues, stock balance."
-      />
-      <p className="text-sm text-muted-foreground">This module is being built.</p>
-    </>
-  );
+  redirect("/inventory/ingredients");
 }
