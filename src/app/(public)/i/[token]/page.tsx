@@ -1,0 +1,101 @@
+import { notFound } from "next/navigation";
+import { getCustomerInvoiceByToken } from "@/server/actions/customer-invoices";
+import { formatINR } from "@/lib/money";
+import { formatIST } from "@/lib/time";
+
+export const dynamic = "force-dynamic";
+
+// Token-gated public view. No auth required. Token is unguessable
+// (24 bytes base64url). Per SECURITY.md §6, no PII appears in the URL
+// query string; everything is in the response body.
+export default async function PublicInvoicePage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  const invoice = await getCustomerInvoiceByToken(token);
+  if (!invoice) notFound();
+
+  return (
+    <main className="mx-auto max-w-3xl bg-ik-paper px-6 py-10 font-ik-sans text-ik-ink">
+      <header className="mb-8 flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-brand-500">
+              <svg width="20" height="20" viewBox="0 0 40 40">
+                <path d="M20 9 C13 13, 11 22, 14 28 C16 31, 19 31, 21 30 C25 28, 28 22, 28 16 C28 12, 24 9, 20 9 Z" fill="#fff" />
+              </svg>
+            </span>
+            <div>
+              <div className="text-[15px] font-medium">Indefine Kitchen</div>
+              <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Catering operations</div>
+            </div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Tax invoice</div>
+          <div className="font-mono text-[16px] font-medium">{invoice.invoiceNo}</div>
+          {invoice.issuedAt && <div className="text-[12px] text-ik-ink-3">Issued {formatIST(invoice.issuedAt, "dd MMM yyyy")}</div>}
+          {invoice.dueAt && <div className="text-[12px] text-ik-ink-3">Due {formatIST(invoice.dueAt, "dd MMM yyyy")}</div>}
+        </div>
+      </header>
+
+      <section className="mb-6 grid gap-4 text-[13px] sm:grid-cols-2">
+        <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Bill to</div>
+          <div className="mt-1 font-medium">{invoice.customer.name}</div>
+          {invoice.customer.gstin && <div className="font-mono text-[12px] text-ik-ink-2">GSTIN {invoice.customer.gstin}</div>}
+          <p className="mt-1 whitespace-pre-line text-ik-ink-2">{invoice.customer.billingAddress}</p>
+          <div className="mt-1 text-[11.5px] text-ik-ink-3">State {invoice.customer.stateCode}</div>
+        </div>
+        <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Place of supply</div>
+          <div className="mt-1 font-mono">{invoice.placeOfSupplyStateCode}</div>
+          {invoice.order && (
+            <>
+              <div className="mt-3 text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Linked order</div>
+              <div className="mt-1 font-mono">{invoice.order.code}</div>
+              <div className="text-[11.5px] text-ik-ink-3">Event {formatIST(invoice.order.eventDate, "dd MMM yyyy")}</div>
+            </>
+          )}
+        </div>
+      </section>
+
+      <table className="w-full border-collapse text-[12.5px]">
+        <thead className="border-b border-ik-rule text-left text-ik-ink-3">
+          <tr>
+            <th className="py-2 pr-2">Description</th>
+            <th className="w-16 py-2 pr-2 text-right">Qty</th>
+            <th className="w-16">Unit</th>
+            <th className="w-20 py-2 pr-2 text-right">Rate ₹</th>
+            <th className="w-16 py-2 pr-2 text-right">GST %</th>
+            <th className="w-24 py-2 pr-2 text-right">Amount ₹</th>
+          </tr>
+        </thead>
+        <tbody className="font-mono">
+          {invoice.lines.map((l) => (
+            <tr key={l.id} className="border-b border-ik-rule">
+              <td className="py-2 pr-2 font-sans">{l.description}</td>
+              <td className="py-2 pr-2 text-right">{l.quantity.toString()}</td>
+              <td className="py-2 pr-2 text-ik-ink-2">{l.unit}</td>
+              <td className="py-2 pr-2 text-right">{l.unitPrice.toString()}</td>
+              <td className="py-2 pr-2 text-right">{l.gstRatePct.toString()}</td>
+              <td className="py-2 pr-2 text-right">{l.lineTotal.toString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <section className="mt-4 grid gap-1 text-right font-mono text-[13px]">
+        <div><span className="text-ik-ink-3">Subtotal</span> <span className="ml-3">{invoice.subtotal.toString()}</span></div>
+        {Number(invoice.cgst) > 0 && <div><span className="text-ik-ink-3">CGST</span> <span className="ml-3">{invoice.cgst.toString()}</span></div>}
+        {Number(invoice.sgst) > 0 && <div><span className="text-ik-ink-3">SGST</span> <span className="ml-3">{invoice.sgst.toString()}</span></div>}
+        {Number(invoice.igst) > 0 && <div><span className="text-ik-ink-3">IGST</span> <span className="ml-3">{invoice.igst.toString()}</span></div>}
+        <div className="text-[15px] font-medium"><span className="text-ik-ink-3">Grand total</span> <span className="ml-3">{formatINR(invoice.grandTotal)}</span></div>
+        {Number(invoice.amountPaid) > 0 && <div className="text-positive"><span className="text-ik-ink-3">Paid</span> <span className="ml-3">{formatINR(invoice.amountPaid)}</span></div>}
+      </section>
+
+      <footer className="mt-10 border-t border-ik-rule pt-4 text-[11px] text-ik-ink-3">
+        Indefine Kitchen Pvt Ltd · This invoice was generated by Indefine Kitchen catering operations software. Visit
+        the link this page came from for the latest copy.
+      </footer>
+    </main>
+  );
+}

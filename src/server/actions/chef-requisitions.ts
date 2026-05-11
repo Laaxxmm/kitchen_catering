@@ -23,6 +23,7 @@ import {
 import { nextChefRequisitionNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
+import { createProductionJobForOrder } from "./production-jobs";
 
 // =====================================================================
 // CREATE / EDIT
@@ -314,6 +315,8 @@ export async function issueChefRequisitionLine(raw: unknown) {
           where: { id: line.requisition.orderId },
           data: { status: OrderStatus.READY_FOR_PRODUCTION },
         });
+        // Auto-create the production job. Idempotent on order.
+        await createProductionJobForOrder(tx, line.requisition.orderId);
       }
     }
 

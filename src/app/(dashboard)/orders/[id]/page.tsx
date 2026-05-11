@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { auth } from "@/server/auth";
+import { redirect } from "next/navigation";
 import {
   cancelOrder,
   getOrder,
@@ -14,6 +15,7 @@ import {
   storeApproveOrder,
   submitOrder,
 } from "@/server/actions/orders";
+import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoices";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { ApprovalBlock } from "./_components/ApprovalBlock";
@@ -62,6 +64,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     if (!reason) return;
     await cancelOrder(id, reason);
   }
+  async function doGenerateInvoice() {
+    "use server";
+    const result = await createCustomerInvoiceFromOrder(id);
+    redirect(`/invoices/${result.id}`);
+  }
 
   // ─── Approval block selection ────────────────────────────────────────
   let approvalBlock: React.ReactNode = null;
@@ -103,6 +110,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             {order.status === OrderStatus.DRAFT && isSales && (
               <form action={doSubmit}>
                 <Button type="submit">Submit for approval</Button>
+              </form>
+            )}
+            {order.status === OrderStatus.DELIVERED && (role === Role.ACCOUNTS || isAdmin || isManager) && (
+              <form action={doGenerateInvoice}>
+                <Button type="submit">Generate invoice</Button>
               </form>
             )}
           </div>

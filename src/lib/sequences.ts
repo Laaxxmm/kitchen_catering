@@ -69,3 +69,12 @@ export async function nextDeliveryNumber(tx: Tx): Promise<string> {
   const n = await nextSequenceValue(tx, seq, fy.storageYear);
   return `DLV-${fy.label}-${String(n).padStart(4, "0")}`;
 }
+
+export async function nextProductionJobNo(tx: Tx): Promise<string> {
+  const fy = getFyForDate(new Date());
+  const seq = (tx as unknown as { productionJobNumberSequence?: typeof tx.orderCodeSequence })
+    .productionJobNumberSequence;
+  if (!seq) throw new Error("productionJobNumberSequence not present in Prisma client");
+  const n = await nextSequenceValue(tx, seq, fy.storageYear);
+  return `PJ-${fy.label}-${String(n).padStart(4, "0")}`;
+}

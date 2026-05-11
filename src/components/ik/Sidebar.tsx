@@ -7,6 +7,7 @@ import { useState, type ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
 import { Wordmark } from "./Wordmark";
 import { IK } from "./tokens";
+import { istFyLabel } from "@/lib/time";
 
 // Left-rail app shell — fixed 236px, collapsible. Sections separated by mono eyebrows.
 // Catering ops modules; ordered roughly by daily-workflow frequency.
@@ -308,7 +309,7 @@ export function Sidebar({ userName, userRole, footer }: SidebarProps) {
               className="ik-caps"
               style={{ fontSize: 9.5, letterSpacing: ".08em" }}
             >
-              {userRole} · FY 25-26
+              {userRole} · {istFyLabel(new Date())}
             </div>
           </div>
           {footer}
