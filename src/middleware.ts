@@ -19,10 +19,47 @@ type Role =
   | "DELIVERY"
   | "ACCOUNTS";
 
-// Route -> allowed roles. Phase 0 only locks down /admin; per-module rules
-// arrive alongside each module's server actions in later phases.
+// Path-pattern → allowed roles. First-match wins; rules higher in the list
+// take precedence over rules lower down (used so /admin matches before any
+// permissive default). ADMIN is implicitly allowed everywhere — we don't
+// need to list it, the runtime adds it.
+//
+// Anything that isn't matched by any pattern is allowed for any
+// authenticated user (since /forbidden, /dashboard etc. are role-neutral).
 const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
+  // Admin
   { pattern: /^\/admin(\/|$)/, allow: ["ADMIN"] },
+
+  // Queues — store and manager work surfaces
+  { pattern: /^\/queue\/store-approvals(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
+  { pattern: /^\/queue\/manager-approvals(\/|$)/, allow: ["ADMIN", "MANAGER"] },
+  { pattern: /^\/queue\/issuing(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
+
+  // Sales modules
+  { pattern: /^\/customers(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "ACCOUNTS"] },
+  { pattern: /^\/quotes(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES"] },
+  { pattern: /^\/dishes(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "KITCHEN_HEAD"] },
+
+  // Orders — broad read access; per-action role checks are server-side
+  { pattern: /^\/orders\/[^/]+\/requisition(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD"] },
+  { pattern: /^\/orders(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "STORE_KEEPER", "KITCHEN_HEAD", "ACCOUNTS"] },
+
+  // Operations
+  { pattern: /^\/kitchen(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "SALES", "STORE_KEEPER", "ACCOUNTS"] },
+  { pattern: /^\/requisitions(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "STORE_KEEPER", "SALES", "ACCOUNTS"] },
+  { pattern: /^\/inventory(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "KITCHEN_HEAD"] },
+
+  // Deliveries — DELIVERY role gets their own scope (enforced server-side
+  // in listDeliveries / getDelivery); the route itself is allowed.
+  { pattern: /^\/deliveries(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "ACCOUNTS", "KITCHEN_HEAD", "DELIVERY"] },
+
+  // Procurement — Phase 2 (placeholder accessible to relevant roles)
+  { pattern: /^\/procurement(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "ACCOUNTS"] },
+
+  // Finance
+  { pattern: /^\/invoices(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "SALES"] },
+  { pattern: /^\/payments(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  { pattern: /^\/reports(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
 ];
 
 export default auth((req) => {
@@ -33,17 +70,15 @@ export default auth((req) => {
   if (
     pathname === "/login" ||
     pathname.startsWith("/api/auth") ||
-    // Mobile REST uses bearer JWTs, not the NextAuth cookie. Each handler
-    // calls `requireMobileAuth` itself.
     pathname.startsWith("/api/mobile/") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/icons") ||
     pathname === "/manifest.webmanifest" ||
     pathname === "/favicon.ico" ||
-    // Customer-facing share pages — capability-token protected, no session.
     pathname.startsWith("/q/") ||
     pathname.startsWith("/i/") ||
-    pathname.startsWith("/api/pdf/public/")
+    pathname.startsWith("/api/pdf/public/") ||
+    pathname === "/forbidden"
   ) {
     return NextResponse.next();
   }
@@ -56,6 +91,8 @@ export default auth((req) => {
   }
 
   const userRole = req.auth!.user!.role as Role;
+  // ADMIN passes every gate.
+  if (userRole === "ADMIN") return NextResponse.next();
 
   for (const rule of ROLE_RULES) {
     if (rule.pattern.test(pathname) && !rule.allow.includes(userRole)) {
@@ -67,9 +104,6 @@ export default auth((req) => {
 });
 
 export const config = {
-  // Skip everything the middleware has no opinion on: static assets, auth
-  // callbacks, public share routes. Narrowing the matcher cuts the number of
-  // middleware invocations per navigation by an order of magnitude.
   matcher: [
     "/((?!api/auth|api/mobile|api/pdf/public|_next/static|_next/image|_next/data|favicon\\.ico|icons|manifest\\.webmanifest|q/|i/|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|avif|css|js|map|txt|woff2?|ttf|otf)$).*)",
   ],

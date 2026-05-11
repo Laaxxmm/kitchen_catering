@@ -8,6 +8,8 @@ import { Icon, type IconName } from "./Icon";
 import { Wordmark } from "./Wordmark";
 import { IK } from "./tokens";
 import { istFyLabel } from "@/lib/time";
+import { SIDEBAR_KEYS_BY_ROLE } from "@/lib/role-nav";
+import type { Role } from "@prisma/client";
 
 // Left-rail app shell — fixed 236px, collapsible. Sections separated by mono eyebrows.
 // Catering ops modules; ordered roughly by daily-workflow frequency.
@@ -53,13 +55,29 @@ export function Sidebar({ userName, userRole, footer }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname() ?? "/dashboard";
 
-  // Longest-prefix-wins so that /clients/groups/<id> highlights "Client groups"
-  // (href "/clients/groups") rather than the shorter-prefix "Clients" entry
-  // (href "/clients"). Iterating in NAV order and tracking the longest match
-  // gives a single deterministic active key.
+  // Per-role allowlist. Server-side guards still enforce real auth; this
+  // just hides modules from users who can't use them.
+  const allowedKeys = SIDEBAR_KEYS_BY_ROLE[userRole as Role] ?? new Set<string>();
+  const navForRole = NAV.filter((n) => n.kind === "sep" ? true : allowedKeys.has(n.key));
+  // Collapse empty sections (e.g. SALES sees no "Operations" section header).
+  const visible: NavNode[] = [];
+  for (let i = 0; i < navForRole.length; i++) {
+    const node = navForRole[i];
+    if (node.kind === "sep") {
+      // Only keep this separator if there's at least one following item
+      // before the next separator.
+      const nextSep = navForRole.findIndex((x, j) => j > i && x.kind === "sep");
+      const slice = navForRole.slice(i + 1, nextSep === -1 ? undefined : nextSep);
+      if (slice.some((x) => x.kind === "item")) visible.push(node);
+    } else {
+      visible.push(node);
+    }
+  }
+
+  // Longest-prefix-wins so deep paths highlight the most specific item.
   let activeKey: string | null = null;
   let activeHrefLen = -1;
-  for (const n of NAV) {
+  for (const n of visible) {
     if (n.kind !== "item") continue;
     const matches =
       pathname === n.href ||
@@ -191,7 +209,7 @@ export function Sidebar({ userName, userRole, footer }: SidebarProps) {
       )}
 
       <nav style={{ flex: 1, overflowY: "auto", padding: "4px 8px 12px" }}>
-        {NAV.map((n, i) => {
+        {visible.map((n, i) => {
           if (n.kind === "sep") {
             return !collapsed ? (
               <div

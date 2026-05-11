@@ -1,4 +1,5 @@
 import { Role } from "@prisma/client";
+import { redirect } from "next/navigation";
 import { auth } from "./auth";
 
 export class AuthorizationError extends Error {
@@ -31,6 +32,24 @@ export async function requireRole(roles: Role[]) {
 
 export function hasRole(session: { user: { role: Role } }, roles: Role[]) {
   return roles.includes(session.user.role);
+}
+
+/**
+ * Page-level role gate. Use at the top of server components.
+ * On AuthenticationError -> redirect to /login.
+ * On AuthorizationError  -> redirect to /forbidden.
+ *
+ * Unlike `requireRole`, this function never throws back into the page;
+ * it always either returns a session or redirects.
+ */
+export async function gateRolePage(roles: Role[]) {
+  try {
+    return await requireRole(roles);
+  } catch (e) {
+    if (e instanceof AuthenticationError) redirect("/login");
+    if (e instanceof AuthorizationError) redirect("/forbidden");
+    throw e;
+  }
 }
 
 // ─── Module-specific guards ──────────────────────────────────────────────

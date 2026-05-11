@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
+import { gateRolePage } from "@/server/rbac";
 
 const SECTIONS = [
   { href: "/admin/users", title: "Users & roles", desc: "Create, update, deactivate users. ADMIN only." },
@@ -7,7 +9,8 @@ const SECTIONS = [
   { href: "/admin/audit", title: "Audit log", desc: "Read-only audit trail of every consequential mutation." },
 ];
 
-export default function AdminPage() {
+export default async function AdminPage() {
+  await gateRolePage([Role.ADMIN]);
   return (
     <>
       <PageHeader eyebrow="Admin" title="Operations admin" description="ADMIN-gated. Configure users, system settings, and inspect audit history." />

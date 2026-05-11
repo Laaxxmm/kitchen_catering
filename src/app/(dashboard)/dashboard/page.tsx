@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { auth } from "@/server/auth";
 import { getDashboardSummary } from "@/server/actions/dashboard";
@@ -16,9 +17,23 @@ function Tile({ eyebrow, value, href }: { eyebrow: string; value: string | numbe
   return href ? <Link href={href}>{body}</Link> : body;
 }
 
+// Which KPI tiles each role sees. Keep tiles relevant to the role; the rest
+// would just be noise / cause 403 on the linked page.
+const TILE_VISIBILITY: Record<Role, ReadonlySet<"orders" | "deliveries" | "ar" | "lowstock">> = {
+  ADMIN:        new Set(["orders", "deliveries", "ar", "lowstock"]),
+  MANAGER:      new Set(["orders", "deliveries", "ar", "lowstock"]),
+  SALES:        new Set(["orders"]),
+  STORE_KEEPER: new Set(["orders", "lowstock"]),
+  KITCHEN_HEAD: new Set(["orders", "lowstock"]),
+  DELIVERY:     new Set(["deliveries"]),
+  ACCOUNTS:     new Set(["orders", "ar"]),
+};
+
 export default async function DashboardPage() {
   const [session, summary] = await Promise.all([auth(), getDashboardSummary()]);
   const name = session?.user?.name ?? "there";
+  const role = session?.user?.role as Role | undefined;
+  const tiles = role ? TILE_VISIBILITY[role] : new Set<string>();
 
   return (
     <>
@@ -29,10 +44,18 @@ export default async function DashboardPage() {
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Tile eyebrow="Today's orders" value={summary.todayOrders} href="/orders" />
-        <Tile eyebrow="Today's deliveries" value={summary.todayDeliveries} href="/deliveries" />
-        <Tile eyebrow="Outstanding AR" value={`₹${formatINR(summary.outstandingAR).replace("₹", "")}`} href="/payments/receivables" />
-        <Tile eyebrow="Low stock" value={summary.lowStockCount} href="/inventory/ingredients?low=1" />
+        {tiles.has("orders") && (
+          <Tile eyebrow="Today's orders" value={summary.todayOrders} href="/orders" />
+        )}
+        {tiles.has("deliveries") && (
+          <Tile eyebrow="Today's deliveries" value={summary.todayDeliveries} href="/deliveries" />
+        )}
+        {tiles.has("ar") && (
+          <Tile eyebrow="Outstanding AR" value={formatINR(summary.outstandingAR)} href="/payments/receivables" />
+        )}
+        {tiles.has("lowstock") && (
+          <Tile eyebrow="Low stock" value={summary.lowStockCount} href="/inventory/ingredients?low=1" />
+        )}
       </div>
 
       {summary.myQueue && (
