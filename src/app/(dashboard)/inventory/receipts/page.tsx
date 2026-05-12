@@ -1,7 +1,9 @@
 import Link from "next/link";
+import type { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { auth } from "@/server/auth";
 import { listRecentReceipts } from "@/server/actions/inventory";
 import { formatIST } from "@/lib/time";
 import { InventoryNav } from "../_components/InventoryNav";
@@ -9,21 +11,22 @@ import { InventoryNav } from "../_components/InventoryNav";
 export const dynamic = "force-dynamic";
 
 export default async function ReceiptsPage() {
-  const receipts = await listRecentReceipts({ limit: 100 });
+  const [session, receipts] = await Promise.all([auth(), listRecentReceipts({ limit: 100 })]);
+  const role = session?.user?.role as Role | undefined;
 
   return (
     <>
       <PageHeader
-        eyebrow="Operations"
-        title="Receipts"
-        description="Ingredient receipts. Each one updates on-hand quantity and moving-average cost in the same transaction."
+        eyebrow="Inventory"
+        title="Receipts — add new stock"
+        description="Every receipt updates on-hand quantity and moving-average cost atomically. The recorder is logged for every entry."
         actions={
           <Link href="/inventory/receipts/new">
-            <Button>Record receipt</Button>
+            <Button>Add stock</Button>
           </Link>
         }
       />
-      <InventoryNav active="receipts" />
+      <InventoryNav active="receipts" role={role} />
 
       {receipts.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">No receipts yet.</p>
@@ -36,6 +39,7 @@ export default async function ReceiptsPage() {
               <TableHead className="text-right">Qty</TableHead>
               <TableHead className="text-right">Unit cost</TableHead>
               <TableHead>Supplier</TableHead>
+              <TableHead>Recorded by</TableHead>
               <TableHead>Note</TableHead>
             </TableRow>
           </TableHeader>
@@ -54,6 +58,7 @@ export default async function ReceiptsPage() {
                 </TableCell>
                 <TableCell className="text-right font-mono">₹{r.unitCost.toString()}</TableCell>
                 <TableCell>{r.supplier ?? "—"}</TableCell>
+                <TableCell className="text-[12.5px] text-ik-ink-2">{r.recordedBy?.name ?? "—"}</TableCell>
                 <TableCell className="text-ik-ink-2">{r.note ?? "—"}</TableCell>
               </TableRow>
             ))}

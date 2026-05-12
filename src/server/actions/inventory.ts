@@ -5,6 +5,7 @@ import { Role } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import {
+  IngredientAdjustmentInput,
   IngredientInput,
   IngredientReceiptInput,
   IngredientIssueInput,
@@ -14,6 +15,11 @@ import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
+// Manual stock corrections (write-offs, opening fixes, post-count tweaks)
+// are admin/manager only. Storekeeper records new stock through receipts
+// — that path has a unit cost + supplier, this one is a free-form quantity
+// edit and is sensitive.
+const ADJUST_ROLES = [Role.ADMIN, Role.MANAGER];
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.SALES, Role.ACCOUNTS,
 ];
@@ -135,6 +141,7 @@ export async function recordIngredientReceipt(raw: unknown) {
         supplier: input.supplier ?? null,
         receivedAt,
         note: input.note ?? null,
+        recordedById: session.user.id,
       },
     });
 
@@ -229,6 +236,70 @@ export async function recordDirectIngredientIssue(raw: unknown) {
   return { id: result.id };
 }
 
+/**
+ * Manual stock adjustment — admin/manager only. Use for write-offs,
+ * spoilage, opening-balance corrections, and any quantity change that
+ * isn't a purchase or an issue. Does NOT touch avgUnitCost (corrections
+ * are quantity-only by design; changing valuation requires a re-receipt).
+ *
+ * Caller provides either `newQty` (absolute target) or `delta` (signed
+ * change); we resolve to the same end state and record both for audit.
+ */
+export async function adjustIngredientStock(raw: unknown) {
+  const session = await requireRole(ADJUST_ROLES);
+  const input = IngredientAdjustmentInput.parse(raw);
+
+  const result = await db.$transaction(async (tx) => {
+    const ingredient = await tx.ingredient.findUnique({ where: { id: input.ingredientId } });
+    if (!ingredient) throw new Error("Ingredient not found");
+
+    const before = toDecimal(ingredient.onHandQty);
+    const after = input.newQty !== undefined ? toDecimal(input.newQty) : before.plus(toDecimal(input.delta!));
+    if (after.lt(0)) throw new Error("Adjusted on-hand cannot be negative");
+    const delta = after.minus(before);
+    if (delta.eq(0)) throw new Error("No change — adjusted quantity matches current on-hand");
+
+    const adj = await tx.ingredientAdjustment.create({
+      data: {
+        ingredientId: input.ingredientId,
+        delta: delta.toDecimalPlaces(3).toString(),
+        beforeQty: before.toDecimalPlaces(3).toString(),
+        afterQty: after.toDecimalPlaces(3).toString(),
+        reason: input.reason,
+        note: input.note ?? null,
+        adjustedById: session.user.id,
+      },
+    });
+
+    await tx.ingredient.update({
+      where: { id: input.ingredientId },
+      data: { onHandQty: after.toDecimalPlaces(3).toString() },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "INGREDIENT_STOCK_ADJUSTED",
+        entity: "IngredientAdjustment",
+        entityId: adj.id,
+        payloadHash: sha256Json({
+          ingredientId: input.ingredientId,
+          before: before.toString(),
+          after: after.toString(),
+          delta: delta.toString(),
+          reason: input.reason,
+        }),
+      },
+    });
+    return adj;
+  });
+
+  revalidatePath("/inventory/ingredients");
+  revalidatePath("/inventory/adjustments");
+  revalidatePath(`/inventory/ingredients/${input.ingredientId}`);
+  return { id: result.id };
+}
+
 // ─── Queries ─────────────────────────────────────────────────────────────
 
 export async function listIngredients(opts: { query?: string; active?: boolean; lowStock?: boolean } = {}) {
@@ -263,7 +334,23 @@ export async function listRecentReceipts(opts: { limit?: number } = {}) {
   return db.ingredientReceipt.findMany({
     orderBy: { receivedAt: "desc" },
     take: opts.limit ?? 50,
-    include: { ingredient: { select: { name: true, sku: true, unit: true } } },
+    include: {
+      ingredient: { select: { name: true, sku: true, unit: true } },
+      recordedBy: { select: { name: true } },
+    },
+  });
+}
+
+// Stock-adjustment audit list — admin/manager only.
+export async function listRecentAdjustments(opts: { limit?: number } = {}) {
+  await requireRole(ADJUST_ROLES);
+  return db.ingredientAdjustment.findMany({
+    orderBy: { adjustedAt: "desc" },
+    take: opts.limit ?? 100,
+    include: {
+      ingredient: { select: { name: true, sku: true, unit: true } },
+      adjustedBy: { select: { name: true } },
+    },
   });
 }
 

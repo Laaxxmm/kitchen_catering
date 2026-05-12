@@ -2,8 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
-import { DeliveryStatus, OrderStatus, Role } from "@prisma/client";
+import { CustomerInvoiceKind, CustomerInvoiceStatus, DeliveryStatus, OrderStatus, PaymentMethod, Role } from "@prisma/client";
+import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
+import { toDecimal } from "@/lib/money";
 import {
   AuthorizationError,
   requireRole,
@@ -222,9 +224,32 @@ export async function confirmDeliveryOTP(id: string, raw: unknown) {
       throw new Error(`Invalid OTP (${3 - attempts} attempts remaining)`);
     }
 
+    // Payment-on-delivery: validate the trio before doing any writes.
+    let pay: { amount: Decimal; method: PaymentMethod; reference: string | null } | null = null;
+    if (input.paymentCollected) {
+      if (!input.paymentAmount || !input.paymentMethod) {
+        throw new Error("Payment amount and method are required when payment is collected");
+      }
+      const amt = toDecimal(input.paymentAmount);
+      if (amt.lte(0)) throw new Error("Payment amount must be greater than zero");
+      pay = {
+        amount: amt,
+        method: input.paymentMethod,
+        reference: input.paymentReference?.trim() || null,
+      };
+    }
+
     await tx.delivery.update({
       where: { id },
-      data: { status: DeliveryStatus.DELIVERED, deliveredAt: new Date() },
+      data: {
+        status: DeliveryStatus.DELIVERED,
+        deliveredAt: new Date(),
+        paymentCollected: input.paymentCollected ?? false,
+        paymentAmount: pay ? pay.amount.toFixed(2) : null,
+        paymentMethod: pay ? pay.method : null,
+        paymentReference: pay ? pay.reference : null,
+        paymentRecordedAt: pay ? new Date() : null,
+      },
     });
     await tx.order.update({
       where: { id: delivery.orderId },
@@ -233,12 +258,59 @@ export async function confirmDeliveryOTP(id: string, raw: unknown) {
     await tx.deliveryAttempt.create({
       data: { deliveryId: id, outcome: "OTP_MATCH" },
     });
+
+    // Auto-record payment on the order's most recent open tax invoice.
+    // Skip proforma — payments bind to the real invoice.
+    if (pay) {
+      const inv = await tx.customerInvoice.findFirst({
+        where: {
+          orderId: delivery.orderId,
+          kind: { not: CustomerInvoiceKind.PROFORMA },
+          status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] },
+        },
+        orderBy: { issuedAt: "desc" },
+        select: { id: true, grandTotal: true, amountPaid: true },
+      });
+      if (inv) {
+        await tx.customerInvoicePayment.create({
+          data: {
+            invoiceId: inv.id,
+            amount: pay.amount.toFixed(2),
+            paidAt: new Date(),
+            method: pay.method,
+            reference: pay.reference,
+            notes: "Collected at delivery",
+            recordedById: session.user.id,
+          },
+        });
+        const newPaid = toDecimal(inv.amountPaid).plus(pay.amount);
+        const fullyPaid = newPaid.gte(toDecimal(inv.grandTotal));
+        await tx.customerInvoice.update({
+          where: { id: inv.id },
+          data: {
+            amountPaid: newPaid.toFixed(2),
+            status: fullyPaid ? CustomerInvoiceStatus.PAID : CustomerInvoiceStatus.PARTIAL,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            userId: session.user.id,
+            action: "INVOICE_PAYMENT_RECORDED_AT_DELIVERY",
+            entity: "CustomerInvoice",
+            entityId: inv.id,
+            payloadHash: sha256Json({ deliveryId: id, amount: pay.amount.toFixed(2), method: pay.method }),
+          },
+        });
+      }
+    }
+
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
         action: "DELIVERY_DELIVERED",
         entity: "Delivery",
         entityId: id,
+        payloadHash: pay ? sha256Json({ paymentCollected: true, amount: pay.amount.toFixed(2), method: pay.method }) : undefined,
       },
     });
   });

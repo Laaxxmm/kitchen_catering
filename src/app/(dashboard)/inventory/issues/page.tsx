@@ -1,6 +1,8 @@
 import Link from "next/link";
+import type { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { auth } from "@/server/auth";
 import { listRecentIssues } from "@/server/actions/inventory";
 import { formatIST } from "@/lib/time";
 import { InventoryNav } from "../_components/InventoryNav";
@@ -8,7 +10,8 @@ import { InventoryNav } from "../_components/InventoryNav";
 export const dynamic = "force-dynamic";
 
 export default async function IssuesPage() {
-  const issues = await listRecentIssues({ limit: 100 });
+  const [session, issues] = await Promise.all([auth(), listRecentIssues({ limit: 100 })]);
+  const role = session?.user?.role as Role | undefined;
 
   return (
     <>
@@ -17,7 +20,7 @@ export default async function IssuesPage() {
         title="Issues"
         description="Stock issued to orders. Most are auto-posted by the Chef Requisition workflow; direct issues are reserved for emergencies."
       />
-      <InventoryNav active="issues" />
+      <InventoryNav active="issues" role={role} />
 
       {issues.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">No issues yet.</p>

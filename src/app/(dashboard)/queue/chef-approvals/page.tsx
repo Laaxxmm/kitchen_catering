@@ -8,14 +8,14 @@ import { formatIST } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
-export default async function StoreApprovalsQueuePage() {
-  const orders = await listOrders({ status: [OrderStatus.PENDING_STORE_APPROVAL] });
+export default async function ChefApprovalsQueuePage() {
+  const orders = await listOrders({ status: [OrderStatus.PENDING_CHEF_APPROVAL] });
   return (
     <>
       <PageHeader
-        eyebrow="Queue · Store"
-        title="Awaiting store approval"
-        description="Orders submitted by sales; storekeeper to sign off ingredient availability. A note is required for any decision."
+        eyebrow="Queue · Chef"
+        title="Awaiting chef approval"
+        description="Orders submitted by front desk or manager. Approve to send the proforma to the customer, or suggest changes for the manager to review."
       />
       {orders.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">Queue is clear.</p>

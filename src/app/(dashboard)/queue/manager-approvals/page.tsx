@@ -11,14 +11,14 @@ export const dynamic = "force-dynamic";
 
 export default async function ManagerApprovalsQueuePage() {
   const orders = await listOrders({
-    status: [OrderStatus.PENDING_MANAGER_APPROVAL, OrderStatus.REJECTED_BY_STORE],
+    status: [OrderStatus.CHANGES_PROPOSED_BY_CHEF],
   });
   return (
     <>
       <PageHeader
         eyebrow="Queue · Manager"
-        title="Awaiting manager approval"
-        description="Two columns: store-approved (waiting on manager sign-off) and store-rejected (manager may override with a reason)."
+        title="Chef-suggested changes"
+        description="Orders where the chef has proposed changes. Review the chef's note on each order detail page, then approve (proforma sends) or reject."
       />
       {orders.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">Queue is clear.</p>
@@ -31,7 +31,6 @@ export default async function ManagerApprovalsQueuePage() {
               <TableHead>Event</TableHead>
               <TableHead className="text-right">Value</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Store note</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -44,7 +43,6 @@ export default async function ManagerApprovalsQueuePage() {
                 <TableCell className="font-mono text-[12px]">{formatIST(o.eventDate, "yyyy-MM-dd")}</TableCell>
                 <TableCell className="text-right font-mono">{formatINR(o.contractValue)}</TableCell>
                 <TableCell><StatusBadge status={o.status} /></TableCell>
-                <TableCell className="text-[12px] text-ik-ink-2">{/* storeApprovalNote not in light list — see detail page */}—</TableCell>
               </TableRow>
             ))}
           </TableBody>

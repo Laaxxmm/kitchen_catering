@@ -73,14 +73,14 @@ enum MealType {
 
 enum OrderStatus {
   DRAFT
-  PENDING_STORE_APPROVAL // sales submitted; store keeper to review stock-availability first
-  PENDING_MANAGER_APPROVAL // store approved; manager to review price + business
-  REJECTED_BY_STORE // store rejected; terminal unless manager overrides
-  REJECTED_BY_MANAGER // manager rejected; terminal
-  APPROVED // both approvals (or manager override) cleared
-  CHEF_REQUISITION_PENDING // assigned to chef; chef to raise requisition
+  // Chef-first workflow (v2). The chef reviews feasibility before any other
+  // approval; the manager only steps in when the chef proposes changes.
+  PENDING_CHEF_APPROVAL // sales/manager submitted; chef to review feasibility
+  CHANGES_PROPOSED_BY_CHEF // chef wants menu/timing changes; manager to OK
+  CHEF_APPROVED // chef confirmed (after any manager-approved changes)
+  CHEF_REQUISITION_PENDING // chef to raise the requisition for store
   ISSUING // chef raised requisition; store fulfilling line-by-line
-  READY_FOR_PRODUCTION // all requisition lines issued (shortages procured + restocked)
+  READY_FOR_PRODUCTION // all requisition lines issued
   IN_PREP // production job created and started
   READY // chef marked all dishes ready
   OUT_FOR_DELIVERY
@@ -89,12 +89,20 @@ enum OrderStatus {
   PAID
   COMPLETED
   CANCELLED
+  REJECTED_BY_MANAGER // manager rejected the chef's proposed changes
+  // Legacy values from the v1 workflow. No new orders take these; kept so
+  // the enum migration is non-destructive.
+  PENDING_STORE_APPROVAL
+  PENDING_MANAGER_APPROVAL
+  REJECTED_BY_STORE
+  APPROVED
 }
 
 enum ApprovalDecision {
   APPROVED
   REJECTED
-  OVERRIDDEN // manager override of a store rejection
+  OVERRIDDEN
+  SUGGESTED_CHANGES // chef proposed alternates / additions
 }
 
 enum BudgetCategory {
@@ -219,6 +227,7 @@ enum CustomerInvoiceKind {
   ORDER // standard catering order invoice
   ADVANCE // advance against an order
   ADHOC // miscellaneous invoice
+  PROFORMA // non-binding, pre-delivery quote-with-numbers; no IRN
   CREDIT_NOTE
 }
 
@@ -328,12 +337,16 @@ model User {
   // Audit / mutations
   auditLogs                       AuditLog[]
   ingredientIssues                IngredientIssue[]
+  ingredientReceiptsRecorded      IngredientReceipt[]      @relation("IngredientReceiptRecordedBy")
+  ingredientAdjustmentsRecorded   IngredientAdjustment[]   @relation("IngredientAdjustmentAdjustedBy")
   quotesCreated                   Quote[]                  @relation("QuoteCreatedBy")
   quoteEvents                     QuoteEvent[]             @relation("QuoteEventActor")
   customerInvoicesCreated         CustomerInvoice[]        @relation("CustomerInvoiceCreatedBy")
   ordersCreated                   Order[]                  @relation("OrderCreatedBy")
   ordersStoreReviewed             Order[]                  @relation("OrderStoreReviewedBy")
   ordersManagerReviewed           Order[]                  @relation("OrderManagerReviewedBy")
+  ordersChefReviewed              Order[]                  @relation("OrderChefReviewedBy")
+  ordersManagerChangeReviewed     Order[]                  @relation("OrderManagerChangeReviewedBy")
   chefRequisitionsCreated         ChefRequisition[]        @relation("ChefRequisitionCreatedBy")
   chefRequisitionsFulfilled       ChefRequisition[]        @relation("ChefRequisitionFulfilledBy")
   prRequested                     PurchaseRequisition[]    @relation("PRRequester")
@@ -537,6 +550,7 @@ model Ingredient {
 
   receipts             IngredientReceipt[]
   issues               IngredientIssue[]
+  adjustments          IngredientAdjustment[]
   recipeIngredients    RecipeIngredient[]
   prLines              PurchaseRequisitionLine[]
   orderBudgetLines     OrderBudgetLine[]         @relation("OrderBudgetLineToIngredient")
@@ -561,9 +575,39 @@ model IngredientReceipt {
   // IngredientReceipt). Nullable for direct/manual receipts.
   grnLineId    String?    @unique
   grnLine      GRNLine?   @relation(fields: [grnLineId], references: [id])
+  // Who recorded this receipt. Nullable for legacy rows and GRN-sourced
+  // receipts where the user is implicit on the GRN itself.
+  recordedById String?
+  recordedBy   User?      @relation("IngredientReceiptRecordedBy", fields: [recordedById], references: [id])
   createdAt    DateTime   @default(now())
 
   @@index([ingredientId, receivedAt])
+  @@index([recordedById])
+}
+
+// Manual stock corrections. Storekeeper records new stock through
+// IngredientReceipt (cost + supplier known); IngredientAdjustment is the
+// admin/manager-only path for write-offs, opening-balance fixes, and any
+// quantity edit that isn't a purchase. Every adjustment captures a reason
+// and the absolute before/after on-hand for traceability; an AuditLog row
+// is written in the same transaction.
+model IngredientAdjustment {
+  id           String     @id @default(cuid())
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  // Signed delta applied. Positive = stock found / opening fix up;
+  // negative = write-off / spoilage / opening fix down.
+  delta        Decimal    @db.Decimal(14, 3)
+  beforeQty    Decimal    @db.Decimal(14, 3)
+  afterQty     Decimal    @db.Decimal(14, 3)
+  reason       String
+  note         String?
+  adjustedById String
+  adjustedBy   User       @relation("IngredientAdjustmentAdjustedBy", fields: [adjustedById], references: [id])
+  adjustedAt   DateTime   @default(now())
+
+  @@index([ingredientId, adjustedAt])
+  @@index([adjustedById])
 }
 
 model IngredientIssue {
@@ -738,6 +782,26 @@ model Order {
   // overrode because Y".
   managerOverrideReason String?
 
+  // Chef-first review (workflow v2).
+  // On submit the order lands at PENDING_CHEF_APPROVAL. The chef either
+  // confirms (chefDecision=APPROVED, advances to CHEF_REQUISITION_PENDING)
+  // or proposes changes (chefDecision=SUGGESTED_CHANGES, chefSuggestionNotes
+  // populated, advances to CHANGES_PROPOSED_BY_CHEF for the manager).
+  chefReviewedById     String?
+  chefReviewedBy       User?             @relation("OrderChefReviewedBy", fields: [chefReviewedById], references: [id])
+  chefReviewedAt       DateTime?
+  chefDecision         ApprovalDecision?
+  chefSuggestionNotes  String?
+
+  // Manager review of the chef's proposed changes. APPROVED here flips the
+  // order back into the chef's queue at CHEF_REQUISITION_PENDING; REJECTED
+  // is terminal (REJECTED_BY_MANAGER).
+  managerChangeReviewedById String?
+  managerChangeReviewedBy   User?         @relation("OrderManagerChangeReviewedBy", fields: [managerChangeReviewedById], references: [id])
+  managerChangeReviewedAt   DateTime?
+  managerChangeDecision     ApprovalDecision?
+  managerChangeNote         String?
+
   // Workflow
   kitchenSupervisorId String?
   kitchenSupervisor   User?     @relation("KitchenSupervisor", fields: [kitchenSupervisorId], references: [id])
@@ -768,6 +832,8 @@ model Order {
   @@index([kitchenSupervisorId])
   @@index([storeReviewedById])
   @@index([managerReviewedById])
+  @@index([chefReviewedById])
+  @@index([managerChangeReviewedById])
 }
 
 model OrderItem {
@@ -963,6 +1029,17 @@ model Delivery {
   signatureUrl   String?
   failureReason  String?
   notes          String?
+
+  // Payment collected at delivery (Phase 3+ workflow). When the driver
+  // confirms OTP, they can also mark whether they collected payment on
+  // the spot. If true, a CustomerInvoicePayment row is auto-created
+  // against the order's invoice in the same transaction.
+  paymentCollected   Boolean? @default(false)
+  paymentAmount      Decimal? @db.Decimal(14, 2)
+  paymentMethod      String?  // 'CASH' | 'UPI' | 'CHEQUE' | 'NEFT' | 'OTHER'
+  paymentReference   String?  // UPI ref / cheque no
+  paymentRecordedAt  DateTime?
+
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
@@ -1256,6 +1333,13 @@ model CustomerInvoice {
   shareToken  String   @unique
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  // Email delivery tracking (Phase 3+ workflow). When the system auto-emails
+  // a proforma / tax invoice to the customer, capture the timestamp and the
+  // destination so the audit trail and the UI can show "Sent to
+  // ops@infosys.com at 14:32".
+  emailedAt   DateTime?
+  emailedTo   String?
 
   lines        CustomerInvoiceLine[]
   payments     CustomerInvoicePayment[]

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { DeliveryStatus } from "@prisma/client";
+import { DeliveryStatus, PaymentMethod } from "@prisma/client";
 
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
@@ -22,9 +22,15 @@ export default async function MobileDeliveryDetailPage({ params }: { params: Pro
 
   async function doDispatch() { "use server"; await dispatchDelivery(id); }
   async function doArrived() { "use server"; await markDeliveryArrived(id); }
-  async function doOTP(otp: string) {
+  async function doOTP(payload: {
+    otp: string;
+    paymentCollected: boolean;
+    paymentAmount?: string;
+    paymentMethod?: PaymentMethod;
+    paymentReference?: string;
+  }) {
     "use server";
-    await confirmDeliveryOTP(id, { otp });
+    await confirmDeliveryOTP(id, payload);
   }
   async function doFail(reason: string) {
     "use server";

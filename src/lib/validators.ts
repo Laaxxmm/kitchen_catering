@@ -124,6 +124,22 @@ export const IngredientIssueInput = z.object({
 });
 export type IngredientIssueInputT = z.infer<typeof IngredientIssueInput>;
 
+// Admin/manager manual stock adjustment. Either set `newQty` (target the
+// new on-hand absolute) or `delta` (signed change). One is required.
+export const IngredientAdjustmentInput = z
+  .object({
+    ingredientId: z.string(),
+    newQty: decimalString.optional(),
+    delta: decimalString.optional(),
+    reason: z.string().min(2).max(200),
+    note: z.string().max(500).nullable().optional(),
+  })
+  .refine((v) => v.newQty !== undefined || v.delta !== undefined, {
+    message: "Either newQty or delta is required",
+    path: ["newQty"],
+  });
+export type IngredientAdjustmentInputT = z.infer<typeof IngredientAdjustmentInput>;
+
 // =====================================================================
 // DISH + RECIPE
 // =====================================================================
@@ -306,6 +322,14 @@ export const DeliveryAssignInput = z.object({
 
 export const DeliveryOTPInput = z.object({
   otp: z.string().regex(/^[0-9]{4}$/, "OTP must be 4 digits"),
+  // Payment-on-delivery: driver records whether they collected payment
+  // at the door. When `paymentCollected` is true, the other fields are
+  // required and a CustomerInvoicePayment row is auto-recorded against
+  // the order's most recent open tax invoice.
+  paymentCollected: z.boolean().optional(),
+  paymentAmount: decimalString.optional(),
+  paymentMethod: z.nativeEnum(PaymentMethod).optional(),
+  paymentReference: z.string().max(120).optional(),
 });
 
 export const DeliveryFailureInput = z.object({

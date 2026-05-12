@@ -116,8 +116,19 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
           <Input id="contactName" {...register("contactName")} />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" {...register("email")} />
+          <Label htmlFor="email">
+            Email <span className="text-alert">*</span>
+          </Label>
+          <Input
+            id="email"
+            type="email"
+            placeholder="customer@example.com"
+            {...register("email")}
+          />
+          <p className="text-[11.5px] text-ik-ink-3">
+            Required to auto-send the proforma and tax invoice. Leave blank only if the
+            customer truly has no email — invoices will need to be sent manually.
+          </p>
         </div>
         <div className="grid gap-2">
           <Label htmlFor="phone">Phone</Label>

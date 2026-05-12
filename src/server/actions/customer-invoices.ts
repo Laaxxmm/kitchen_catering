@@ -135,6 +135,187 @@ export async function createCustomerInvoiceFromOrder(orderId: string) {
   return { id: result.id, invoiceNo: result.invoiceNo };
 }
 
+// ─── Proforma invoice (workflow v2) ─────────────────────────────────────
+
+/**
+ * Auto-creates a PROFORMA invoice when an order reaches CHEF_APPROVED /
+ * CHEF_REQUISITION_PENDING. Idempotent on (orderId, kind=PROFORMA). After
+ * creating, attempts to email it to the customer (best-effort; failures
+ * are logged but don't throw, so the order workflow isn't held up by
+ * SMTP issues).
+ *
+ * Called from inside the chef-approval server actions (post-commit).
+ * Not exposed as a button — the system runs it automatically.
+ */
+export async function createProformaInvoiceForOrder(orderId: string) {
+  // No requireRole — this is called from inside server actions that
+  // already enforced role. Anonymous-but-server-side call.
+
+  const order = await db.order.findUnique({
+    where: { id: orderId },
+    include: {
+      items: { include: { dish: { select: { name: true, unit: true, hsnSac: true } } }, orderBy: { sortOrder: "asc" } },
+      customer: true,
+    },
+  });
+  if (!order) throw new Error("Order not found");
+  if (order.items.length === 0) return null;
+
+  // Idempotency: skip if a PROFORMA already exists for this order.
+  const existing = await db.customerInvoice.findFirst({
+    where: { orderId, kind: CustomerInvoiceKind.PROFORMA, status: { not: CustomerInvoiceStatus.CANCELLED } },
+    select: { id: true, invoiceNo: true, shareToken: true },
+  });
+  let invoice: { id: string; invoiceNo: string; shareToken: string };
+  if (existing) {
+    invoice = existing;
+  } else {
+    const supplierState = indefineStateCode();
+    const summary = summarise({
+      lines: order.items.map((it) => ({
+        quantity: it.portions.toString(),
+        unitPrice: it.unitPrice.toString(),
+        discountPct: it.discountPct.toString(),
+        gstRatePct: it.gstRatePct.toString(),
+      })),
+      supplierStateCode: supplierState,
+      placeOfSupplyStateCode: order.placeOfSupplyStateCode,
+    });
+
+    const created = await db.$transaction(async (tx) => {
+      const invoiceNo = await nextCustomerInvoiceNumber(tx);
+      const row = await tx.customerInvoice.create({
+        data: {
+          invoiceNo,
+          kind: CustomerInvoiceKind.PROFORMA,
+          // Proforma is informational only; it lands as ISSUED so the
+          // public token URL surfaces it immediately, but eInvoiceStatus
+          // stays NOT_REQUIRED — proformas never get an IRN.
+          status: CustomerInvoiceStatus.ISSUED,
+          issuedAt: new Date(),
+          orderId,
+          customerId: order.customer.id,
+          placeOfSupplyStateCode: order.placeOfSupplyStateCode,
+          subtotal: summary.subtotal.toString(),
+          cgst: summary.cgst.toString(),
+          sgst: summary.sgst.toString(),
+          igst: summary.igst.toString(),
+          taxTotal: summary.taxTotal.toString(),
+          grandTotal: summary.grandTotal.toString(),
+          eInvoiceStatus: EInvoiceStatus.NOT_REQUIRED,
+          createdById: order.createdById,
+          shareToken: newShareToken(),
+          lines: {
+            create: order.items.map((it, idx) => ({
+              sortOrder: idx,
+              description: it.dish.name,
+              hsnSac: it.dish.hsnSac ?? null,
+              quantity: it.portions.toString(),
+              unit: it.dish.unit,
+              unitPrice: it.unitPrice.toString(),
+              discountPct: it.discountPct.toString(),
+              gstRatePct: it.gstRatePct.toString(),
+              lineSubtotal: it.lineSubtotal.toString(),
+              lineTax: it.lineTax.toString(),
+              lineTotal: it.lineTotal.toString(),
+            })),
+          },
+        },
+        select: { id: true, invoiceNo: true, shareToken: true },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: order.createdById,
+          action: "CUSTOMER_INVOICE_PROFORMA_AUTO_CREATED",
+          entity: "CustomerInvoice",
+          entityId: row.id,
+          payloadHash: sha256Json({ orderId, kind: "PROFORMA", grandTotal: summary.grandTotal.toString() }),
+        },
+      });
+      return row;
+    });
+    invoice = created;
+  }
+
+  // Best-effort email. Logged + swallowed on failure.
+  if (order.customer.email) {
+    try {
+      const { sendEmail, buildInvoiceEmail } = await import("@/lib/email");
+      const { renderCustomerInvoicePDF } = await import("@/server/pdf/customer-invoice");
+      const fullInvoice = await db.customerInvoice.findUnique({
+        where: { id: invoice.id },
+        include: { lines: { orderBy: { sortOrder: "asc" } }, order: { select: { code: true, eventDate: true } } },
+      });
+      if (!fullInvoice) throw new Error("Just-created proforma vanished");
+      const pdf = await renderCustomerInvoicePDF({
+        invoiceNo: fullInvoice.invoiceNo,
+        issuedAt: fullInvoice.issuedAt,
+        dueAt: fullInvoice.dueAt,
+        orderCode: fullInvoice.order?.code ?? null,
+        placeOfSupplyStateCode: fullInvoice.placeOfSupplyStateCode,
+        irn: fullInvoice.irn,
+        ackNo: fullInvoice.ackNo,
+        ackDate: fullInvoice.ackDate,
+        customer: {
+          name: order.customer.name,
+          gstin: order.customer.gstin,
+          billingAddress: order.customer.billingAddress,
+          stateCode: order.customer.stateCode,
+        },
+        lines: fullInvoice.lines.map((l) => ({
+          description: l.description,
+          quantity: l.quantity.toString(),
+          unit: l.unit,
+          unitPrice: l.unitPrice.toString(),
+          gstRatePct: l.gstRatePct.toString(),
+          lineTotal: l.lineTotal.toString(),
+        })),
+        subtotal: fullInvoice.subtotal.toString(),
+        cgst: fullInvoice.cgst.toString(),
+        sgst: fullInvoice.sgst.toString(),
+        igst: fullInvoice.igst.toString(),
+        taxTotal: fullInvoice.taxTotal.toString(),
+        grandTotal: fullInvoice.grandTotal.toString(),
+        amountPaid: fullInvoice.amountPaid.toString(),
+        notes: fullInvoice.notes,
+        terms: fullInvoice.termsMd,
+      });
+      const publicBase = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
+      const composed = buildInvoiceEmail({
+        invoiceNo: invoice.invoiceNo,
+        invoiceKind: "PROFORMA",
+        customerName: order.customer.name,
+        grandTotal: fullInvoice.grandTotal.toString(),
+        eventDateLabel: order.eventDate.toISOString().slice(0, 10),
+        publicUrl: `${publicBase}/i/${invoice.shareToken}`,
+      });
+      await sendEmail({
+        to: order.customer.email,
+        subject: composed.subject,
+        text: composed.text,
+        html: composed.html,
+        attachments: [
+          {
+            filename: `${invoice.invoiceNo}.pdf`,
+            content: pdf,
+            contentType: "application/pdf",
+          },
+        ],
+      });
+      await db.customerInvoice.update({
+        where: { id: invoice.id },
+        data: { emailedAt: new Date(), emailedTo: order.customer.email },
+      });
+    } catch (err) {
+      console.error(`[proforma email] failed for invoice ${invoice.invoiceNo}:`, err);
+    }
+  } else {
+    console.error(`[proforma email] no customer email on file for ${order.customer.name}; PDF created but not sent`);
+  }
+
+  return invoice;
+}
+
 // ─── Standalone invoice (ad-hoc, no order) ──────────────────────────────
 
 interface StandaloneLineInput {

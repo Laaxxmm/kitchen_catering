@@ -1,7 +1,9 @@
 import Link from "next/link";
+import type { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { auth } from "@/server/auth";
 import { listIngredients } from "@/server/actions/inventory";
 import { InventoryNav } from "../_components/InventoryNav";
 
@@ -13,11 +15,11 @@ export default async function IngredientsPage({
   searchParams: Promise<{ q?: string; low?: string }>;
 }) {
   const sp = await searchParams;
-  const ingredients = await listIngredients({
-    query: sp.q,
-    active: true,
-    lowStock: sp.low === "1",
-  });
+  const [session, ingredients] = await Promise.all([
+    auth(),
+    listIngredients({ query: sp.q, active: true, lowStock: sp.low === "1" }),
+  ]);
+  const role = session?.user?.role as Role | undefined;
 
   return (
     <>
@@ -31,7 +33,7 @@ export default async function IngredientsPage({
           </Link>
         }
       />
-      <InventoryNav active="ingredients" />
+      <InventoryNav active="ingredients" role={role} />
 
       <form className="mb-4 flex flex-wrap items-end gap-2" action="/inventory/ingredients">
         <input

@@ -30,8 +30,9 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Admin
   { pattern: /^\/admin(\/|$)/, allow: ["ADMIN"] },
 
-  // Queues — store and manager work surfaces
-  { pattern: /^\/queue\/store-approvals(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
+  // Queues — chef-approvals (PENDING_CHEF_APPROVAL) is the new front door;
+  // manager-approvals handles chef-proposed changes; issuing is store-side.
+  { pattern: /^\/queue\/chef-approvals(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD"] },
   { pattern: /^\/queue\/manager-approvals(\/|$)/, allow: ["ADMIN", "MANAGER"] },
   { pattern: /^\/queue\/issuing(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
 
@@ -47,6 +48,9 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Operations
   { pattern: /^\/kitchen(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "SALES", "STORE_KEEPER", "ACCOUNTS"] },
   { pattern: /^\/requisitions(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "STORE_KEEPER", "SALES", "ACCOUNTS"] },
+  // Manual stock adjustments are admin/manager only (write-offs, opening
+  // fixes) — storekeeper adds new stock through /inventory/receipts.
+  { pattern: /^\/inventory\/adjustments(\/|$)/, allow: ["ADMIN", "MANAGER"] },
   { pattern: /^\/inventory(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "KITCHEN_HEAD"] },
 
   // Deliveries — DELIVERY role gets their own scope (enforced server-side

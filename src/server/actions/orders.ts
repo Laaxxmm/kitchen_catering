@@ -177,6 +177,11 @@ export async function updateOrderDraft(id: string, raw: unknown) {
   revalidatePath("/orders");
 }
 
+/**
+ * Submit a DRAFT order. Workflow v2: goes straight to the CHEF for
+ * feasibility approval (no separate store-approval step). The chef can
+ * either confirm or propose changes (which then need manager OK).
+ */
 export async function submitOrder(id: string) {
   const session = await requireRole(ORDER_SALES_ROLES);
 
@@ -198,7 +203,7 @@ export async function submitOrder(id: string) {
     await tx.order.update({
       where: { id },
       data: {
-        status: OrderStatus.PENDING_STORE_APPROVAL,
+        status: OrderStatus.PENDING_CHEF_APPROVAL,
         submittedAt: new Date(),
       },
     });
@@ -208,18 +213,167 @@ export async function submitOrder(id: string) {
         action: "ORDER_SUBMITTED",
         entity: "Order",
         entityId: id,
-        payloadHash: sha256Json({ from: order.status, to: OrderStatus.PENDING_STORE_APPROVAL }),
+        payloadHash: sha256Json({ from: order.status, to: OrderStatus.PENDING_CHEF_APPROVAL }),
       },
     });
   });
 
   revalidatePath(`/orders/${id}`);
   revalidatePath("/orders");
-  revalidatePath("/queue/store-approvals");
+  revalidatePath("/queue/chef-approvals");
 }
 
 // =====================================================================
-// TWO-STAGE APPROVAL
+// CHEF-FIRST APPROVAL (workflow v2)
+// =====================================================================
+
+/**
+ * Chef reviews the order. Two outcomes:
+ *   - APPROVED          → CHEF_REQUISITION_PENDING (proforma is auto-emailed
+ *                          to the customer in this transition)
+ *   - SUGGESTED_CHANGES → CHANGES_PROPOSED_BY_CHEF (manager reviews)
+ *
+ * The chef writes a free-text note in both cases — for APPROVED it's a
+ * confirmation note; for SUGGESTED_CHANGES it's the alternative menu /
+ * timing note the manager needs to OK.
+ */
+export async function chefApproveOrder(
+  id: string,
+  input: { decision: "APPROVED" | "SUGGESTED_CHANGES"; note: string },
+) {
+  const session = await requireRole(ORDER_KITCHEN_ROLES);
+  if (!input.note?.trim()) throw new Error("A note is required");
+
+  let triggerProforma = false;
+
+  await db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
+    if (!order) throw new Error("Order not found");
+    if (order.status !== OrderStatus.PENDING_CHEF_APPROVAL) {
+      throw new AuthorizationError("Order is not awaiting chef approval");
+    }
+
+    const nextStatus =
+      input.decision === "APPROVED"
+        ? OrderStatus.CHEF_REQUISITION_PENDING
+        : OrderStatus.CHANGES_PROPOSED_BY_CHEF;
+
+    await tx.order.update({
+      where: { id },
+      data: {
+        status: nextStatus,
+        chefReviewedById: session.user.id,
+        chefReviewedAt: new Date(),
+        chefDecision: input.decision === "APPROVED"
+          ? ApprovalDecision.APPROVED
+          : ApprovalDecision.SUGGESTED_CHANGES,
+        chefSuggestionNotes: input.note,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: input.decision === "APPROVED" ? "ORDER_CHEF_APPROVED" : "ORDER_CHEF_SUGGESTED_CHANGES",
+        entity: "Order",
+        entityId: id,
+        payloadHash: sha256Json({ decision: input.decision, note: input.note }),
+      },
+    });
+
+    if (input.decision === "APPROVED") {
+      triggerProforma = true;
+    }
+  });
+
+  revalidatePath(`/orders/${id}`);
+  revalidatePath("/orders");
+  revalidatePath("/queue/chef-approvals");
+  revalidatePath("/queue/manager-approvals");
+
+  // Auto-create + email the proforma invoice OUTSIDE the transaction so
+  // a slow SMTP / PDF render doesn't hold a row lock.
+  if (triggerProforma) {
+    const { createProformaInvoiceForOrder } = await import("./customer-invoices");
+    try {
+      await createProformaInvoiceForOrder(id);
+    } catch (err) {
+      console.error(`[proforma] order ${id} failed:`, err);
+    }
+  }
+}
+
+/**
+ * Manager reviews the chef's proposed changes. Two outcomes:
+ *   - APPROVED → advances straight to CHEF_REQUISITION_PENDING (per the
+ *                product decision: chef doesn't re-confirm, manager OK is
+ *                enough). Auto-creates + emails the proforma.
+ *   - REJECTED → REJECTED_BY_MANAGER (terminal).
+ *
+ * Only callable from CHANGES_PROPOSED_BY_CHEF.
+ */
+export async function managerApproveChefSuggestion(
+  id: string,
+  input: { decision: "APPROVED" | "REJECTED"; note?: string },
+) {
+  const session = await requireRole(ORDER_MANAGER_ROLES);
+
+  let triggerProforma = false;
+
+  await db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
+    if (!order) throw new Error("Order not found");
+    if (order.status !== OrderStatus.CHANGES_PROPOSED_BY_CHEF) {
+      throw new AuthorizationError("Order does not have pending chef-proposed changes");
+    }
+    const nextStatus =
+      input.decision === "APPROVED"
+        ? OrderStatus.CHEF_REQUISITION_PENDING
+        : OrderStatus.REJECTED_BY_MANAGER;
+
+    await tx.order.update({
+      where: { id },
+      data: {
+        status: nextStatus,
+        managerChangeReviewedById: session.user.id,
+        managerChangeReviewedAt: new Date(),
+        managerChangeDecision:
+          input.decision === "APPROVED" ? ApprovalDecision.APPROVED : ApprovalDecision.REJECTED,
+        managerChangeNote: input.note ?? null,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: input.decision === "APPROVED" ? "ORDER_MANAGER_APPROVED_CHANGES" : "ORDER_MANAGER_REJECTED_CHANGES",
+        entity: "Order",
+        entityId: id,
+        payloadHash: sha256Json({ decision: input.decision, note: input.note ?? null }),
+      },
+    });
+    if (input.decision === "APPROVED") {
+      triggerProforma = true;
+    }
+  });
+
+  revalidatePath(`/orders/${id}`);
+  revalidatePath("/orders");
+  revalidatePath("/queue/manager-approvals");
+
+  if (triggerProforma) {
+    const { createProformaInvoiceForOrder } = await import("./customer-invoices");
+    try {
+      await createProformaInvoiceForOrder(id);
+    } catch (err) {
+      console.error(`[proforma] order ${id} failed:`, err);
+    }
+  }
+}
+
+// =====================================================================
+// LEGACY TWO-STAGE APPROVAL (workflow v1 — kept for reference)
+// New orders never see PENDING_STORE_APPROVAL; these actions remain to
+// process any in-flight v1 orders cleanly. Safe to delete in a future
+// migration once there's confidence nothing references them.
 // =====================================================================
 
 export async function storeApproveOrder(id: string, raw: unknown) {
@@ -404,15 +558,22 @@ export interface OrderFilter {
 export async function listOrders(filter: OrderFilter = {}) {
   const session = await requireRole(READ_ROLES);
 
-  // "My queue" maps to role-relevant statuses.
+  // "My queue" maps to role-relevant statuses (workflow v2: chef-first).
   let statuses: OrderStatus[] | undefined;
   if (filter.myQueue) {
     if (hasRole(session, [Role.STORE_KEEPER])) {
-      statuses = [OrderStatus.PENDING_STORE_APPROVAL];
+      // Store no longer approves orders; their queue is the requisition
+      // fulfilment list (/queue/issuing). Surface ISSUING orders here so
+      // they can see what's in flight.
+      statuses = [OrderStatus.ISSUING];
     } else if (hasRole(session, [Role.MANAGER])) {
-      statuses = [OrderStatus.PENDING_MANAGER_APPROVAL, OrderStatus.REJECTED_BY_STORE];
+      // Manager owns proposed-changes approval + everything in flight.
+      statuses = [OrderStatus.CHANGES_PROPOSED_BY_CHEF];
     } else if (hasRole(session, [Role.KITCHEN_HEAD])) {
+      // Chef's queue: orders waiting for chef-approval first, then
+      // production work afterwards.
       statuses = [
+        OrderStatus.PENDING_CHEF_APPROVAL,
         OrderStatus.CHEF_REQUISITION_PENDING,
         OrderStatus.ISSUING,
         OrderStatus.READY_FOR_PRODUCTION,
@@ -420,7 +581,7 @@ export async function listOrders(filter: OrderFilter = {}) {
         OrderStatus.READY,
       ];
     } else if (hasRole(session, [Role.SALES])) {
-      statuses = [OrderStatus.DRAFT, OrderStatus.PENDING_STORE_APPROVAL, OrderStatus.PENDING_MANAGER_APPROVAL];
+      statuses = [OrderStatus.DRAFT, OrderStatus.PENDING_CHEF_APPROVAL, OrderStatus.CHANGES_PROPOSED_BY_CHEF];
     } else if (hasRole(session, [Role.DELIVERY])) {
       statuses = [OrderStatus.READY, OrderStatus.OUT_FOR_DELIVERY];
     }
@@ -457,6 +618,8 @@ export async function getOrder(id: string) {
       createdBy: { select: { name: true, email: true } },
       storeReviewedBy: { select: { name: true } },
       managerReviewedBy: { select: { name: true } },
+      chefReviewedBy: { select: { name: true } },
+      managerChangeReviewedBy: { select: { name: true } },
       kitchenSupervisor: { select: { name: true } },
       chefRequisitions: { select: { id: true, requisitionNo: true, status: true } },
     },

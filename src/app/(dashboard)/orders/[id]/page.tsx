@@ -1,24 +1,24 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { OrderStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { OrderStepper } from "@/components/ik/OrderStepper";
 import { auth } from "@/server/auth";
-import { redirect } from "next/navigation";
+import { db } from "@/server/db";
 import {
   cancelOrder,
+  chefApproveOrder,
   getOrder,
-  managerApproveOrder,
-  managerOverrideStoreRejection,
-  storeApproveOrder,
+  managerApproveChefSuggestion,
   submitOrder,
 } from "@/server/actions/orders";
 import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoices";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
-import { ApprovalBlock } from "./_components/ApprovalBlock";
+import { ChefApprovalBlock } from "./_components/ChefApprovalBlock";
+import { ManagerChangeBlock } from "./_components/ManagerChangeBlock";
 
 export const dynamic = "force-dynamic";
 
@@ -28,35 +28,36 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   if (!order) notFound();
   const role = session?.user?.role;
   const isAdmin = role === Role.ADMIN;
-  const isStore = role === Role.STORE_KEEPER || isAdmin;
   const isManager = role === Role.MANAGER || isAdmin;
+  const isChef = role === Role.KITCHEN_HEAD || isAdmin;
   const isSales = role === Role.SALES || isAdmin || role === Role.MANAGER;
 
-  // ─── Server-action shims so the client-side ApprovalBlock can invoke
-  //     server actions without exposing the order id to the client. ─────
+  // Pull any proforma invoice for this order so we can link it.
+  const proforma = await db.customerInvoice.findFirst({
+    where: { orderId: id, kind: "PROFORMA", status: { not: "CANCELLED" } },
+    select: { id: true, invoiceNo: true, shareToken: true, emailedAt: true, emailedTo: true, grandTotal: true },
+  });
+
+  // ─── Server-action shims ───────────────────────────────────────────
   async function doSubmit() {
     "use server";
     await submitOrder(id);
   }
-  async function doStoreApprove(note: string) {
+  async function doChefApprove(note: string) {
     "use server";
-    await storeApproveOrder(id, { decision: "APPROVED", note });
+    await chefApproveOrder(id, { decision: "APPROVED", note });
   }
-  async function doStoreReject(note: string) {
+  async function doChefSuggest(note: string) {
     "use server";
-    await storeApproveOrder(id, { decision: "REJECTED", note });
+    await chefApproveOrder(id, { decision: "SUGGESTED_CHANGES", note });
   }
-  async function doManagerApprove(note: string) {
+  async function doManagerApproveChanges(note: string) {
     "use server";
-    await managerApproveOrder(id, { decision: "APPROVED", note: note || undefined });
+    await managerApproveChefSuggestion(id, { decision: "APPROVED", note: note || undefined });
   }
-  async function doManagerReject(note: string) {
+  async function doManagerRejectChanges(note: string) {
     "use server";
-    await managerApproveOrder(id, { decision: "REJECTED", note: note || undefined });
-  }
-  async function doOverride(reason: string) {
-    "use server";
-    await managerOverrideStoreRejection(id, { reason });
+    await managerApproveChefSuggestion(id, { decision: "REJECTED", note: note || undefined });
   }
   async function doCancel(formData: FormData) {
     "use server";
@@ -71,32 +72,10 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   }
 
   // ─── Approval block selection ────────────────────────────────────────
-  let approvalBlock: React.ReactNode = null;
-  if (order.status === OrderStatus.PENDING_STORE_APPROVAL && isStore) {
-    approvalBlock = (
-      <ApprovalBlock
-        action="store"
-        onApprove={doStoreApprove}
-        onReject={doStoreReject}
-      />
-    );
-  } else if (order.status === OrderStatus.PENDING_MANAGER_APPROVAL && isManager) {
-    approvalBlock = (
-      <ApprovalBlock
-        action="manager"
-        onApprove={doManagerApprove}
-        onReject={doManagerReject}
-      />
-    );
-  } else if (order.status === OrderStatus.REJECTED_BY_STORE && isManager) {
-    approvalBlock = (
-      <ApprovalBlock
-        action="override"
-        storeNote={order.storeApprovalNote}
-        onOverride={doOverride}
-      />
-    );
-  }
+  // Chef sees the chef-approval block when order is PENDING_CHEF_APPROVAL.
+  // Manager sees the changes-review block when order is CHANGES_PROPOSED_BY_CHEF.
+  const showChefBlock = isChef && order.status === OrderStatus.PENDING_CHEF_APPROVAL;
+  const showManagerChangesBlock = isManager && order.status === OrderStatus.CHANGES_PROPOSED_BY_CHEF;
 
   return (
     <>
@@ -110,26 +89,41 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             <Link href={`/orders/${order.id}/pnl`}><Button variant="outline">P&amp;L</Button></Link>
             {order.status === OrderStatus.DRAFT && isSales && (
               <form action={doSubmit}>
-                <Button type="submit">Submit for approval</Button>
+                <Button type="submit">Send to chef for approval</Button>
               </form>
             )}
             {order.status === OrderStatus.DELIVERED && (role === Role.ACCOUNTS || isAdmin || isManager) && (
               <form action={doGenerateInvoice}>
-                <Button type="submit">Generate invoice</Button>
+                <Button type="submit">Generate tax invoice</Button>
               </form>
             )}
           </div>
         }
       />
 
+      {/* Horizontal flow stepper — visible to everyone */}
+      <div className="mb-6">
+        <OrderStepper current={order.status} />
+      </div>
+
       <div className="grid gap-6 md:grid-cols-3">
         <div className="md:col-span-2 grid gap-6">
-          {/* Status timeline */}
+          {/* Approval blocks (conditional) */}
+          {showChefBlock && (
+            <ChefApprovalBlock onApprove={doChefApprove} onSuggest={doChefSuggest} />
+          )}
+          {showManagerChangesBlock && (
+            <ManagerChangeBlock
+              chefNote={order.chefSuggestionNotes ?? ""}
+              chefName={order.chefReviewedBy?.name ?? "the chef"}
+              onApprove={doManagerApproveChanges}
+              onReject={doManagerRejectChanges}
+            />
+          )}
+
+          {/* Decision history */}
           <section className="rounded-md border border-ik-rule bg-ik-card p-4">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="font-medium text-[14px] text-ik-ink">Status</h3>
-              <StatusBadge status={order.status} />
-            </div>
+            <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Decision history</h3>
             <ol className="grid gap-2 text-[12.5px]">
               <li>
                 <span className="text-ik-ink-3">Created</span>{" "}
@@ -138,35 +132,38 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               </li>
               {order.submittedAt && (
                 <li>
-                  <span className="text-ik-ink-3">Submitted</span>{" "}
+                  <span className="text-ik-ink-3">Submitted for chef approval</span>{" "}
                   <span className="font-mono">{formatIST(order.submittedAt)}</span>
                 </li>
               )}
-              {order.storeReviewedAt && (
+              {order.chefReviewedAt && (
                 <li>
-                  <span className="text-ik-ink-3">Store {order.storeDecision?.toLowerCase()}</span>{" "}
-                  <span className="font-mono">{formatIST(order.storeReviewedAt)}</span>
-                  {order.storeReviewedBy?.name && <span className="text-ik-ink-3"> · {order.storeReviewedBy.name}</span>}
-                  {order.storeApprovalNote && (
+                  <span className="text-ik-ink-3">Chef</span>{" "}
+                  <span className="font-medium">
+                    {order.chefDecision === "APPROVED" ? "approved" : "proposed changes"}
+                  </span>{" "}
+                  <span className="font-mono">{formatIST(order.chefReviewedAt)}</span>
+                  {order.chefReviewedBy?.name && <span className="text-ik-ink-3"> · {order.chefReviewedBy.name}</span>}
+                  {order.chefSuggestionNotes && (
                     <div className="mt-1 border-l-2 border-ik-rule pl-2 italic text-ik-ink-2">
-                      {order.storeApprovalNote}
+                      {order.chefSuggestionNotes}
                     </div>
                   )}
                 </li>
               )}
-              {order.managerReviewedAt && (
+              {order.managerChangeReviewedAt && (
                 <li>
-                  <span className="text-ik-ink-3">Manager {order.managerDecision?.toLowerCase()}</span>{" "}
-                  <span className="font-mono">{formatIST(order.managerReviewedAt)}</span>
-                  {order.managerReviewedBy?.name && <span className="text-ik-ink-3"> · {order.managerReviewedBy.name}</span>}
-                  {order.managerApprovalNote && (
-                    <div className="mt-1 border-l-2 border-ik-rule pl-2 italic text-ik-ink-2">
-                      {order.managerApprovalNote}
-                    </div>
+                  <span className="text-ik-ink-3">Manager (on chef&apos;s changes)</span>{" "}
+                  <span className="font-medium">
+                    {order.managerChangeDecision === "APPROVED" ? "approved" : "rejected"}
+                  </span>{" "}
+                  <span className="font-mono">{formatIST(order.managerChangeReviewedAt)}</span>
+                  {order.managerChangeReviewedBy?.name && (
+                    <span className="text-ik-ink-3"> · {order.managerChangeReviewedBy.name}</span>
                   )}
-                  {order.managerOverrideReason && (
-                    <div className="mt-1 border-l-2 border-amber pl-2 italic text-amber">
-                      Override reason: {order.managerOverrideReason}
+                  {order.managerChangeNote && (
+                    <div className="mt-1 border-l-2 border-ik-rule pl-2 italic text-ik-ink-2">
+                      {order.managerChangeNote}
                     </div>
                   )}
                 </li>
@@ -179,9 +176,6 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               )}
             </ol>
           </section>
-
-          {/* Approval block */}
-          {approvalBlock}
 
           {/* Items */}
           <section className="rounded-md border border-ik-rule bg-ik-card p-4">
@@ -211,6 +205,29 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               </TableBody>
             </Table>
           </section>
+
+          {/* Proforma invoice */}
+          {proforma && (
+            <section className="rounded-md border border-brand-200 bg-brand-50 p-4 text-[13px]">
+              <h3 className="mb-2 font-medium text-brand-700">Proforma invoice</h3>
+              <p className="mb-2 text-ik-ink-2">
+                Auto-generated when the order was approved.{" "}
+                {proforma.emailedAt ? (
+                  <>
+                    Emailed to <strong>{proforma.emailedTo}</strong> at{" "}
+                    <span className="font-mono">{formatIST(proforma.emailedAt)}</span>.
+                  </>
+                ) : (
+                  <span className="text-amber">Not emailed yet (check customer email on file).</span>
+                )}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Link href={`/invoices/${proforma.id}`}><Button size="sm" variant="outline">Open invoice</Button></Link>
+                <Link href={`/api/invoices/${proforma.id}/pdf`} target="_blank"><Button size="sm" variant="outline">Download PDF</Button></Link>
+                <Link href={`/i/${proforma.shareToken}`} target="_blank"><Button size="sm" variant="outline">Customer view</Button></Link>
+              </div>
+            </section>
+          )}
 
           {/* Chef requisition block */}
           <section className="rounded-md border border-ik-rule bg-ik-card p-4">
@@ -260,6 +277,13 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               {order.customer.gstin && <div className="font-mono text-[12px] text-ik-ink-2">{order.customer.gstin}</div>}
               {order.customer.contactName && <div>{order.customer.contactName}</div>}
               {order.customer.phone && <div className="text-ik-ink-2">{order.customer.phone}</div>}
+              {order.customer.email ? (
+                <div className="text-ik-ink-2">{order.customer.email}</div>
+              ) : (
+                <div className="rounded bg-amber-wash px-2 py-1 text-[11.5px] text-amber">
+                  ⚠ No email on file — proforma won&apos;t be auto-sent. Add an email on the customer page.
+                </div>
+              )}
             </div>
           </section>
 

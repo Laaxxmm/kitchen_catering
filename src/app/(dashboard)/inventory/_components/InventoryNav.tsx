@@ -1,20 +1,35 @@
 import Link from "next/link";
+import type { Role } from "@prisma/client";
 
 interface Props {
-  active: "ingredients" | "receipts" | "issues" | "audit";
+  active: "ingredients" | "receipts" | "issues" | "adjustments" | "audit";
+  role?: Role;
 }
 
-const TABS = [
+const BASE_TABS = [
   { key: "ingredients", label: "Ingredients", href: "/inventory/ingredients" },
-  { key: "receipts", label: "Receipts", href: "/inventory/receipts" },
+  { key: "receipts", label: "Receipts (add stock)", href: "/inventory/receipts" },
   { key: "issues", label: "Issues", href: "/inventory/issues" },
   { key: "audit", label: "Monthly audit", href: "/inventory/audit" },
 ] as const;
 
-export function InventoryNav({ active }: Props) {
+const ADJUSTMENTS_TAB = {
+  key: "adjustments",
+  label: "Stock adjustments",
+  href: "/inventory/adjustments",
+} as const;
+
+export function InventoryNav({ active, role }: Props) {
+  // Adjustments tab is admin/manager only — storekeeper doesn't see it,
+  // matching the middleware gate on /inventory/adjustments.
+  const tabs =
+    role === "ADMIN" || role === "MANAGER"
+      ? [...BASE_TABS.slice(0, 3), ADJUSTMENTS_TAB, BASE_TABS[3]]
+      : BASE_TABS;
+
   return (
-    <nav className="mb-4 flex gap-1 border-b border-ik-rule text-[13px]">
-      {TABS.map((t) => {
+    <nav className="mb-4 flex flex-wrap gap-1 border-b border-ik-rule text-[13px]">
+      {tabs.map((t) => {
         const isActive = t.key === active;
         return (
           <Link
