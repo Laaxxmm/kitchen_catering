@@ -65,10 +65,14 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         description={`${invoice.customer.name} · ${invoice.kind} · ${formatINR(invoice.grandTotal)}`}
         actions={
           <div className="flex gap-2">
+            <Link href={`/api/invoices/${invoice.id}/pdf`} target="_blank"><Button variant="outline">Download PDF</Button></Link>
             <Link href={`/i/${invoice.shareToken}`} target="_blank"><Button variant="outline">Public view</Button></Link>
             <Link href="/invoices"><Button variant="outline">Back</Button></Link>
             {invoice.status === CustomerInvoiceStatus.DRAFT && canIssue && (
-              <form action={doIssue}><Button type="submit">Issue invoice</Button></form>
+              <>
+                <Link href={`/invoices/${invoice.id}/edit`}><Button variant="outline">Edit lines</Button></Link>
+                <form action={doIssue}><Button type="submit">Issue invoice</Button></form>
+              </>
             )}
           </div>
         }

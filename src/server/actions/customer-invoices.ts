@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { randomBytes } from "node:crypto";
+import { Decimal } from "decimal.js";
 import {
   CustomerInvoiceKind,
   CustomerInvoiceStatus,
@@ -132,6 +133,212 @@ export async function createCustomerInvoiceFromOrder(orderId: string) {
   revalidatePath("/invoices");
   revalidatePath(`/orders/${orderId}`);
   return { id: result.id, invoiceNo: result.invoiceNo };
+}
+
+// ─── Standalone invoice (ad-hoc, no order) ──────────────────────────────
+
+interface StandaloneLineInput {
+  description: string;
+  hsnSac?: string | null;
+  quantity: string;
+  unit: string;
+  unitPrice: string;
+  discountPct?: string;
+  gstRatePct?: string;
+}
+
+interface StandaloneInvoiceInput {
+  customerId: string;
+  placeOfSupplyStateCode: string;
+  dueDate?: string | null;
+  notes?: string | null;
+  termsMd?: string | null;
+  poRef?: string | null;
+  lines: StandaloneLineInput[];
+}
+
+export async function createStandaloneCustomerInvoice(raw: StandaloneInvoiceInput) {
+  const session = await requireRole(WRITE_ROLES);
+  if (!raw.customerId) throw new Error("Customer is required");
+  if (!raw.lines || raw.lines.length === 0) throw new Error("Add at least one line");
+
+  const result = await db.$transaction(async (tx) => {
+    const customer = await tx.customer.findUnique({
+      where: { id: raw.customerId },
+      select: { id: true },
+    });
+    if (!customer) throw new Error("Customer not found");
+
+    const supplierState = indefineStateCode();
+    const summary = summarise({
+      lines: raw.lines.map((l) => ({
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        discountPct: l.discountPct ?? "0",
+        gstRatePct: l.gstRatePct ?? "0",
+      })),
+      supplierStateCode: supplierState,
+      placeOfSupplyStateCode: raw.placeOfSupplyStateCode,
+    });
+
+    const invoiceNo = await nextCustomerInvoiceNumber(tx);
+    const invoice = await tx.customerInvoice.create({
+      data: {
+        invoiceNo,
+        kind: CustomerInvoiceKind.ADHOC,
+        status: CustomerInvoiceStatus.DRAFT,
+        orderId: null,
+        customerId: raw.customerId,
+        placeOfSupplyStateCode: raw.placeOfSupplyStateCode,
+        subtotal: summary.subtotal.toString(),
+        cgst: summary.cgst.toString(),
+        sgst: summary.sgst.toString(),
+        igst: summary.igst.toString(),
+        taxTotal: summary.taxTotal.toString(),
+        grandTotal: summary.grandTotal.toString(),
+        eInvoiceStatus: EInvoiceStatus.NOT_REQUIRED,
+        createdById: session.user.id,
+        shareToken: newShareToken(),
+        dueAt: raw.dueDate ? new Date(raw.dueDate) : null,
+        notes: raw.notes ?? null,
+        termsMd: raw.termsMd ?? null,
+        poRef: raw.poRef ?? null,
+        lines: {
+          create: raw.lines.map((l, idx) => {
+            const q = new Decimal(l.quantity);
+            const u = new Decimal(l.unitPrice);
+            const d = new Decimal(l.discountPct ?? "0").div(100);
+            const g = new Decimal(l.gstRatePct ?? "0").div(100);
+            const sub = q.times(u).times(new Decimal(1).minus(d));
+            const tax = sub.times(g);
+            return {
+              sortOrder: idx,
+              description: l.description,
+              hsnSac: l.hsnSac ?? null,
+              quantity: l.quantity,
+              unit: l.unit,
+              unitPrice: l.unitPrice,
+              discountPct: l.discountPct ?? "0",
+              gstRatePct: l.gstRatePct ?? "0",
+              lineSubtotal: sub.toDecimalPlaces(2).toString(),
+              lineTax: tax.toDecimalPlaces(2).toString(),
+              lineTotal: sub.plus(tax).toDecimalPlaces(2).toString(),
+            };
+          }),
+        },
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "CUSTOMER_INVOICE_CREATED",
+        entity: "CustomerInvoice",
+        entityId: invoice.id,
+        payloadHash: sha256Json({ invoiceNo, kind: "ADHOC", grandTotal: summary.grandTotal.toString() }),
+      },
+    });
+    return invoice;
+  });
+
+  revalidatePath("/invoices");
+  return { id: result.id, invoiceNo: result.invoiceNo };
+}
+
+// ─── Edit lines on a DRAFT invoice ──────────────────────────────────────
+
+interface EditInvoiceInput {
+  placeOfSupplyStateCode?: string;
+  dueDate?: string | null;
+  notes?: string | null;
+  termsMd?: string | null;
+  poRef?: string | null;
+  lines: StandaloneLineInput[];
+}
+
+export async function updateDraftInvoice(id: string, input: EditInvoiceInput) {
+  const session = await requireRole(WRITE_ROLES);
+  if (!input.lines || input.lines.length === 0) throw new Error("Add at least one line");
+
+  await db.$transaction(async (tx) => {
+    const inv = await tx.customerInvoice.findUnique({
+      where: { id },
+      select: { id: true, status: true, placeOfSupplyStateCode: true },
+    });
+    if (!inv) throw new Error("Invoice not found");
+    if (inv.status !== CustomerInvoiceStatus.DRAFT) {
+      throw new AuthorizationError("Only DRAFT invoices can be edited. Cancel and re-create to amend a non-draft.");
+    }
+
+    const supplierState = indefineStateCode();
+    const pos = input.placeOfSupplyStateCode ?? inv.placeOfSupplyStateCode;
+    const summary = summarise({
+      lines: input.lines.map((l) => ({
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        discountPct: l.discountPct ?? "0",
+        gstRatePct: l.gstRatePct ?? "0",
+      })),
+      supplierStateCode: supplierState,
+      placeOfSupplyStateCode: pos,
+    });
+
+    // Replace all lines (simpler than diffing for the DRAFT case).
+    await tx.customerInvoiceLine.deleteMany({ where: { invoiceId: id } });
+    await tx.customerInvoiceLine.createMany({
+      data: input.lines.map((l, idx) => {
+        const q = new Decimal(l.quantity);
+        const u = new Decimal(l.unitPrice);
+        const d = new Decimal(l.discountPct ?? "0").div(100);
+        const g = new Decimal(l.gstRatePct ?? "0").div(100);
+        const sub = q.times(u).times(new Decimal(1).minus(d));
+        const tax = sub.times(g);
+        return {
+          invoiceId: id,
+          sortOrder: idx,
+          description: l.description,
+          hsnSac: l.hsnSac ?? null,
+          quantity: l.quantity,
+          unit: l.unit,
+          unitPrice: l.unitPrice,
+          discountPct: l.discountPct ?? "0",
+          gstRatePct: l.gstRatePct ?? "0",
+          lineSubtotal: sub.toDecimalPlaces(2).toString(),
+          lineTax: tax.toDecimalPlaces(2).toString(),
+          lineTotal: sub.plus(tax).toDecimalPlaces(2).toString(),
+        };
+      }),
+    });
+
+    await tx.customerInvoice.update({
+      where: { id },
+      data: {
+        placeOfSupplyStateCode: pos,
+        dueAt: input.dueDate ? new Date(input.dueDate) : null,
+        notes: input.notes ?? null,
+        termsMd: input.termsMd ?? null,
+        poRef: input.poRef ?? null,
+        subtotal: summary.subtotal.toString(),
+        cgst: summary.cgst.toString(),
+        sgst: summary.sgst.toString(),
+        igst: summary.igst.toString(),
+        taxTotal: summary.taxTotal.toString(),
+        grandTotal: summary.grandTotal.toString(),
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "CUSTOMER_INVOICE_DRAFT_UPDATED",
+        entity: "CustomerInvoice",
+        entityId: id,
+        payloadHash: sha256Json({ lines: input.lines.length, grandTotal: summary.grandTotal.toString() }),
+      },
+    });
+  });
+
+  revalidatePath("/invoices");
+  revalidatePath(`/invoices/${id}`);
 }
 
 export async function issueCustomerInvoice(id: string) {

@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { OrderStatus } from "@prisma/client";
+import { OrderStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { listOrders } from "@/server/actions/orders";
+import { auth } from "@/server/auth";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 
@@ -45,11 +46,15 @@ export default async function OrdersPage({
   const filter = sp.filter ?? "all";
   const myQueue = filter === "mine";
   const statuses = myQueue ? undefined : statusesForFilter(filter);
-  const orders = await listOrders({
-    myQueue,
-    status: statuses,
-    query: sp.q,
-  });
+  const [session, orders] = await Promise.all([
+    auth(),
+    listOrders({ myQueue, status: statuses, query: sp.q }),
+  ]);
+  const role = session?.user?.role;
+  // Only roles that can actually create an order see the New button.
+  // KITCHEN_HEAD / STORE_KEEPER / DELIVERY / ACCOUNTS can read orders
+  // but creating is SALES / MANAGER / ADMIN.
+  const canCreate = role === Role.ADMIN || role === Role.MANAGER || role === Role.SALES;
 
   return (
     <>
@@ -58,9 +63,11 @@ export default async function OrdersPage({
         title="Orders"
         description="Catering orders. Each goes through store approval, manager approval, requisition, production, delivery, invoice, payment."
         actions={
-          <Link href="/orders/new">
-            <Button>New order</Button>
-          </Link>
+          canCreate ? (
+            <Link href="/orders/new">
+              <Button>New order</Button>
+            </Link>
+          ) : null
         }
       />
 

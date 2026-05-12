@@ -1,24 +1,34 @@
 import Link from "next/link";
+import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { listCustomerInvoices } from "@/server/actions/customer-invoices";
+import { auth } from "@/server/auth";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
 export default async function InvoicesPage() {
-  const invoices = await listCustomerInvoices();
+  const [session, invoices] = await Promise.all([auth(), listCustomerInvoices()]);
+  const role = session?.user?.role;
+  const canCreate = role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS;
   return (
     <>
       <PageHeader
         eyebrow="Finance"
         title="Tax invoices"
-        description="Customer invoices, GST broken into CGST+SGST (intra-state) or IGST (inter-state). E-invoice IRN is Phase 3."
+        description="Customer invoices, GST broken into CGST+SGST (intra-state) or IGST (inter-state). Generate from a delivered order or create a standalone ad-hoc invoice."
+        actions={
+          canCreate ? (
+            <Link href="/invoices/new"><Button>New standalone invoice</Button></Link>
+          ) : null
+        }
       />
       {invoices.length === 0 ? (
-        <p className="text-[13px] text-ik-ink-3">No invoices yet. Generate one from a DELIVERED order.</p>
+        <p className="text-[13px] text-ik-ink-3">No invoices yet. Generate one from a DELIVERED order, or create an ad-hoc invoice.</p>
       ) : (
         <Table>
           <TableHeader>
