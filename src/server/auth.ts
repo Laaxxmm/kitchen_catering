@@ -47,27 +47,46 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       async authorize(raw) {
         const parsed = credentialsSchema.safeParse(raw);
-        if (!parsed.success) return null;
+        if (!parsed.success) {
+          console.warn("[login] payload failed Zod parse", parsed.error.issues);
+          return null;
+        }
 
-        // Rate-limit per email: 5 attempts per minute. Stops credential
-        // brute-force without making the legitimate user's bad-typo retry
-        // loop feel sluggish. Returning `null` here surfaces as "Invalid
-        // credentials" which is what we want — don't disclose the limit.
         const limit = rateLimit(
           `web-login:email:${parsed.data.email.toLowerCase()}`,
           5,
           60_000,
         );
-        if (!limit.allowed) return null;
+        if (!limit.allowed) {
+          console.warn("[login] rate-limited", parsed.data.email);
+          return null;
+        }
 
         const user = await db.user.findUnique({
           where: { email: parsed.data.email },
         });
-        if (!user || !user.active) return null;
+        if (!user) {
+          console.warn("[login] no user with email:", parsed.data.email);
+          return null;
+        }
+        if (!user.active) {
+          console.warn("[login] user is inactive:", parsed.data.email);
+          return null;
+        }
 
         const ok = await bcrypt.compare(parsed.data.password, user.passwordHash);
-        if (!ok) return null;
+        if (!ok) {
+          console.warn(
+            "[login] bcrypt mismatch for",
+            parsed.data.email,
+            "(hash prefix",
+            user.passwordHash.slice(0, 7),
+            ")",
+          );
+          return null;
+        }
 
+        console.log("[login] OK", parsed.data.email, "role", user.role);
         return {
           id: user.id,
           email: user.email,
