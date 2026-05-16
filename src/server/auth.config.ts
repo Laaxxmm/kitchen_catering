@@ -15,7 +15,15 @@ import type { Role } from "@prisma/client";
  */
 const authConfig = {
   session: { strategy: "jwt" },
-  pages: { signIn: "/login" },
+  pages: {
+    signIn: "/login",
+    // Bounce auth errors back to /login (with the error code in the
+    // query string) instead of NextAuth's default /api/auth/error,
+    // which on next-auth v5 + app-router blows up with
+    //   `UnknownAction: Cannot parse action at /api/auth/error`
+    // and surfaces as a generic "Bad Request" to the user.
+    error: "/login",
+  },
   providers: [],
   callbacks: {
     async jwt({ token, user }) {
