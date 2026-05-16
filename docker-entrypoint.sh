@@ -1,78 +1,74 @@
 #!/bin/sh
-# SAB India Tracker — container entrypoint.
-# `set -x` traces every command to stderr so Railway's Deploy Logs tab
-# shows exactly what the container is doing line-by-line. Remove later
-# once boot is reliable.
+# Green Park Eco Hotel — container entrypoint.
+#
+# Boot order:
+#   1. validate critical env vars (shell — catches missing values fast)
+#   2. apply DB migrations (prisma migrate deploy)
+#   3. optionally seed default users (SEED_DB=true — first deploy only)
+#   4. start Next.js
+#
+# Fails loud and fast with a clear message on any step, so Railway's
+# Deploy Logs pinpoint the problem instead of a generic crashloop.
 
-# Print a sentinel BEFORE anything else, to both stdout and stderr,
-# so we can tell whether the script was ever exec'd vs. the runtime
-# refusing to start the container at all.
-echo "=== SAB ENTRYPOINT REACHED ==="
-echo "=== SAB ENTRYPOINT REACHED ===" 1>&2
-
-set -ex
+set -e
 
 PORT="${PORT:-8080}"
+HOSTNAME="${HOSTNAME:-0.0.0.0}"
 
 echo "============================================================"
-echo "  SAB India Tracker — boot"
-echo "============================================================"
-echo "  NODE_ENV  = ${NODE_ENV:-<unset>}"
-echo "  PORT      = ${PORT}"
-echo "  HOSTNAME  = ${HOSTNAME:-<unset>}"
-echo "  PWD       = $(pwd)"
-echo "  whoami    = $(whoami)"
-echo "  id        = $(id)"
-echo "  node      = $(node --version 2>&1 || echo MISSING)"
-echo "  files in /app:"
-ls -la /app | head -20
-echo "  DATABASE_URL is $([ -n "${DATABASE_URL}" ] && echo SET || echo UNSET)"
-echo "  NEXTAUTH_SECRET is $([ -n "${NEXTAUTH_SECRET}" ] && echo SET || echo UNSET)"
-echo "  AUTH_SECRET is $([ -n "${AUTH_SECRET}" ] && echo SET || echo UNSET)"
-echo "  NEXTAUTH_URL = ${NEXTAUTH_URL:-<unset>}"
-echo "  SEED_DB   = ${SEED_DB:-<unset>}"
-echo "  AI_ENABLED = ${AI_ENABLED:-<unset>}  (must be exactly 'true' to enable AI)"
-echo "  ANTHROPIC_API_KEY is $([ -n "${ANTHROPIC_API_KEY}" ] && echo SET || echo UNSET)"
-echo "  AI_MODEL_DEFAULT = ${AI_MODEL_DEFAULT:-<unset>}"
-echo "  AI_MODEL_FAST = ${AI_MODEL_FAST:-<unset>}"
+echo "  Green Park Eco Hotel — container boot"
+echo "------------------------------------------------------------"
+echo "  NODE_ENV     = ${NODE_ENV:-development}"
+echo "  PORT         = ${PORT}"
+echo "  HOSTNAME     = ${HOSTNAME}"
+echo "  NEXTAUTH_URL = ${NEXTAUTH_URL:-<default>}"
+echo "  DATABASE_URL    $([ -n "${DATABASE_URL}"     ] && echo set || echo MISSING)"
+echo "  AUTH_SECRET     $([ -n "${AUTH_SECRET}"      ] && echo set || echo MISSING)"
+echo "  SEED_DB      = ${SEED_DB:-false}"
 echo "============================================================"
 
-if [ -z "$DATABASE_URL" ]; then
-  echo "FATAL: DATABASE_URL is not set."
-  echo "       In Railway service Variables, set:"
+# ---- 1/4 env validation ----
+echo "[1/4] Validating critical environment variables"
+MISSING=""
+[ -z "${DATABASE_URL}" ] && MISSING="${MISSING} DATABASE_URL"
+[ -z "${AUTH_SECRET}"  ] && MISSING="${MISSING} AUTH_SECRET"
+if [ -n "${MISSING}" ]; then
+  echo "FATAL: missing environment variables:${MISSING}"
+  echo "       Set them in Railway → service → Variables tab."
+  echo "       For DATABASE_URL use the reference syntax:"
   echo "         DATABASE_URL = \${{ Postgres.DATABASE_URL }}"
-  echo "       (with the curly-brace reference syntax — Railway expands it)"
+  echo "       For AUTH_SECRET generate via:  openssl rand -base64 32"
   exit 1
 fi
+SECRET_LEN=$(printf '%s' "${AUTH_SECRET}" | wc -c | tr -d ' ')
+if [ "${SECRET_LEN}" -lt 32 ]; then
+  echo "FATAL: AUTH_SECRET is too short (${SECRET_LEN} chars). Needs at least 32."
+  echo "       Generate via:  openssl rand -base64 32"
+  exit 1
+fi
+echo "      OK"
+echo
 
-# Disable -e for migrations so we can print our own message on failure.
-set +e
-echo "==> [1/3] prisma migrate deploy"
+# ---- 2/4 migrations ----
+echo "[2/4] Applying Prisma migrations"
 node node_modules/prisma/build/index.js migrate deploy
-MIGRATE_RC=$?
-set -e
-if [ "$MIGRATE_RC" -ne 0 ]; then
-  echo "FATAL: prisma migrate deploy failed (rc=$MIGRATE_RC)"
-  echo "       See the Prisma error above. Common causes:"
-  echo "       - DATABASE_URL host unreachable from this container"
-  echo "       - DB user lacks CREATE/ALTER permissions"
-  echo "       - _prisma_migrations table left dirty by a previous failed deploy"
-  exit 1
-fi
+echo
 
-if [ "$SEED_DB" = "true" ]; then
-  echo "==> [2/3] SEED_DB=true -> running prisma/seed.ts"
-  set +e
-  node node_modules/tsx/dist/cli.mjs prisma/seed.ts
-  SEED_RC=$?
-  set -e
-  if [ "$SEED_RC" -ne 0 ]; then
-    echo "    Seed exited rc=$SEED_RC. Continuing — likely already seeded."
+# ---- 3/4 optional seed ----
+if [ "${SEED_DB}" = "true" ]; then
+  echo "[3/4] SEED_DB=true — running prisma/seed.ts (one-shot)"
+  # Seed is idempotent (upserts) so re-runs are safe. We still don't
+  # fail the boot if it errors — that way a stale SEED_DB=true flag
+  # can't bring the site down.
+  if ! node node_modules/tsx/dist/cli.mjs prisma/seed.ts; then
+    echo "    Seed exited non-zero. Continuing — likely already seeded."
   fi
+  echo
 else
-  echo "==> [2/3] skipping seed (SEED_DB != true)"
+  echo "[3/4] SEED_DB!=true — skipping seed (normal for redeploys)"
+  echo
 fi
 
-echo "==> [3/3] next start on 0.0.0.0:${PORT}"
-# Bypass npm — call next directly so no script arg parsing can interfere.
-exec node node_modules/next/dist/bin/next start --hostname 0.0.0.0 --port "$PORT"
+# ---- 4/4 server ----
+echo "[4/4] Starting Next.js on ${HOSTNAME}:${PORT}"
+exec node node_modules/next/dist/bin/next start --hostname "${HOSTNAME}" --port "${PORT}"

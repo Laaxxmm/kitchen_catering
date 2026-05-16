@@ -1,15 +1,21 @@
 {
-  "name": "SAB India Tracker",
-  "short_name": "SAB Tracker",
-  "description": "Punch in/out and timesheets for fire-safety installation teams.",
-  "start_url": "/punch",
+  "name": "Green Park Eco Hotel",
+  "short_name": "Green Park Eco Hotel",
+  "description": "B2B catering operations — orders, kitchen, deliveries, invoicing and P&L.",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f7f4ee",
-  "theme_color": "#d97757",
+  "background_color": "#FAF8F2",
+  "theme_color": "#0F6E56",
   "orientation": "portrait",
-  "categories": ["productivity", "business"],
+  "categories": ["business", "productivity", "food"],
   "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
     {
       "src": "/icons/icon-192.png",
       "sizes": "192x192",

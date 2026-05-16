@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Decimal } from "decimal.js";
 import { Button } from "@/components/ui/button";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Ingredient { id: string; name: string; sku: string; unit: string; avgCost: string }
 interface OrderItem { id: string; dishName: string }
@@ -60,6 +61,7 @@ export function RequisitionDraftForm({ ingredients, orderItems, onSubmit }: Prop
       try {
         await onSubmit(payload);
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

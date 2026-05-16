@@ -5,9 +5,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  assignChef,
   getProductionJob,
-  listChefs,
   markProductionItemReady,
   startProductionItem,
 } from "@/server/actions/production-jobs";
@@ -18,13 +16,9 @@ export const dynamic = "force-dynamic";
 
 export default async function KitchenJobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [job, chefs] = await Promise.all([getProductionJob(id), listChefs()]);
+  const job = await getProductionJob(id);
   if (!job) notFound();
 
-  async function doAssign(itemId: string, chefUserId: string) {
-    "use server";
-    await assignChef({ itemId, chefUserId });
-  }
   async function doStart(itemId: string) {
     "use server";
     await startProductionItem(itemId);
@@ -59,7 +53,6 @@ export default async function KitchenJobDetailPage({ params }: { params: Promise
           <TableRow>
             <TableHead>Dish</TableHead>
             <TableHead className="text-right">Portions</TableHead>
-            <TableHead>Chef</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Action</TableHead>
           </TableRow>
@@ -69,29 +62,13 @@ export default async function KitchenJobDetailPage({ params }: { params: Promise
             <TableRow key={it.id}>
               <TableCell>{it.dish.name}</TableCell>
               <TableCell className="text-right font-mono">{it.portions.toString()}</TableCell>
-              <TableCell>
-                <ItemControls
-                  itemId={it.id}
-                  chefUserId={it.chefUserId}
-                  status={it.status}
-                  chefs={chefs}
-                  onAssign={doAssign}
-                  onStart={doStart}
-                  onReady={doReady}
-                  mode="assign"
-                />
-              </TableCell>
               <TableCell><StatusBadge status={it.status} /></TableCell>
               <TableCell>
                 <ItemControls
                   itemId={it.id}
-                  chefUserId={it.chefUserId}
                   status={it.status}
-                  chefs={chefs}
-                  onAssign={doAssign}
                   onStart={doStart}
                   onReady={doReady}
-                  mode="actions"
                 />
               </TableCell>
             </TableRow>

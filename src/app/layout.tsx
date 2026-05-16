@@ -18,18 +18,23 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Indefine Kitchen",
+  title: "Green Park Eco Hotel",
   description:
     "B2B catering operations — orders, kitchen, deliveries, invoicing and P&L.",
   manifest: "/manifest.webmanifest",
-  applicationName: "Indefine Kitchen",
+  applicationName: "Green Park Eco Hotel",
   appleWebApp: {
     capable: true,
-    title: "Indefine Kitchen",
+    title: "Green Park Eco Hotel",
     statusBarStyle: "default",
   },
   icons: {
+    // SVG first — modern browsers prefer it because it scales cleanly
+    // from a 16×16 favicon up to a 512×512 app tile. The PNG fallbacks
+    // keep older browsers + iOS happy until we regenerate them from the
+    // new mark.
     icon: [
+      { url: "/icons/icon.svg", type: "image/svg+xml" },
       { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
       { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
     ],

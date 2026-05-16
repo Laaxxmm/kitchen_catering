@@ -37,9 +37,11 @@ export default async function DeliveryDetailPage({ params }: { params: Promise<{
     "use server";
     await markDeliveryArrived(id);
   }
-  async function doOTP(otp: string) {
+  async function doOTP() {
     "use server";
-    await confirmDeliveryOTP(id, { otp });
+    // OTP step retired — confirmation is a single click. Pass an empty
+    // payload; the server treats absent OTP as "no readback required".
+    await confirmDeliveryOTP(id, {});
   }
   async function doFail(reason: string) {
     "use server";
@@ -73,7 +75,10 @@ export default async function DeliveryDetailPage({ params }: { params: Promise<{
               {delivery.arrivedAt && <li><span className="text-ik-ink-3">Arrived:</span> <span className="font-mono">{formatIST(delivery.arrivedAt)}</span></li>}
               {delivery.deliveredAt && <li><span className="text-ik-ink-3">Delivered:</span> <span className="font-mono">{formatIST(delivery.deliveredAt)}</span></li>}
               {delivery.failureReason && <li className="text-alert">Failure: {delivery.failureReason}</li>}
-              {delivery.otpAttempts > 0 && <li className="text-amber">OTP attempts: {delivery.otpAttempts}/3</li>}
+              {/* Legacy OTP-attempt counter (pre-retirement deliveries only). */}
+              {delivery.otpAttempts > 0 && (
+                <li className="text-amber">Failed verification attempts: {delivery.otpAttempts}/3</li>
+              )}
             </ol>
           </div>
 

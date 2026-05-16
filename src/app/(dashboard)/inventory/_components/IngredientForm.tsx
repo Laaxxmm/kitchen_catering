@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { IngredientInputT } from "@/lib/validators";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   defaults?: Partial<IngredientInputT>;
@@ -48,6 +49,7 @@ export function IngredientForm({ defaults, onSubmit, submitLabel = "Save", redir
         if (redirectOnSuccess) router.push(redirectOnSuccess.replace(":id", result.id));
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

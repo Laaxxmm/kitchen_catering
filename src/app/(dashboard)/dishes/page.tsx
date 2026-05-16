@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { auth } from "@/server/auth";
 import { listDishes } from "@/server/actions/dishes";
 
 export const dynamic = "force-dynamic";
@@ -12,22 +14,30 @@ export default async function DishesPage({
   searchParams: Promise<{ q?: string; inactive?: string }>;
 }) {
   const sp = await searchParams;
+  const [session, dishes] = await Promise.all([
+    auth(),
+    listDishes({ query: sp.q, active: sp.inactive === "1" ? undefined : true }),
+  ]);
+  const role = session?.user?.role as Role | undefined;
+  // Chef sees the menu as read-only information — no prices, no
+  // categorisation by tax bracket, no add/edit. They just need the
+  // catalogue of what we cook.
+  const isChef = role === Role.KITCHEN_HEAD;
+  const canCreate = role === Role.ADMIN || role === Role.MANAGER || role === Role.SALES;
   const includeInactive = sp.inactive === "1";
-  const dishes = await listDishes({
-    query: sp.q,
-    active: includeInactive ? undefined : true,
-  });
 
   return (
     <>
       <PageHeader
-        eyebrow="Sales"
+        eyebrow={isChef ? "Kitchen" : "Sales"}
         title="Dishes"
-        description="Catalogue of menu items with unit price and GST rate."
+        description={isChef ? "Menu reference — what we cook." : "Catalogue of menu items with unit price and GST rate."}
         actions={
-          <Link href="/dishes/new">
-            <Button>New dish</Button>
-          </Link>
+          canCreate ? (
+            <Link href="/dishes/new">
+              <Button>New dish</Button>
+            </Link>
+          ) : null
         }
       />
 
@@ -55,8 +65,8 @@ export default async function DishesPage({
               <TableHead>Name</TableHead>
               <TableHead>Category</TableHead>
               <TableHead>Unit</TableHead>
-              <TableHead className="text-right">Price</TableHead>
-              <TableHead className="text-right">GST %</TableHead>
+              {!isChef && <TableHead className="text-right">Price</TableHead>}
+              {!isChef && <TableHead className="text-right">GST %</TableHead>}
               <TableHead>Status</TableHead>
             </TableRow>
           </TableHeader>
@@ -71,8 +81,8 @@ export default async function DishesPage({
                 </TableCell>
                 <TableCell>{d.category ?? "—"}</TableCell>
                 <TableCell>{d.unit}</TableCell>
-                <TableCell className="text-right font-mono">₹{d.unitPrice.toString()}</TableCell>
-                <TableCell className="text-right font-mono">{d.gstRatePct.toString()}</TableCell>
+                {!isChef && <TableCell className="text-right font-mono">₹{d.unitPrice.toString()}</TableCell>}
+                {!isChef && <TableCell className="text-right font-mono">{d.gstRatePct.toString()}</TableCell>}
                 <TableCell>
                   {d.active ? (
                     <span className="text-positive">Active</span>

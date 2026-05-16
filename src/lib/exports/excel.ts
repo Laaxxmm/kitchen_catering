@@ -14,7 +14,7 @@ export interface SheetSpec {
  */
 export async function buildWorkbook(sheets: SheetSpec[]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Indefine Kitchen";
+  wb.creator = "Green Park Eco Hotel";
   wb.created = new Date();
 
   for (const spec of sheets) {

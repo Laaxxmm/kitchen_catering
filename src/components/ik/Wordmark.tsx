@@ -1,6 +1,7 @@
-// Green-square brand mark + "Indefine Kitchen" lockup.
+// Brand mark + "Green Park Eco Hotel" lockup.
+// The mark is a stylised chef's toque on a brand-green rounded square —
+// reads as "kitchen" at any size from 14px favicon up to 36px hero.
 // Two tones: ink (paper-cream backgrounds) and light (dark surfaces / topbar).
-// Matches SAB's proportions; only the colours, glyph, and text differ.
 
 type Tone = "ink" | "light";
 
@@ -22,22 +23,7 @@ export function Wordmark({ size = 18, tone = "ink", showTag = true }: WordmarkPr
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: size * 0.55 }}>
-      <svg width={glyph} height={glyph} viewBox="0 0 40 40" style={{ flex: "none" }}>
-        <rect x="2" y="2" width="36" height="36" rx="6" fill={ACCENT} />
-        {/* Stylised basil leaf */}
-        <path
-          d="M20 9 C13 13, 11 22, 14 28 C16 31, 19 31, 21 30 C25 28, 28 22, 28 16 C28 12, 24 9, 20 9 Z"
-          fill="#fff"
-          opacity="0.95"
-        />
-        <path
-          d="M20 11 L20 28"
-          stroke={ACCENT}
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          fill="none"
-        />
-      </svg>
+      <ChefToqueMark size={glyph} />
       <div style={{ lineHeight: 1.05 }}>
         <div
           style={{
@@ -48,9 +34,9 @@ export function Wordmark({ size = 18, tone = "ink", showTag = true }: WordmarkPr
             color,
           }}
         >
-          Indefine{" "}
+          Green Park{" "}
           <span style={{ fontWeight: 500, color: tone === "ink" ? ACCENT_INK : "#fff" }}>
-            Kitchen
+            Eco Hotel
           </span>
         </div>
         {showTag && (
@@ -68,5 +54,26 @@ export function Wordmark({ size = 18, tone = "ink", showTag = true }: WordmarkPr
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The mark on its own — chef's toque on a brand-green rounded square.
+ * Exported so the sidebar collapsed-state, login screen, and any
+ * future favicon-style usage can share one drawing.
+ */
+export function ChefToqueMark({ size = 32 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" style={{ flex: "none" }} aria-hidden>
+      <rect x="2" y="2" width="36" height="36" rx="6" fill={ACCENT} />
+      {/* Hat puff — three overlapping circles for the classic "cloud" silhouette */}
+      <circle cx="14" cy="20" r="5" fill="#fff" />
+      <circle cx="20" cy="17" r="6" fill="#fff" />
+      <circle cx="26" cy="20" r="5" fill="#fff" />
+      {/* Hat band */}
+      <rect x="10" y="25" width="20" height="6.5" rx="1.6" fill="#fff" />
+      {/* Subtle inner crease on the band */}
+      <line x1="11.5" y1="28.25" x2="28.5" y2="28.25" stroke={ACCENT} strokeOpacity="0.35" strokeWidth="0.7" />
+    </svg>
   );
 }

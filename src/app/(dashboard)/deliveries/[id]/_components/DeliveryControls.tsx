@@ -1,24 +1,24 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { DeliveryStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   status: DeliveryStatus;
   onDispatch: () => Promise<void>;
   onArrived: () => Promise<void>;
-  onConfirmOTP: (otp: string) => Promise<void>;
+  /** OTP-less confirm. Name kept for backwards compat with the page shim. */
+  onConfirmOTP: () => Promise<void>;
   onFail: (reason: string) => Promise<void>;
 }
 
 export function DeliveryControls({ status, onDispatch, onArrived, onConfirmOTP, onFail }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const [otp, setOtp] = useState("");
 
   function call(fn: () => Promise<void>) {
     startTransition(async () => {
@@ -27,6 +27,7 @@ export function DeliveryControls({ status, onDispatch, onArrived, onConfirmOTP, 
         toast.success("Saved");
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Action failed");
       }
     });
@@ -44,20 +45,13 @@ export function DeliveryControls({ status, onDispatch, onArrived, onConfirmOTP, 
           <div>
             <Button variant="outline" disabled={pending} onClick={() => call(onArrived)}>Mark arrived</Button>
           </div>
-          <div className="flex items-end gap-2">
-            <div className="grid gap-1">
-              <label className="text-[11.5px] text-ik-ink-3">4-digit OTP</label>
-              <Input
-                value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                placeholder="0000"
-                inputMode="numeric"
-                className="w-24 text-center font-mono text-[16px] tracking-widest"
-              />
-            </div>
-            <Button disabled={pending || otp.length !== 4} onClick={() => call(() => onConfirmOTP(otp))}>
+          <div>
+            <Button disabled={pending} onClick={() => call(onConfirmOTP)}>
               Confirm delivery
             </Button>
+            <p className="mt-1 text-[11.5px] text-ik-ink-3">
+              On confirmation, the GST tax invoice is auto-generated and emailed to the customer.
+            </p>
           </div>
         </>
       )}

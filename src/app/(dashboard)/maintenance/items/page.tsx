@@ -1,0 +1,36 @@
+import Link from "next/link";
+import { Role } from "@prisma/client";
+import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
+import { gateRolePage } from "@/server/rbac";
+import { listMaintenanceItems } from "@/server/actions/maintenance";
+import { ItemsTable } from "./_components/ItemsTable";
+
+export const dynamic = "force-dynamic";
+
+export default async function MaintenanceItemsPage() {
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.MAINTENANCE_MANAGER]);
+  const items = await listMaintenanceItems({ activeOnly: false });
+  const serialised = items.map((i) => ({
+    id: i.id,
+    name: i.name,
+    sku: i.sku,
+    unit: i.unit,
+    category: i.category,
+    currentStock: i.currentStock.toString(),
+    minStock: i.minStock?.toString() ?? null,
+    active: i.active,
+  }));
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Maintenance"
+        title="Items"
+        description="Spares catalog — switches, pipes, bulbs, washers. Stock auto-updates from receipts and activity consumption."
+        actions={<Link href="/maintenance"><Button variant="outline" size="sm">← Back</Button></Link>}
+      />
+      <ItemsTable items={serialised} />
+    </>
+  );
+}

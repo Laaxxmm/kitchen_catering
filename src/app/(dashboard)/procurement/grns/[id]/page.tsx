@@ -30,6 +30,17 @@ export default async function GRNDetailPage({ params }: { params: Promise<{ id: 
         <StatusBadge status={grn.status} />
         {grn.receivedBy?.name && <span className="text-ik-ink-3">Received by {grn.receivedBy.name}</span>}
       </div>
+
+      <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">
+        <strong>Next:</strong> Stock and average cost have been updated automatically. When the vendor
+        sends their bill, record it on the Supplier bills page — the system will match it against this GRN
+        and the PO before allowing payment.
+        <div className="mt-2">
+          <Link href={`/procurement/vendor-bills/new?poId=${grn.poId}`}>
+            <Button size="sm" variant="outline">Record supplier bill</Button>
+          </Link>
+        </div>
+      </div>
       <Table>
         <TableHeader>
           <TableRow>

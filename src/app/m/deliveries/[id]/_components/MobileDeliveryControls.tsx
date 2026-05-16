@@ -5,9 +5,12 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { DeliveryStatus, PaymentMethod } from "@prisma/client";
 import { Button } from "@/components/ui/button";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface OTPPayload {
-  otp: string;
+  // OTP step retired — kept on the type so the page-level shim stays
+  // shape-compatible; always sent as `undefined`.
+  otp?: string;
   paymentCollected: boolean;
   paymentAmount?: string;
   paymentMethod?: PaymentMethod;
@@ -35,7 +38,6 @@ const METHODS: { value: PaymentMethod; label: string }[] = [
 export function MobileDeliveryControls({ status, onDispatch, onArrived, onConfirmOTP, onFail }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const [otp, setOtp] = useState("");
   const [collected, setCollected] = useState(false);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("CASH");
@@ -48,12 +50,13 @@ export function MobileDeliveryControls({ status, onDispatch, onArrived, onConfir
         toast.success("Saved");
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Failed");
       }
     });
   }
 
-  function submitOTP() {
+  function submitDelivery() {
     if (collected) {
       const amt = Number(amount);
       if (!amount || isNaN(amt) || amt <= 0) {
@@ -63,7 +66,6 @@ export function MobileDeliveryControls({ status, onDispatch, onArrived, onConfir
     }
     call(() =>
       onConfirmOTP({
-        otp,
         paymentCollected: collected,
         paymentAmount: collected ? amount : undefined,
         paymentMethod: collected ? method : undefined,
@@ -86,16 +88,6 @@ export function MobileDeliveryControls({ status, onDispatch, onArrived, onConfir
             Mark arrived
           </Button>
           <div className="grid gap-2">
-            <label className="text-[11.5px] text-ik-ink-3">4-digit OTP from recipient</label>
-            <input
-              value={otp}
-              onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 4))}
-              placeholder="0000"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              className="h-12 w-full rounded-md border border-ik-rule bg-ik-card px-3 text-center font-mono text-[24px] tracking-widest"
-            />
-
             {/* Payment-on-delivery */}
             <label className="mt-2 flex items-center gap-2 text-[12.5px]">
               <input
@@ -145,8 +137,8 @@ export function MobileDeliveryControls({ status, onDispatch, onArrived, onConfir
 
             <Button
               className="h-11 w-full"
-              disabled={pending || otp.length !== 4}
-              onClick={submitOTP}
+              disabled={pending}
+              onClick={submitDelivery}
             >
               Confirm delivery{collected ? " + record payment" : ""}
             </Button>

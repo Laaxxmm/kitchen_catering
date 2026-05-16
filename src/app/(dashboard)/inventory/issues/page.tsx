@@ -1,6 +1,7 @@
 import Link from "next/link";
-import type { Role } from "@prisma/client";
+import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { auth } from "@/server/auth";
 import { listRecentIssues } from "@/server/actions/inventory";
@@ -18,7 +19,12 @@ export default async function IssuesPage() {
       <PageHeader
         eyebrow="Operations"
         title="Issues"
-        description="Stock issued to orders. Most are auto-posted by the Chef Requisition workflow; direct issues are reserved for emergencies."
+        description="Stock issued to orders. Most are auto-posted by the Chef Requisition workflow; direct issues capture extras outside that flow so the order's cost stays accurate."
+        actions={
+          role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER || role === Role.ACCOUNTS ? (
+            <Link href="/inventory/issues/new"><Button>Record stock used</Button></Link>
+          ) : null
+        }
       />
       <InventoryNav active="issues" role={role} />
 

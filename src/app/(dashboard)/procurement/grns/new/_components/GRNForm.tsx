@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface POLine {
   id: string;
@@ -51,6 +52,7 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
       try {
         await onSubmit({ poId, notes: notes || null, lines: payload });
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

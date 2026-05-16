@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { auth } from "@/server/auth";
 import { deactivateDish, getDish, updateDish } from "@/server/actions/dishes";
 import { DishForm } from "../_components/DishForm";
 import { getSettingBool } from "@/lib/settings";
@@ -12,11 +14,16 @@ export const dynamic = "force-dynamic";
 
 export default async function DishDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [dish, recipesEnabled] = await Promise.all([
+  const [dish, recipesEnabled, session] = await Promise.all([
     getDish(id),
     getSettingBool("recipe.suggestionsEnabled"),
+    auth(),
   ]);
   if (!dish) notFound();
+  const role = session?.user?.role as Role | undefined;
+  // Chef sees the dish as read-only information — no price, no GST, no
+  // edit. They only need to know name + unit + recipe to cook it.
+  const isChef = role === Role.KITCHEN_HEAD;
 
   async function update(input: DishInputT) {
     "use server";
@@ -37,7 +44,7 @@ export default async function DishDetailPage({ params }: { params: Promise<{ id:
         actions={
           <div className="flex gap-2">
             <Link href="/dishes"><Button variant="outline">Back</Button></Link>
-            {dish.active && (
+            {!isChef && dish.active && (
               <form action={deactivate}>
                 <Button variant="outline" type="submit">Deactivate</Button>
               </form>
@@ -46,20 +53,43 @@ export default async function DishDetailPage({ params }: { params: Promise<{ id:
         }
       />
 
-      <DishForm
-        defaults={{
-          code: dish.code,
-          name: dish.name,
-          category: dish.category,
-          description: dish.description,
-          unitPrice: dish.unitPrice.toString(),
-          unit: dish.unit,
-          hsnSac: dish.hsnSac,
-          gstRatePct: dish.gstRatePct.toString(),
-        }}
-        onSubmit={update}
-        submitLabel="Save changes"
-      />
+      {isChef ? (
+        // Chef-friendly read-only summary. Price + GST deliberately omitted.
+        <section className="grid max-w-2xl gap-2 rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+          <div className="flex justify-between">
+            <span className="text-ik-ink-3">Name</span>
+            <span className="text-ik-ink">{dish.name}</span>
+          </div>
+          {dish.category && (
+            <div className="flex justify-between">
+              <span className="text-ik-ink-3">Category</span>
+              <span className="text-ik-ink">{dish.category}</span>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span className="text-ik-ink-3">Unit</span>
+            <span className="text-ik-ink">{dish.unit}</span>
+          </div>
+          {dish.description && (
+            <div className="mt-2 border-t border-ik-rule pt-2 text-ik-ink-2">{dish.description}</div>
+          )}
+        </section>
+      ) : (
+        <DishForm
+          defaults={{
+            code: dish.code,
+            name: dish.name,
+            category: dish.category,
+            description: dish.description,
+            unitPrice: dish.unitPrice.toString(),
+            unit: dish.unit,
+            hsnSac: dish.hsnSac,
+            gstRatePct: dish.gstRatePct.toString(),
+          }}
+          onSubmit={update}
+          submitLabel="Save changes"
+        />
+      )}
 
       <section className="mt-8 max-w-3xl">
         <h2 className="mb-2 font-medium text-[15px] text-ik-ink">Recipe</h2>

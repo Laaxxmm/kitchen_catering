@@ -8,6 +8,8 @@ import { OrderStatus } from "@prisma/client";
  */
 export const STATUS_LABEL: Record<OrderStatus, string> = {
   DRAFT: "Draft",
+  PENDING_ADMIN_APPROVAL: "Awaiting admin approval",
+  REJECTED_BY_ADMIN: "Rejected by admin",
   PENDING_CHEF_APPROVAL: "Awaiting chef approval",
   CHANGES_PROPOSED_BY_CHEF: "Changes proposed — manager to review",
   CHEF_APPROVED: "Chef approved",
@@ -35,6 +37,8 @@ export const STATUS_LABEL: Record<OrderStatus, string> = {
  */
 export const STATUS_TONE: Record<OrderStatus, "neutral" | "pending" | "positive" | "alert"> = {
   DRAFT: "neutral",
+  PENDING_ADMIN_APPROVAL: "pending",
+  REJECTED_BY_ADMIN: "alert",
   PENDING_CHEF_APPROVAL: "pending",
   CHANGES_PROPOSED_BY_CHEF: "pending",
   CHEF_APPROVED: "positive",
@@ -59,12 +63,15 @@ export const STATUS_TONE: Record<OrderStatus, "neutral" | "pending" | "positive"
 /**
  * The happy-path linear flow of an order, used to render the horizontal
  * stepper on the order detail page. Branch states (CHANGES_PROPOSED_BY_CHEF,
- * REJECTED_BY_MANAGER, CANCELLED) aren't in the line — when current status
- * is one of those, the stepper highlights the parent stage and shows the
+ * REJECTED_BY_*, CANCELLED) aren't in the line — when current status is
+ * one of those, the stepper highlights the parent stage and shows the
  * branch as a separate annotation.
+ *
+ * v3 adds an "Admin review" stop between Draft and Chef review.
  */
 export const STAGE_FLOW: Array<{ status: OrderStatus; short: string }> = [
   { status: OrderStatus.DRAFT, short: "Draft" },
+  { status: OrderStatus.PENDING_ADMIN_APPROVAL, short: "Admin review" },
   { status: OrderStatus.PENDING_CHEF_APPROVAL, short: "Chef review" },
   { status: OrderStatus.CHEF_REQUISITION_PENDING, short: "Requisition" },
   { status: OrderStatus.ISSUING, short: "Issuing" },
@@ -85,6 +92,8 @@ export function stageIndex(status: OrderStatus): number {
 /** Where the stepper should highlight when current is an off-path branch. */
 export function effectiveStageIndex(status: OrderStatus): number {
   switch (status) {
+    case OrderStatus.REJECTED_BY_ADMIN:
+      return stageIndex(OrderStatus.PENDING_ADMIN_APPROVAL);
     case OrderStatus.CHANGES_PROPOSED_BY_CHEF:
       return stageIndex(OrderStatus.PENDING_CHEF_APPROVAL);
     case OrderStatus.CHEF_APPROVED:

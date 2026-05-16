@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ChefRequisitionLineStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Decimal } from "decimal.js";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   lineId: string;
@@ -34,6 +35,7 @@ export function LineFulfilControls({ lineId, requestedQty, issuedQty, onHand, st
         toast.success("Saved");
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Action failed");
       }
     });
@@ -42,12 +44,19 @@ export function LineFulfilControls({ lineId, requestedQty, issuedQty, onHand, st
   if (status === ChefRequisitionLineStatus.ISSUED || status === ChefRequisitionLineStatus.CANCELLED) {
     return <span className="text-[12px] text-ik-ink-3">—</span>;
   }
-  if (status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT) {
-    return <span className="text-[12px] text-amber">Procurement</span>;
-  }
+
+  // Lines previously sent to procurement can still be issued once stock
+  // is back. Show an amber "Procurement" badge alongside the issue
+  // buttons so the storekeeper knows the line was originally flagged.
+  const wasAwaitingProcurement = status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT;
 
   return (
     <div className="flex flex-col gap-1 text-[12.5px]">
+      {wasAwaitingProcurement && (
+        <span className="self-start rounded-full bg-amber-wash px-2 py-0.5 text-[10.5px] font-medium text-amber">
+          Was sent to procurement — stock is back, you can issue now
+        </span>
+      )}
       <div className="flex flex-wrap gap-1">
         {fullPossible && (
           <Button
@@ -85,18 +94,20 @@ export function LineFulfilControls({ lineId, requestedQty, issuedQty, onHand, st
             </Button>
           </span>
         )}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={pending}
-          onClick={() => {
-            const reason = prompt("Reason for sending to procurement?");
-            if (reason && reason.trim()) call(() => onSendToProcurement(lineId, reason.trim()));
-          }}
-        >
-          Send to procurement
-        </Button>
+        {!wasAwaitingProcurement && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={pending}
+            onClick={() => {
+              const reason = prompt("Reason for sending to procurement?");
+              if (reason && reason.trim()) call(() => onSendToProcurement(lineId, reason.trim()));
+            }}
+          >
+            Send to procurement
+          </Button>
+        )}
       </div>
     </div>
   );

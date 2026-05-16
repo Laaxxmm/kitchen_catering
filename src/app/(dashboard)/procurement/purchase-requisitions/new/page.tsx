@@ -15,9 +15,13 @@ export default async function NewPRPage() {
   }
   return (
     <>
-      <PageHeader eyebrow="Procurement" title="New purchase requisition" description="Add ingredient lines, then Submit. PRs under ₹1L auto-approve; larger ones need a manager." />
+      <PageHeader
+        eyebrow="Procurement"
+        title="Raise a stock request"
+        description="List what you need, hit Create. The manager reviews + approves; pricing is captured downstream when the PO goes out."
+      />
       <PRDraftForm
-        ingredients={ingredients.map((i) => ({ id: i.id, sku: i.sku, name: i.name, unit: i.unit, avgCost: i.avgUnitCost.toString() }))}
+        ingredients={ingredients.map((i) => ({ id: i.id, sku: i.sku, name: i.name, unit: i.unit }))}
         onSubmit={create}
       />
     </>

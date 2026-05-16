@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Decimal } from "decimal.js";
 import {
   GRNStatus,
+  PurchaseRequisitionStatus,
   Role,
   VendorBillStatus,
   VendorPOStatus,
@@ -62,7 +63,25 @@ export async function createVendorPO(raw: unknown) {
   const tier = approvalTierFor(summary.grandTotal);
 
   const po = await db.$transaction(async (tx) => {
+    // If we're spinning the PO out of an approved PR, validate first so
+    // the same request can't be turned into two parallel POs.
+    if (input.prId) {
+      const pr = await tx.purchaseRequisition.findUnique({
+        where: { id: input.prId },
+        select: { id: true, status: true, prNo: true },
+      });
+      if (!pr) throw new Error("Linked purchase requisition not found");
+      if (pr.status !== PurchaseRequisitionStatus.APPROVED) {
+        throw new AuthorizationError(
+          `Only APPROVED requests can be turned into a PO (request ${pr.prNo} is ${pr.status})`,
+        );
+      }
+    }
+
     const poNo = await nextVendorPONumber(tx);
+    const linkedPRNote = input.prId
+      ? (input.notes ? input.notes + "\n\n" : "") + `Created from purchase requisition ${input.prId}`
+      : input.notes ?? null;
     const created = await tx.vendorPO.create({
       data: {
         poNo,
@@ -76,7 +95,7 @@ export async function createVendorPO(raw: unknown) {
         taxTotal: summary.taxTotal.toString(),
         grandTotal: summary.grandTotal.toString(),
         approvalTier: tier,
-        notes: input.notes ?? null,
+        notes: linkedPRNote,
         lines: {
           create: input.lines.map((l, idx) => {
             const q = toDecimal(l.quantity);
@@ -107,9 +126,26 @@ export async function createVendorPO(raw: unknown) {
         action: "VENDOR_PO_CREATED",
         entity: "VendorPO",
         entityId: created.id,
-        payloadHash: sha256Json({ poNo, vendorId: input.vendorId, total: summary.grandTotal.toString(), tier }),
+        payloadHash: sha256Json({ poNo, vendorId: input.vendorId, total: summary.grandTotal.toString(), tier, prId: input.prId ?? null }),
       },
     });
+
+    if (input.prId) {
+      await tx.purchaseRequisition.update({
+        where: { id: input.prId },
+        data: { status: PurchaseRequisitionStatus.ISSUED },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "PR_ISSUED_AS_PO",
+          entity: "PurchaseRequisition",
+          entityId: input.prId,
+          payloadHash: sha256Json({ poId: created.id, poNo }),
+        },
+      });
+    }
+
     return created;
   });
 
@@ -533,6 +569,66 @@ export async function approveVendorBill(id: string) {
     });
   });
   revalidatePath(`/procurement/vendor-bills/${id}`);
+}
+
+/**
+ * One-click "Mark paid" for a vendor bill — records a single
+ * VendorBillPayment for the outstanding balance, method `OTHER`,
+ * note "Marked paid". For richer cases (TDS, split payments) use the
+ * existing BillPaymentForm.
+ */
+export async function markVendorBillPaid(id: string) {
+  // Vendor side: accounts is the one who actually pays the supplier,
+  // so they get the one-click mark-paid action (plus admin/manager).
+  // Customer side stays admin/manager only — see
+  // markCustomerInvoicePaid for that gate.
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
+  await db.$transaction(async (tx) => {
+    const bill = await tx.vendorBill.findUnique({
+      where: { id },
+      select: { id: true, status: true, grandTotal: true, amountPaid: true },
+    });
+    if (!bill) throw new Error("Bill not found");
+    if (bill.status === VendorBillStatus.PAID) {
+      throw new Error("Bill is already marked paid");
+    }
+    if (bill.status === VendorBillStatus.DRAFT || bill.status === VendorBillStatus.PENDING_MATCH) {
+      throw new Error("Run the 3-way match (or save the bill) before marking it paid");
+    }
+    const balance = toDecimal(bill.grandTotal).minus(toDecimal(bill.amountPaid));
+    if (balance.gt(0)) {
+      await tx.vendorBillPayment.create({
+        data: {
+          vendorBillId: id,
+          amount: balance.toFixed(2),
+          paidAt: new Date(),
+          method: "OTHER",
+          notes: "Marked paid (no detailed breakdown)",
+          recordedById: session.user.id,
+        },
+      });
+    }
+    await tx.vendorBill.update({
+      where: { id },
+      data: {
+        amountPaid: bill.grandTotal.toString(),
+        status: VendorBillStatus.PAID,
+        paidAt: new Date(),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "VENDOR_BILL_MARKED_PAID",
+        entity: "VendorBill",
+        entityId: id,
+        payloadHash: sha256Json({ balanceCleared: balance.toString() }),
+      },
+    });
+  });
+  revalidatePath("/procurement/vendor-bills");
+  revalidatePath(`/procurement/vendor-bills/${id}`);
+  revalidatePath("/payments/payables");
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────

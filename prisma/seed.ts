@@ -24,6 +24,8 @@ async function main() {
     { email: "chef@indefine.in",     name: "Head Chef",       role: Role.KITCHEN_HEAD },
     { email: "delivery@indefine.in", name: "Delivery Driver", role: Role.DELIVERY },
     { email: "accounts@indefine.in", name: "Accounts User",   role: Role.ACCOUNTS },
+    { email: "housekeeping@indefine.in", name: "Housekeeping Manager", role: Role.HOUSEKEEPING_MANAGER },
+    { email: "maintenance@indefine.in", name: "Maintenance Manager", role: Role.MAINTENANCE_MANAGER },
   ];
   for (const u of users) {
     await db.user.upsert({

@@ -33,11 +33,15 @@ export default async function MobileLayout({
       <header className="flex items-center justify-between border-b border-ik-rule bg-ik-card px-4 py-3">
         <Link href="/m/deliveries" className="flex items-center gap-2">
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-500">
+            {/* Chef toque — matches desktop mark. */}
             <svg width="16" height="16" viewBox="0 0 40 40">
-              <path d="M20 9 C13 13, 11 22, 14 28 C16 31, 19 31, 21 30 C25 28, 28 22, 28 16 C28 12, 24 9, 20 9 Z" fill="#fff" />
+              <circle cx="14" cy="20" r="5" fill="#fff" />
+              <circle cx="20" cy="17" r="6" fill="#fff" />
+              <circle cx="26" cy="20" r="5" fill="#fff" />
+              <rect x="10" y="25" width="20" height="6.5" rx="1.6" fill="#fff" />
             </svg>
           </span>
-          <span className="text-[14px] font-medium">Indefine Kitchen</span>
+          <span className="text-[14px] font-medium">Green Park Eco Hotel</span>
         </Link>
         <div className="text-[11px] text-ik-ink-3">{session.user.role}</div>
       </header>

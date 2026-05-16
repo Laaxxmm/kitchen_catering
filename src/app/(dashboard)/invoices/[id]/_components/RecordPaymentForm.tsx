@@ -7,6 +7,7 @@ import { PaymentMethod } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   outstanding: number;
@@ -40,6 +41,7 @@ export function RecordPaymentForm({ outstanding, onSubmit }: Props) {
         setReference("");
         setNotes("");
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

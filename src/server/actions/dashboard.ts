@@ -1,6 +1,17 @@
 "use server";
 
-import { CustomerInvoiceStatus, DeliveryStatus, OrderStatus, Role } from "@prisma/client";
+import {
+  ChefRequisitionStatus,
+  CustomerInvoiceStatus,
+  DeliveryStatus,
+  GRNStatus,
+  OrderStatus,
+  ProductionJobStatus,
+  PurchaseRequisitionStatus,
+  Role,
+  VendorBillStatus,
+  VendorPOStatus,
+} from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { hasRole, requireSession } from "@/server/rbac";
@@ -139,17 +150,90 @@ export async function getDashboardSummary() {
     };
   }
 
-  // ─── Live orders by stage (admin/manager) ────────────────────────────
-  // Counts active orders bucketed into the happy-path stages so the dashboard
-  // can render a "where is the work right now" view.
+  // ─── AP (payables) breakdown for admin/manager/accounts ──────────────
+  // - paidThisMonth: VendorBillPayment.amount sum for the current month
+  //   (non-reversed).
+  // - pending: outstanding (grandTotal - amountPaid) over APPROVED /
+  //   MATCHED / OVERDUE / DISCREPANCY bills.
+  // - overdue: outstanding restricted to dueDate < now.
+  let ap: { paidThisMonth: string; pending: string; overdue: string } | null = null;
+  if (hasRole(session, [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS])) {
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const [monthBillPayments, openBills, overdueBills] = await Promise.all([
+      db.vendorBillPayment.findMany({
+        where: { paidAt: { gte: monthStart, lt: monthEnd }, reversedAt: null },
+        select: { amount: true },
+      }),
+      db.vendorBill.findMany({
+        where: {
+          status: {
+            in: [
+              VendorBillStatus.MATCHED,
+              VendorBillStatus.APPROVED,
+              VendorBillStatus.OVERDUE,
+              VendorBillStatus.DISCREPANCY,
+            ],
+          },
+        },
+        select: { grandTotal: true, amountPaid: true },
+      }),
+      db.vendorBill.findMany({
+        where: {
+          status: {
+            in: [VendorBillStatus.MATCHED, VendorBillStatus.APPROVED, VendorBillStatus.OVERDUE],
+          },
+          dueDate: { lt: now },
+        },
+        select: { grandTotal: true, amountPaid: true },
+      }),
+    ]);
+    const paid = monthBillPayments
+      .reduce((s, p) => s.plus(toDecimal(p.amount)), new Decimal(0))
+      .toDecimalPlaces(2);
+    const pending = openBills
+      .reduce((s, b) => s.plus(toDecimal(b.grandTotal).minus(toDecimal(b.amountPaid))), new Decimal(0))
+      .toDecimalPlaces(2);
+    const overdueAP = overdueBills
+      .reduce((s, b) => s.plus(toDecimal(b.grandTotal).minus(toDecimal(b.amountPaid))), new Decimal(0))
+      .toDecimalPlaces(2);
+    ap = {
+      paidThisMonth: paid.toString(),
+      pending: pending.toString(),
+      overdue: overdueAP.toString(),
+    };
+  }
+
+  // ─── Order-status counts (shared) ────────────────────────────────────
+  // Single groupBy covers both the admin "stage counts" view and the chef
+  // "kitchen pipeline" tiles. Previously this was 6+ separate COUNT calls
+  // — one groupBy is dramatically faster on cold caches.
+  //
+  // We also pull `_min(updatedAt)` so the journey strip can flag any
+  // status where an order has been parked for too long ("stuck").
   let stageCounts: Record<string, number> | null = null;
-  if (hasRole(session, [Role.ADMIN, Role.MANAGER])) {
+  let stageStuck: Record<string, boolean> | null = null;
+  let kitchen: {
+    awaitingChefApproval: number;
+    requisitionPending: number;
+    waitingOnStore: number;
+    readyToCook: number;
+    inProduction: number;
+    readyToDispatch: number;
+    /** Admin gate (workflow v3) — populated only for admin/manager views. */
+    awaitingAdminApproval?: number;
+  } | null = null;
+  const needsOrderStatusCounts =
+    hasRole(session, [Role.ADMIN, Role.MANAGER]) ||
+    hasRole(session, [Role.KITCHEN_HEAD]) ||
+    hasRole(session, [Role.STORE_KEEPER]);
+  if (needsOrderStatusCounts) {
     const STAGE_STATUSES: OrderStatus[] = [
       OrderStatus.DRAFT,
+      OrderStatus.PENDING_ADMIN_APPROVAL,
       OrderStatus.PENDING_CHEF_APPROVAL,
       OrderStatus.CHANGES_PROPOSED_BY_CHEF,
       OrderStatus.CHEF_REQUISITION_PENDING,
-      OrderStatus.ISSUING,
       OrderStatus.ISSUING,
       OrderStatus.READY_FOR_PRODUCTION,
       OrderStatus.IN_PREP,
@@ -162,9 +246,316 @@ export async function getDashboardSummary() {
       by: ["status"],
       where: { status: { in: STAGE_STATUSES } },
       _count: { _all: true },
+      _min: { updatedAt: true },
     });
-    stageCounts = Object.fromEntries(rows.map((r) => [r.status, r._count._all]));
+    const m: Record<string, number> = Object.fromEntries(rows.map((r) => [r.status, r._count._all]));
+    // Pre-delivery stages get the strictest "stuck" rule (24h). Once an
+    // order is OUT_FOR_DELIVERY or beyond we don't expect the chef to
+    // poke at it, so the threshold is much more forgiving.
+    const STUCK_AFTER_HOURS: Partial<Record<string, number>> = {
+      [OrderStatus.DRAFT]: 48,
+      [OrderStatus.PENDING_CHEF_APPROVAL]: 12,
+      [OrderStatus.CHANGES_PROPOSED_BY_CHEF]: 12,
+      [OrderStatus.CHEF_REQUISITION_PENDING]: 24,
+      [OrderStatus.ISSUING]: 24,
+      [OrderStatus.READY_FOR_PRODUCTION]: 24,
+      [OrderStatus.IN_PREP]: 12,
+      [OrderStatus.READY]: 6,
+      [OrderStatus.OUT_FOR_DELIVERY]: 6,
+      [OrderStatus.DELIVERED]: 72,
+      [OrderStatus.INVOICED]: 240, // 10 days — invoicing waits on payment
+    };
+    const stuck: Record<string, boolean> = {};
+    for (const r of rows) {
+      if (!r._min.updatedAt) continue;
+      const ageHours = (now.getTime() - r._min.updatedAt.getTime()) / (60 * 60 * 1000);
+      const limit = STUCK_AFTER_HOURS[r.status] ?? 48;
+      if (ageHours > limit) stuck[r.status] = true;
+    }
+    stageStuck = stuck;
+    if (hasRole(session, [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER])) stageCounts = m;
+    if (hasRole(session, [Role.KITCHEN_HEAD, Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER])) {
+      kitchen = {
+        awaitingChefApproval: m[OrderStatus.PENDING_CHEF_APPROVAL] ?? 0,
+        requisitionPending: m[OrderStatus.CHEF_REQUISITION_PENDING] ?? 0,
+        waitingOnStore: m[OrderStatus.ISSUING] ?? 0,
+        readyToCook: m[OrderStatus.READY_FOR_PRODUCTION] ?? 0,
+        inProduction: m[OrderStatus.IN_PREP] ?? 0,
+        readyToDispatch: m[OrderStatus.READY] ?? 0,
+        awaitingAdminApproval: m[OrderStatus.PENDING_ADMIN_APPROVAL] ?? 0,
+      };
+    }
   }
+
+  // ─── Procurement queue (admin/manager) ───────────────────────────────
+  // Four groupBys (one per buy-side table) instead of seven separate
+  // counts; sums folded in code.
+  let procurement: {
+    prPendingApproval: number;
+    prApprovedNoPO: number;
+    poPendingApproval: number;
+    poSentNotReceived: number;
+    grnPendingBill: number;
+    billsPendingMatch: number;
+    billsPendingPayment: number;
+  } | null = null;
+  if (hasRole(session, [Role.ADMIN, Role.MANAGER])) {
+    const [prRows, poRows, grnRows, billRows] = await Promise.all([
+      db.purchaseRequisition.groupBy({ by: ["status"], _count: { _all: true } }),
+      db.vendorPO.groupBy({ by: ["status"], _count: { _all: true } }),
+      db.gRN.groupBy({ by: ["status"], _count: { _all: true } }),
+      db.vendorBill.groupBy({ by: ["status"], _count: { _all: true } }),
+    ]);
+    const pr = Object.fromEntries(prRows.map((r) => [r.status, r._count._all]));
+    const po = Object.fromEntries(poRows.map((r) => [r.status, r._count._all]));
+    const grn = Object.fromEntries(grnRows.map((r) => [r.status, r._count._all]));
+    const bill = Object.fromEntries(billRows.map((r) => [r.status, r._count._all]));
+    procurement = {
+      prPendingApproval: pr[PurchaseRequisitionStatus.PENDING_APPROVAL] ?? 0,
+      prApprovedNoPO: pr[PurchaseRequisitionStatus.APPROVED] ?? 0,
+      poPendingApproval: po[VendorPOStatus.PENDING_APPROVAL] ?? 0,
+      poSentNotReceived:
+        (po[VendorPOStatus.APPROVED] ?? 0) +
+        (po[VendorPOStatus.SENT] ?? 0) +
+        (po[VendorPOStatus.PARTIALLY_RECEIVED] ?? 0),
+      grnPendingBill:
+        (grn[GRNStatus.ACCEPTED] ?? 0) + (grn[GRNStatus.PARTIALLY_ACCEPTED] ?? 0),
+      billsPendingMatch:
+        (bill[VendorBillStatus.DRAFT] ?? 0) +
+        (bill[VendorBillStatus.PENDING_MATCH] ?? 0) +
+        (bill[VendorBillStatus.DISCREPANCY] ?? 0),
+      billsPendingPayment:
+        (bill[VendorBillStatus.MATCHED] ?? 0) +
+        (bill[VendorBillStatus.APPROVED] ?? 0) +
+        (bill[VendorBillStatus.OVERDUE] ?? 0),
+    };
+  }
+
+  // ─── Production-job board peek (chef) ────────────────────────────────
+  // One groupBy across all production-job statuses.
+  let production: { queued: number; prep: number; cooking: number; ready: number } | null = null;
+  if (hasRole(session, [Role.KITCHEN_HEAD, Role.ADMIN, Role.MANAGER])) {
+    const rows = await db.productionJob.groupBy({
+      by: ["status"],
+      _count: { _all: true },
+    });
+    const m = Object.fromEntries(rows.map((r) => [r.status, r._count._all]));
+    production = {
+      queued: m[ProductionJobStatus.QUEUED] ?? 0,
+      prep: m[ProductionJobStatus.PREP] ?? 0,
+      cooking: m[ProductionJobStatus.COOKING] ?? 0,
+      ready: m[ProductionJobStatus.READY] ?? 0,
+    };
+  }
+
+  // ─── Driver queue ────────────────────────────────────────────────────
+  // The driver's daily worklist: every delivery assigned to them that's
+  // still in flight, with the order's customer + delivery address so
+  // they can plan their route without clicking through.
+  let driver: {
+    deliveries: Array<{
+      id: string;
+      deliveryNo: string;
+      status: DeliveryStatus;
+      scheduledAt: string;
+      vehicleNo: string | null;
+      orderCode: string;
+      customerName: string;
+      deliveryAddress: string;
+    }>;
+  } | null = null;
+  if (hasRole(session, [Role.DELIVERY])) {
+    const rows = await db.delivery.findMany({
+      where: {
+        driverUserId: userId,
+        status: {
+          in: [DeliveryStatus.SCHEDULED, DeliveryStatus.DISPATCHED, DeliveryStatus.IN_TRANSIT],
+        },
+      },
+      orderBy: { scheduledAt: "asc" },
+      take: 50,
+      select: {
+        id: true,
+        deliveryNo: true,
+        status: true,
+        scheduledAt: true,
+        vehicleNo: true,
+        order: {
+          select: {
+            code: true,
+            deliveryAddress: true,
+            customer: { select: { name: true } },
+          },
+        },
+      },
+    });
+    driver = {
+      deliveries: rows.map((d) => ({
+        id: d.id,
+        deliveryNo: d.deliveryNo,
+        status: d.status,
+        scheduledAt: d.scheduledAt.toISOString(),
+        vehicleNo: d.vehicleNo,
+        orderCode: d.order.code,
+        customerName: d.order.customer.name,
+        deliveryAddress: d.order.deliveryAddress,
+      })),
+    };
+  }
+
+  // ─── Stock-request feed ──────────────────────────────────────────────
+  // Two flavours, both backed by the same query path:
+  //   - storekeeper view: their own recent PRs with current status, so
+  //     they can track requests they raised without digging into the
+  //     procurement section.
+  //   - admin/manager view: PRs awaiting approval, with vendor/lines
+  //     summary, so they can act without a click-through.
+  let storekeeperPRs: Array<{
+    id: string;
+    prNo: string;
+    status: PurchaseRequisitionStatus;
+    createdAt: string;
+    submittedAt: string | null;
+    lineCount: number;
+    grandTotal: string;
+  }> | null = null;
+  if (hasRole(session, [Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER])) {
+    const filter = hasRole(session, [Role.STORE_KEEPER]) ? { requestedById: userId } : {};
+    const rows = await db.purchaseRequisition.findMany({
+      where: {
+        ...filter,
+        status: {
+          in: [
+            PurchaseRequisitionStatus.DRAFT,
+            PurchaseRequisitionStatus.PENDING_APPROVAL,
+            PurchaseRequisitionStatus.APPROVED,
+            PurchaseRequisitionStatus.ISSUED,
+            PurchaseRequisitionStatus.PARTIALLY_ISSUED,
+            PurchaseRequisitionStatus.REJECTED,
+          ],
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      select: {
+        id: true,
+        prNo: true,
+        status: true,
+        createdAt: true,
+        submittedAt: true,
+        lines: { select: { requestedQty: true, unitCostSnapshot: true } },
+      },
+    });
+    storekeeperPRs = rows.map((r) => ({
+      id: r.id,
+      prNo: r.prNo,
+      status: r.status,
+      createdAt: r.createdAt.toISOString(),
+      submittedAt: r.submittedAt?.toISOString() ?? null,
+      lineCount: r.lines.length,
+      grandTotal: r.lines
+        .reduce(
+          (s, l) => s.plus(toDecimal(l.requestedQty).times(toDecimal(l.unitCostSnapshot))),
+          new Decimal(0),
+        )
+        .toDecimalPlaces(2)
+        .toString(),
+    }));
+  }
+
+  // Admin / manager: PRs sitting in their approval queue, with extra
+  // context (raised-by, line count, value) for in-line decisioning.
+  let adminPendingPRs: Array<{
+    id: string;
+    prNo: string;
+    raisedBy: string;
+    submittedAt: string;
+    lineCount: number;
+    grandTotal: string;
+  }> | null = null;
+  if (hasRole(session, [Role.ADMIN, Role.MANAGER])) {
+    const rows = await db.purchaseRequisition.findMany({
+      where: { status: PurchaseRequisitionStatus.PENDING_APPROVAL },
+      orderBy: { submittedAt: "asc" },
+      take: 8,
+      select: {
+        id: true,
+        prNo: true,
+        submittedAt: true,
+        requestedBy: { select: { name: true } },
+        lines: { select: { requestedQty: true, unitCostSnapshot: true } },
+      },
+    });
+    adminPendingPRs = rows
+      .filter((r) => r.submittedAt)
+      .map((r) => ({
+        id: r.id,
+        prNo: r.prNo,
+        raisedBy: r.requestedBy?.name ?? "—",
+        submittedAt: r.submittedAt!.toISOString(),
+        lineCount: r.lines.length,
+        grandTotal: r.lines
+          .reduce(
+            (s, l) => s.plus(toDecimal(l.requestedQty).times(toDecimal(l.unitCostSnapshot))),
+            new Decimal(0),
+          )
+          .toDecimalPlaces(2)
+          .toString(),
+      }));
+  }
+
+  // ─── Storekeeper queue ───────────────────────────────────────────────
+  // The storekeeper's daily worklist:
+  //   - openChefRequisitions: chef raised a requisition, still SUBMITTED
+  //     or PARTIALLY_ISSUED. Their main inbox.
+  //   - poAwaitingReceipt: vendor POs sent / approved / partially-received
+  //     where goods may show up at the door any day.
+  //   - lowStock: ingredients at or below reorder level (already counted
+  //     above; pass through so the storekeeper sees their own number).
+  let storeKeeper: {
+    openChefRequisitions: number;
+    poAwaitingReceipt: number;
+    lowStock: number;
+  } | null = null;
+  if (hasRole(session, [Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER])) {
+    const [openChefRequisitions, poAwaitingReceipt] = await Promise.all([
+      db.chefRequisition.count({
+        where: {
+          status: {
+            in: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED],
+          },
+        },
+      }),
+      db.vendorPO.count({
+        where: {
+          status: {
+            in: [VendorPOStatus.APPROVED, VendorPOStatus.SENT, VendorPOStatus.PARTIALLY_RECEIVED],
+          },
+        },
+      }),
+    ]);
+    storeKeeper = { openChefRequisitions, poAwaitingReceipt, lowStock: lowStockCount };
+  }
+
+  // ─── Today's orders (for the visual timeline) ─────────────────────
+  // Lightweight list — only what the timeline needs to render. Capped at
+  // 50 so we don't pull the world; today never has more than a handful.
+  const todayOrdersList = await db.order.findMany({
+    where: {
+      eventDate: { gte: todayStart, lt: tomorrowStart },
+      status: { notIn: [OrderStatus.CANCELLED, OrderStatus.REJECTED_BY_MANAGER, OrderStatus.REJECTED_BY_STORE] },
+    },
+    select: {
+      id: true,
+      code: true,
+      status: true,
+      eventDate: true,
+      mealType: true,
+      customer: { select: { name: true } },
+    },
+    orderBy: { eventDate: "asc" },
+    take: 50,
+  });
 
   return {
     todayOrders,
@@ -173,6 +564,67 @@ export async function getDashboardSummary() {
     lowStockCount,
     myQueue,
     ar,
+    ap,
     stageCounts,
+    stageStuck,
+    procurement,
+    storeKeeper,
+    storekeeperPRs,
+    adminPendingPRs,
+    driver,
+    kitchen,
+    production,
+    todayOrdersList: todayOrdersList.map((o) => ({
+      id: o.id,
+      code: o.code,
+      status: o.status,
+      eventDate: o.eventDate.toISOString(),
+      mealType: o.mealType,
+      customerName: o.customer.name,
+    })),
   };
+}
+
+/**
+ * Orders waiting on the store to finish issuing ingredients (status ISSUING
+ * or CHEF_REQUISITION_PENDING). Returned with the unfulfilled lines so the
+ * chef can see exactly what's blocking each order without clicking into it.
+ *
+ * Used by the kitchen board's "Coming up" panel and by the chef order
+ * detail "What's blocking this order?" block.
+ */
+export async function getOrdersWaitingOnIngredients(limit = 8) {
+  await requireSession();
+  const orders = await db.order.findMany({
+    where: {
+      status: { in: [OrderStatus.CHEF_REQUISITION_PENDING, OrderStatus.ISSUING] },
+    },
+    orderBy: { eventDate: "asc" },
+    take: limit,
+    select: {
+      id: true,
+      code: true,
+      status: true,
+      eventDate: true,
+      customer: { select: { name: true } },
+      chefRequisitions: {
+        where: { status: { in: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED] } },
+        select: {
+          id: true,
+          requisitionNo: true,
+          status: true,
+          lines: {
+            where: { status: { not: "ISSUED" } },
+            select: {
+              ingredient: { select: { name: true, unit: true } },
+              requestedQty: true,
+              issuedQty: true,
+              status: true,
+            },
+          },
+        },
+      },
+    },
+  });
+  return orders;
 }

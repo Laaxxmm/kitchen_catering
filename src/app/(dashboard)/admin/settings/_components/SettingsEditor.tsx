@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Row { key: string; value: unknown; notes: string | null; updatedAt: string }
 
@@ -34,6 +35,7 @@ export function SettingsEditor({ rows, onSave }: Props) {
         toast.success(`Saved ${key}`);
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

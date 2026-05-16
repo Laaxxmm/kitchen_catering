@@ -6,7 +6,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
 // `webDir` points at the Next `out/` directory.
 const config: CapacitorConfig = {
   appId: "com.indefine.kitchen",
-  appName: "Indefine Kitchen",
+  appName: "Green Park Eco Hotel",
   webDir: "dist-mobile",
   server: {
     // Production server. The WebView loads the live Next.js app from this URL

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   chefNote: string;
@@ -38,6 +39,7 @@ export function ManagerChangeBlock({ chefNote, chefName, onApprove, onReject }: 
         setNote("");
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

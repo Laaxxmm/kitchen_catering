@@ -8,6 +8,7 @@ import {
   CustomerInvoiceStatus,
   EInvoiceStatus,
   OrderStatus,
+  PaymentMethod,
   Role,
 } from "@prisma/client";
 import { db } from "@/server/db";
@@ -19,8 +20,11 @@ import {
 import { nextCustomerInvoiceNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { summarise } from "@/lib/gst";
+import { toDecimal } from "@/lib/money";
 import { indefineGstin, indefineCompanyName, indefineStateCode } from "@/lib/org";
 import { eInvoiceEnabled, getEInvoiceProvider } from "@/server/services/e-invoice/provider";
+import { buildInvoiceEmail, sendEmail } from "@/lib/email";
+import { formatIST } from "@/lib/time";
 import type { Prisma } from "@prisma/client";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
@@ -48,6 +52,12 @@ export async function createCustomerInvoiceFromOrder(orderId: string) {
       include: {
         items: { include: { dish: { select: { name: true, unit: true, hsnSac: true } } }, orderBy: { sortOrder: "asc" } },
         customer: { select: { id: true } },
+        // Pull any payment captured at the door so we credit it against
+        // the new tax invoice automatically.
+        deliveries: {
+          where: { paymentCollected: true },
+          select: { id: true, paymentAmount: true, paymentMethod: true, paymentReference: true },
+        },
       },
     });
     if (!order) throw new Error("Order not found");
@@ -77,11 +87,28 @@ export async function createCustomerInvoiceFromOrder(orderId: string) {
 
     const invoiceNo = await nextCustomerInvoiceNumber(tx);
 
+    // Sum payments collected at the door for this order.
+    const podTotal = order.deliveries.reduce(
+      (s, d) => s.plus(d.paymentAmount ? toDecimal(d.paymentAmount) : 0),
+      new Decimal(0),
+    );
+    const fullyPaidAtDelivery = podTotal.gte(summary.grandTotal);
+    const partiallyPaidAtDelivery = podTotal.gt(0) && !fullyPaidAtDelivery;
+
     const invoice = await tx.customerInvoice.create({
       data: {
         invoiceNo,
         kind: CustomerInvoiceKind.ORDER,
-        status: CustomerInvoiceStatus.DRAFT,
+        // Invoice is created in ISSUED status — the GST document is now
+        // canonical for this order. Status flips to PAID/PARTIAL below
+        // if there was a payment-on-delivery.
+        status: fullyPaidAtDelivery
+          ? CustomerInvoiceStatus.PAID
+          : partiallyPaidAtDelivery
+            ? CustomerInvoiceStatus.PARTIAL
+            : CustomerInvoiceStatus.ISSUED,
+        issuedAt: new Date(),
+        amountPaid: podTotal.toFixed(2),
         orderId,
         customerId: order.customer.id,
         placeOfSupplyStateCode: order.placeOfSupplyStateCode,
@@ -117,13 +144,44 @@ export async function createCustomerInvoiceFromOrder(orderId: string) {
       },
     });
 
+    // Materialise each payment-on-delivery as a CustomerInvoicePayment
+    // row so the ledger / reports tally cleanly.
+    for (const d of order.deliveries) {
+      if (!d.paymentAmount || !d.paymentMethod) continue;
+      await tx.customerInvoicePayment.create({
+        data: {
+          invoiceId: invoice.id,
+          amount: d.paymentAmount,
+          paidAt: new Date(),
+          // Delivery.paymentMethod is stored as a free-text string for
+          // historical reasons. Cast into the PaymentMethod enum used
+          // by CustomerInvoicePayment.
+          method: d.paymentMethod as PaymentMethod,
+          reference: d.paymentReference,
+          notes: "Collected at delivery",
+          recordedById: session.user.id,
+        },
+      });
+    }
+
+    // Order advances DELIVERED → INVOICED (or PAID if fully settled at door).
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: fullyPaidAtDelivery ? OrderStatus.PAID : OrderStatus.INVOICED },
+    });
+
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
         action: "CUSTOMER_INVOICE_CREATED",
         entity: "CustomerInvoice",
         entityId: invoice.id,
-        payloadHash: sha256Json({ orderId, invoiceNo, grandTotal: summary.grandTotal.toString() }),
+        payloadHash: sha256Json({
+          orderId,
+          invoiceNo,
+          grandTotal: summary.grandTotal.toString(),
+          podTotal: podTotal.toString(),
+        }),
       },
     });
 
@@ -132,6 +190,7 @@ export async function createCustomerInvoiceFromOrder(orderId: string) {
 
   revalidatePath("/invoices");
   revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/invoices/${result.id}`);
   return { id: result.id, invoiceNo: result.invoiceNo };
 }
 
@@ -520,6 +579,255 @@ export async function updateDraftInvoice(id: string, input: EditInvoiceInput) {
 
   revalidatePath("/invoices");
   revalidatePath(`/invoices/${id}`);
+}
+
+/**
+ * System-triggered tax invoice creation. Called from confirmDelivery
+ * the moment an order is marked DELIVERED, so the customer's GST invoice
+ * is ready without anyone clicking a button.
+ *
+ * - Idempotent: returns the existing ORDER invoice id if one was already
+ *   created (so this is safe to call multiple times from the same flow).
+ * - Creates the invoice as ISSUED (not DRAFT) — the order is delivered,
+ *   nothing is going to change about the line items now.
+ * - Advances the order status from DELIVERED to INVOICED.
+ * - Best-effort emails the invoice PDF to the customer.
+ *
+ * Must run inside a transaction. Returns the invoice id + invoiceNo so
+ * the caller can bind a payment to it in the same transaction.
+ */
+export async function createTaxInvoiceForOrderInTx(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  userId: string,
+): Promise<{ id: string; invoiceNo: string; grandTotal: string; created: boolean }> {
+  // Idempotency: short-circuit if an ORDER invoice already exists.
+  const existing = await tx.customerInvoice.findFirst({
+    where: { orderId, kind: CustomerInvoiceKind.ORDER },
+    select: { id: true, invoiceNo: true, grandTotal: true },
+  });
+  if (existing) {
+    return { id: existing.id, invoiceNo: existing.invoiceNo, grandTotal: existing.grandTotal.toString(), created: false };
+  }
+
+  const order = await tx.order.findUnique({
+    where: { id: orderId },
+    include: {
+      items: { include: { dish: { select: { name: true, unit: true, hsnSac: true } } }, orderBy: { sortOrder: "asc" } },
+      customer: { select: { id: true } },
+    },
+  });
+  if (!order) throw new Error("Order not found");
+
+  const supplierState = indefineStateCode();
+  const lines = order.items.map((it) => ({
+    quantity: it.portions.toString(),
+    unitPrice: it.unitPrice.toString(),
+    discountPct: it.discountPct.toString(),
+    gstRatePct: it.gstRatePct.toString(),
+  }));
+  const summary = summarise({
+    lines,
+    supplierStateCode: supplierState,
+    placeOfSupplyStateCode: order.placeOfSupplyStateCode,
+  });
+  const invoiceNo = await nextCustomerInvoiceNumber(tx);
+
+  const invoice = await tx.customerInvoice.create({
+    data: {
+      invoiceNo,
+      kind: CustomerInvoiceKind.ORDER,
+      // Create ISSUED, not DRAFT — delivery is done, no edits expected.
+      status: CustomerInvoiceStatus.ISSUED,
+      issuedAt: new Date(),
+      orderId,
+      customerId: order.customer.id,
+      placeOfSupplyStateCode: order.placeOfSupplyStateCode,
+      subtotal: summary.subtotal.toString(),
+      cgst: summary.cgst.toString(),
+      sgst: summary.sgst.toString(),
+      igst: summary.igst.toString(),
+      taxTotal: summary.taxTotal.toString(),
+      grandTotal: summary.grandTotal.toString(),
+      eInvoiceStatus: EInvoiceStatus.NOT_REQUIRED,
+      createdById: userId,
+      shareToken: newShareToken(),
+      lines: {
+        create: order.items.map((it, idx) => ({
+          sortOrder: idx,
+          description: it.dish.name,
+          hsnSac: it.dish.hsnSac ?? null,
+          quantity: it.portions.toString(),
+          unit: it.dish.unit,
+          unitPrice: it.unitPrice.toString(),
+          discountPct: it.discountPct.toString(),
+          gstRatePct: it.gstRatePct.toString(),
+          lineSubtotal: it.lineSubtotal.toString(),
+          lineTax: it.lineTax.toString(),
+          lineTotal: it.lineTotal.toString(),
+        })),
+      },
+    },
+    select: { id: true, invoiceNo: true, grandTotal: true },
+  });
+
+  // Order advances DELIVERED → INVOICED in the same transaction.
+  await tx.order.update({
+    where: { id: orderId },
+    data: { status: OrderStatus.INVOICED },
+  });
+
+  await tx.auditLog.create({
+    data: {
+      userId,
+      action: "CUSTOMER_INVOICE_AUTO_CREATED_ON_DELIVERY",
+      entity: "CustomerInvoice",
+      entityId: invoice.id,
+      payloadHash: sha256Json({ orderId, invoiceNo: invoice.invoiceNo, grandTotal: invoice.grandTotal.toString() }),
+    },
+  });
+
+  return { id: invoice.id, invoiceNo: invoice.invoiceNo, grandTotal: invoice.grandTotal.toString(), created: true };
+}
+
+/**
+ * Best-effort email of a freshly-issued tax invoice. Runs post-commit so
+ * SMTP latency doesn't hold the delivery confirmation transaction open.
+ * Failures are logged and swallowed; the invoice still exists in the
+ * system and can be re-sent manually if the customer never receives it.
+ */
+export async function emailTaxInvoice(
+  invoiceId: string,
+  opts: { force?: boolean } = {},
+): Promise<void> {
+  try {
+    const invoice = await db.customerInvoice.findUnique({
+      where: { id: invoiceId },
+      include: { customer: true, order: { select: { eventDate: true } } },
+    });
+    if (!invoice) return;
+    if (!invoice.customer.email) {
+      // No email on file — surface this if it was a manual click. The
+      // user is responsible for handling missing-email customers.
+      if (opts.force) {
+        throw new Error("Customer has no email on file. Add one on the customer page first.");
+      }
+      return;
+    }
+    // Silent skip when called as the auto-send pass; force=true means
+    // the user clicked "Resend by email" deliberately.
+    if (invoice.emailedAt && !opts.force) return;
+
+    const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
+    const publicUrl = `${baseUrl}/i/${invoice.shareToken}`;
+    const composed = buildInvoiceEmail({
+      invoiceNo: invoice.invoiceNo,
+      invoiceKind: "ORDER",
+      customerName: invoice.customer.name,
+      grandTotal: invoice.grandTotal.toString(),
+      eventDateLabel: invoice.order?.eventDate
+        ? formatIST(invoice.order.eventDate, "EEE d MMM yyyy")
+        : undefined,
+      publicUrl,
+    });
+    const sent = await sendEmail({
+      to: invoice.customer.email,
+      subject: composed.subject,
+      text: composed.text,
+      html: composed.html,
+    });
+    if (sent.provider !== "console" || process.env.EMAIL_LOG_BODY === "1") {
+      await db.customerInvoice.update({
+        where: { id: invoiceId },
+        data: { emailedAt: new Date(), emailedTo: invoice.customer.email },
+      });
+    }
+  } catch (err) {
+    console.error(
+      `[emailTaxInvoice ${invoiceId}] failed: ${err instanceof Error ? err.message : err}`,
+    );
+    // Re-throw on force so the UI can show the failure (e.g. no email on file).
+    if (opts.force) throw err;
+  }
+}
+
+/**
+ * One-click "Mark paid" — records a single payment for the outstanding
+ * balance, method `OTHER`, note "Marked paid (no detailed breakdown)".
+ * Use this for the simple cash-on-bank-statement case where accounts
+ * doesn't need to capture method/reference.
+ *
+ * For richer cases (split payments, TDS, etc.) accounts uses the
+ * existing RecordPaymentForm.
+ */
+export async function markCustomerInvoicePaid(invoiceId: string) {
+  // Tighter gate than the rest of the WRITE_ROLES set — admin / manager
+  // only. Accounts records detailed payments through the RecordPayment
+  // form; this one-click action belongs to the people who can also
+  // approve orders.
+  const session = await requireRole([Role.ADMIN, Role.MANAGER]);
+  await db.$transaction(async (tx) => {
+    const invoice = await tx.customerInvoice.findUnique({
+      where: { id: invoiceId },
+      select: { id: true, status: true, grandTotal: true, amountPaid: true, orderId: true },
+    });
+    if (!invoice) throw new Error("Invoice not found");
+    if (invoice.status === CustomerInvoiceStatus.PAID) {
+      throw new Error("Invoice is already marked paid");
+    }
+    if (invoice.status === CustomerInvoiceStatus.CANCELLED) {
+      throw new Error("Cannot mark a cancelled invoice paid");
+    }
+    if (invoice.status === CustomerInvoiceStatus.DRAFT) {
+      throw new Error("Issue the invoice first, then mark it paid");
+    }
+    const balance = new Decimal(invoice.grandTotal.toString()).minus(invoice.amountPaid.toString());
+    if (balance.lte(0)) {
+      // Numeric edge — flip the status flag and we're done.
+      await tx.customerInvoice.update({
+        where: { id: invoiceId },
+        data: { status: CustomerInvoiceStatus.PAID },
+      });
+    } else {
+      await tx.customerInvoicePayment.create({
+        data: {
+          invoiceId,
+          amount: balance.toFixed(2),
+          paidAt: new Date(),
+          method: "OTHER",
+          notes: "Marked paid (no detailed breakdown)",
+          recordedById: session.user.id,
+        },
+      });
+      await tx.customerInvoice.update({
+        where: { id: invoiceId },
+        data: {
+          amountPaid: invoice.grandTotal.toString(),
+          status: CustomerInvoiceStatus.PAID,
+        },
+      });
+    }
+    // If the invoice belongs to an order, advance it to PAID too — the
+    // commercial transaction is complete.
+    if (invoice.orderId) {
+      await tx.order.update({
+        where: { id: invoice.orderId },
+        data: { status: OrderStatus.PAID },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "CUSTOMER_INVOICE_MARKED_PAID",
+        entity: "CustomerInvoice",
+        entityId: invoiceId,
+        payloadHash: sha256Json({ balanceCleared: balance.toString() }),
+      },
+    });
+  });
+  revalidatePath("/invoices");
+  revalidatePath(`/invoices/${invoiceId}`);
+  revalidatePath("/payments/receivables");
 }
 
 export async function issueCustomerInvoice(id: string) {

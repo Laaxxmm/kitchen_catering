@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isNextNavigationError } from "@/lib/next-error";
 
 const KIND_LABELS: Record<DocumentKind, string> = {
   ORIGINAL: "Original document",
@@ -79,6 +80,7 @@ export function DocumentsCard({
         if (fileRef.current) fileRef.current.value = "";
         setDescription("");
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Upload failed");
       }
     });
@@ -91,6 +93,7 @@ export function DocumentsCard({
         await onDelete(id);
         toast.success("Deleted");
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Delete failed");
       }
     });

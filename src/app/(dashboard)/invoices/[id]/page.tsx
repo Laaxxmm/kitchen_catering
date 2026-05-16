@@ -8,8 +8,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { auth } from "@/server/auth";
 import {
   cancelCustomerInvoice,
+  emailTaxInvoice,
   getCustomerInvoice,
   issueCustomerInvoice,
+  markCustomerInvoicePaid,
 } from "@/server/actions/customer-invoices";
 import {
   recordCustomerInvoicePayment,
@@ -27,11 +29,23 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   if (!invoice) notFound();
   const role = session?.user?.role;
   const canIssue = role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS;
+  // Accounts records detailed payments via the form below; the
+  // one-click "Mark paid" + manual email-to-customer are admin/manager
+  // only, since they're commercial decisions.
+  const canMarkPaid = role === Role.ADMIN || role === Role.MANAGER;
   const canPay = canIssue;
 
   async function doIssue() {
     "use server";
     await issueCustomerInvoice(id);
+  }
+  async function doEmailToCustomer() {
+    "use server";
+    await emailTaxInvoice(id, { force: true });
+  }
+  async function doMarkPaid() {
+    "use server";
+    await markCustomerInvoicePaid(id);
   }
   async function doCancel(formData: FormData) {
     "use server";
@@ -67,6 +81,19 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           <div className="flex gap-2">
             <Link href={`/api/invoices/${invoice.id}/pdf`} target="_blank"><Button variant="outline">Download PDF</Button></Link>
             <Link href={`/i/${invoice.shareToken}`} target="_blank"><Button variant="outline">Public view</Button></Link>
+            {invoice.status !== CustomerInvoiceStatus.DRAFT && invoice.status !== CustomerInvoiceStatus.CANCELLED && canMarkPaid && (
+              <form action={doEmailToCustomer}>
+                <Button type="submit">{invoice.emailedAt ? "Resend by email" : "Send to customer"}</Button>
+              </form>
+            )}
+            {invoice.status !== CustomerInvoiceStatus.PAID
+              && invoice.status !== CustomerInvoiceStatus.CANCELLED
+              && invoice.status !== CustomerInvoiceStatus.DRAFT
+              && canMarkPaid && (
+                <form action={doMarkPaid}>
+                  <Button type="submit" variant="outline">Mark paid</Button>
+                </form>
+              )}
             <Link href="/invoices"><Button variant="outline">Back</Button></Link>
             {invoice.status === CustomerInvoiceStatus.DRAFT && canIssue && (
               <>

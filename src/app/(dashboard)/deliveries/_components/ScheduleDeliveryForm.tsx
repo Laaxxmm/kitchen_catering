@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface OrderOption { id: string; code: string; customerName: string; eventDate: string }
 interface DriverOption { id: string; name: string }
@@ -14,12 +15,16 @@ interface Props {
   orders: OrderOption[];
   drivers: DriverOption[];
   onSubmit: (input: { orderId: string; driverUserId: string; vehicleNo: string | null; scheduledAt: string }) => Promise<{ id: string; deliveryNo: string }>;
+  // Pre-select an order when the page was reached via "Schedule delivery
+  // for ORD-XX" from the order detail page.
+  initialOrderId?: string | null;
 }
 
-export function ScheduleDeliveryForm({ orders, drivers, onSubmit }: Props) {
+export function ScheduleDeliveryForm({ orders, drivers, onSubmit, initialOrderId }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const [orderId, setOrderId] = useState(orders[0]?.id ?? "");
+  const prefilled = initialOrderId && orders.some((o) => o.id === initialOrderId) ? initialOrderId : null;
+  const [orderId, setOrderId] = useState(prefilled ?? orders[0]?.id ?? "");
   const [driverUserId, setDriverUserId] = useState(drivers[0]?.id ?? "");
   const [vehicleNo, setVehicleNo] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
@@ -36,10 +41,11 @@ export function ScheduleDeliveryForm({ orders, drivers, onSubmit }: Props) {
           vehicleNo: vehicleNo || null,
           scheduledAt,
         });
-        toast.success(`Scheduled ${result.deliveryNo}. Check server console for OTP.`);
+        toast.success(`Scheduled ${result.deliveryNo}`);
         router.push(`/deliveries/${result.id}`);
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

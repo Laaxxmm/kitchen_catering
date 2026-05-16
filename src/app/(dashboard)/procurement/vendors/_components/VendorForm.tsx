@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { VendorInputT } from "@/lib/validators";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   defaults?: Partial<VendorInputT>;
@@ -56,6 +57,7 @@ export function VendorForm({ defaults, onSubmit, submitLabel = "Save", redirectO
         if (redirectOnSuccess) router.push(redirectOnSuccess.replace(":id", r.id));
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

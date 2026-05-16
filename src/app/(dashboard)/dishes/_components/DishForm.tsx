@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { DishInputT } from "@/lib/validators";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   defaults?: Partial<DishInputT>;
@@ -48,6 +49,7 @@ export function DishForm({ defaults, onSubmit, submitLabel = "Save", redirectOnS
         if (redirectOnSuccess) router.push(redirectOnSuccess.replace(":id", result.id));
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

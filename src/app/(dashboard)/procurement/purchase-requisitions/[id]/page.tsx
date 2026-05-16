@@ -42,6 +42,11 @@ export default async function PRDetailPage({ params }: { params: Promise<{ id: s
 
   const total = pr.lines.reduce((s, l) => s.plus(new Decimal(l.requestedQty.toString()).times(new Decimal(l.unitCostSnapshot.toString()))), new Decimal(0));
 
+  // Pricing is for the approver's eye only — storekeeper/chef raise the
+  // request based on operational need; pricing is captured downstream
+  // when the PO goes out. Hide cost columns from non-approvers.
+  const showPricing = isApprover || role === Role.ACCOUNTS;
+
   return (
     <>
       <PageHeader
@@ -65,13 +70,44 @@ export default async function PRDetailPage({ params }: { params: Promise<{ id: s
       {pr.rejectionReason && (
         <div className="mb-4 rounded-md border border-alert-wash bg-alert-wash p-3 text-[12.5px] text-alert">{pr.rejectionReason}</div>
       )}
+
+      {/* Next-step guidance — keeps the workflow obvious end-to-end. */}
+      {pr.status === PurchaseRequisitionStatus.DRAFT && (
+        <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">
+          <strong>Next:</strong> Hit <em>Submit</em> when the lines look right. PRs under ₹1L auto-approve;
+          anything bigger goes to the manager.
+        </div>
+      )}
+      {pr.status === PurchaseRequisitionStatus.PENDING_APPROVAL && (
+        <div className="mb-4 rounded-md border border-amber bg-amber-wash p-3 text-[13px] text-ik-ink-2">
+          <strong>Next:</strong> Waiting on a manager / admin to approve or reject this request.
+        </div>
+      )}
+      {pr.status === PurchaseRequisitionStatus.APPROVED && (
+        <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">
+          <strong>Next:</strong> Approved — admin/manager picks a vendor and issues a Purchase Order so
+          the goods can actually be bought.
+          {isApprover && (
+            <div className="mt-2">
+              <Link href={`/procurement/purchase-orders/new?prId=${pr.id}`}>
+                <Button size="sm">Create Purchase Order from this request</Button>
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+      {pr.status === PurchaseRequisitionStatus.REJECTED && (
+        <div className="mb-4 rounded-md border border-alert-wash bg-alert-wash p-3 text-[13px] text-alert">
+          This request was rejected. Raise a new one if needed.
+        </div>
+      )}
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Ingredient</TableHead>
             <TableHead className="text-right">Requested</TableHead>
-            <TableHead className="text-right">Unit cost</TableHead>
-            <TableHead className="text-right">Line ₹</TableHead>
+            {showPricing && <TableHead className="text-right">Unit cost</TableHead>}
+            {showPricing && <TableHead className="text-right">Line ₹</TableHead>}
             <TableHead className="text-right">On hand</TableHead>
             <TableHead>Notes</TableHead>
           </TableRow>
@@ -83,8 +119,8 @@ export default async function PRDetailPage({ params }: { params: Promise<{ id: s
               <TableRow key={l.id}>
                 <TableCell>{l.ingredient.name} <span className="text-ik-ink-3">· {l.ingredient.sku}</span></TableCell>
                 <TableCell className="text-right font-mono">{l.requestedQty.toString()} {l.ingredient.unit}</TableCell>
-                <TableCell className="text-right font-mono">{l.unitCostSnapshot.toString()}</TableCell>
-                <TableCell className="text-right font-mono">{lineTotal.toString()}</TableCell>
+                {showPricing && <TableCell className="text-right font-mono">{l.unitCostSnapshot.toString()}</TableCell>}
+                {showPricing && <TableCell className="text-right font-mono">{lineTotal.toString()}</TableCell>}
                 <TableCell className="text-right font-mono text-ik-ink-3">{l.ingredient.onHandQty.toString()}</TableCell>
                 <TableCell className="text-ik-ink-2 text-[11.5px]">{l.notes ?? "—"}</TableCell>
               </TableRow>
@@ -92,9 +128,11 @@ export default async function PRDetailPage({ params }: { params: Promise<{ id: s
           })}
         </TableBody>
       </Table>
-      <div className="mt-3 text-right font-mono text-[14px]">
-        <span className="text-ik-ink-3">Total snapshot</span> ₹{total.toDecimalPlaces(2).toString()}
-      </div>
+      {showPricing && (
+        <div className="mt-3 text-right font-mono text-[14px]">
+          <span className="text-ik-ink-3">Total snapshot</span> ₹{total.toDecimalPlaces(2).toString()}
+        </div>
+      )}
 
       {canApprove && (
         <form action={doReject} className="mt-6 rounded-md border border-alert-wash bg-alert-wash p-4 max-w-xl">

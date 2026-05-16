@@ -6,9 +6,9 @@ import nodemailer, { type Transporter } from "nodemailer";
  *      Default tuned for Outlook / Office 365:
  *        SMTP_HOST=smtp.office365.com
  *        SMTP_PORT=587
- *        SMTP_USER=ops@indefine.in
+ *        SMTP_USER=ops@greenparkecohotel.in
  *        SMTP_PASS=<outlook app password>
- *        EMAIL_FROM="Indefine Kitchen <ops@indefine.in>"
+ *        EMAIL_FROM="Green Park Eco Hotel <ops@greenparkecohotel.in>"
  *
  *   2. Console (dev)      — when SMTP_HOST / SMTP_USER aren't set, logs the
  *      message to stderr instead of sending. Useful for local dev.
@@ -70,7 +70,7 @@ function getTransport(): Transporter | null {
 function emailFrom(): string {
   return (
     process.env.EMAIL_FROM ??
-    (process.env.SMTP_USER ? `Indefine Kitchen <${process.env.SMTP_USER}>` : "Indefine Kitchen <no-reply@localhost>")
+    (process.env.SMTP_USER ? `Green Park Eco Hotel <${process.env.SMTP_USER}>` : "Green Park Eco Hotel <no-reply@localhost>")
   );
 }
 
@@ -117,26 +117,26 @@ export function buildInvoiceEmail(input: {
   publicUrl: string;
 }): { subject: string; text: string; html: string } {
   const kindLabel = input.invoiceKind === "PROFORMA" ? "Proforma invoice" : "Tax invoice";
-  const subject = `${kindLabel} ${input.invoiceNo} from Indefine Kitchen`;
+  const subject = `${kindLabel} ${input.invoiceNo} from Green Park Eco Hotel`;
   const text =
     `Hi ${input.customerName},\n\n` +
-    `Please find your ${kindLabel.toLowerCase()} from Indefine Kitchen attached.\n\n` +
+    `Please find your ${kindLabel.toLowerCase()} from Green Park Eco Hotel attached.\n\n` +
     `Invoice no:  ${input.invoiceNo}\n` +
     `Amount:      ${input.grandTotal}\n` +
     (input.eventDateLabel ? `For event on: ${input.eventDateLabel}\n` : "") +
     `\nYou can also view the invoice online at:\n${input.publicUrl}\n\n` +
-    `Thank you,\nIndefine Kitchen\n`;
+    `Thank you,\nGreen Park Eco Hotel\n`;
   const html = `
 <div style="font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; color:#1F2A24; line-height:1.5;">
   <p>Hi ${escapeHtml(input.customerName)},</p>
-  <p>Please find your <strong>${escapeHtml(kindLabel.toLowerCase())}</strong> from Indefine Kitchen attached.</p>
+  <p>Please find your <strong>${escapeHtml(kindLabel.toLowerCase())}</strong> from Green Park Eco Hotel attached.</p>
   <table style="border-collapse:collapse; margin:12px 0;">
     <tr><td style="padding:4px 12px 4px 0; color:#516056;">Invoice no</td><td style="font-family:monospace;">${escapeHtml(input.invoiceNo)}</td></tr>
     <tr><td style="padding:4px 12px 4px 0; color:#516056;">Amount</td><td style="font-weight:600;">${escapeHtml(input.grandTotal)}</td></tr>
     ${input.eventDateLabel ? `<tr><td style="padding:4px 12px 4px 0; color:#516056;">Event date</td><td>${escapeHtml(input.eventDateLabel)}</td></tr>` : ""}
   </table>
   <p>You can also view the invoice online here: <a href="${escapeHtml(input.publicUrl)}" style="color:#0F6E56;">View invoice</a>.</p>
-  <p style="color:#516056; font-size: 13px;">Thank you,<br/>Indefine Kitchen</p>
+  <p style="color:#516056; font-size: 13px;">Thank you,<br/>Green Park Eco Hotel</p>
 </div>`.trim();
   return { subject, text, html };
 }
@@ -149,4 +149,58 @@ function escapeHtml(s: string): string {
     '"': "&quot;",
     "'": "&#39;",
   }[c] as string));
+}
+
+/**
+ * Composer for quote emails. Sent both when the user clicks "Send to
+ * customer" for the first time and again whenever they hit "Resend by
+ * email" after a revision. The body intentionally avoids price detail
+ * so the customer always clicks through to the live share link.
+ */
+export function buildQuoteEmail(input: {
+  quoteNo: string;
+  customerName: string;
+  title: string;
+  grandTotal: string;
+  eventDateLabel?: string;
+  validUntilLabel?: string;
+  publicUrl: string;
+  notes?: string | null;
+}): { subject: string; text: string; html: string } {
+  const subject = `Quote ${input.quoteNo} from Green Park Eco Hotel`;
+  const text =
+    `Hi ${input.customerName},\n\n` +
+    `Please find your quote — "${input.title}" — from Green Park Eco Hotel.\n\n` +
+    `Quote no:    ${input.quoteNo}\n` +
+    `Amount:      ${input.grandTotal}\n` +
+    (input.eventDateLabel ? `Event date:  ${input.eventDateLabel}\n` : "") +
+    (input.validUntilLabel ? `Valid until: ${input.validUntilLabel}\n` : "") +
+    `\nView the full quote here:\n${input.publicUrl}\n\n` +
+    (input.notes ? `Notes from us:\n${input.notes}\n\n` : "") +
+    `Reply to this email or call us if you'd like to change anything — menu, dates, headcount, ` +
+    `whatever. We can revise the quote any time before you accept.\n\n` +
+    `Thank you,\nGreen Park Eco Hotel\n`;
+  const html = `
+<div style="font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; color:#1F2A24; line-height:1.5;">
+  <p>Hi ${escapeHtml(input.customerName)},</p>
+  <p>Please find your quote — <strong>${escapeHtml(input.title)}</strong> — from Green Park Eco Hotel.</p>
+  <table style="border-collapse:collapse; margin:12px 0;">
+    <tr><td style="padding:4px 12px 4px 0; color:#516056;">Quote no</td><td style="font-family:monospace;">${escapeHtml(input.quoteNo)}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0; color:#516056;">Amount</td><td style="font-weight:600;">${escapeHtml(input.grandTotal)}</td></tr>
+    ${input.eventDateLabel ? `<tr><td style="padding:4px 12px 4px 0; color:#516056;">Event date</td><td>${escapeHtml(input.eventDateLabel)}</td></tr>` : ""}
+    ${input.validUntilLabel ? `<tr><td style="padding:4px 12px 4px 0; color:#516056;">Valid until</td><td>${escapeHtml(input.validUntilLabel)}</td></tr>` : ""}
+  </table>
+  <p>
+    <a href="${escapeHtml(input.publicUrl)}" style="display:inline-block; background:#0F6E56; color:#fff; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:500;">
+      View the full quote
+    </a>
+  </p>
+  ${input.notes ? `<p style="color:#516056; border-left:3px solid #C8EBDD; padding-left:12px; margin:16px 0;">${escapeHtml(input.notes).replace(/\n/g, "<br/>")}</p>` : ""}
+  <p style="color:#516056; font-size:13px;">
+    Reply to this email or call us if you'd like to change anything — menu, dates, headcount,
+    whatever. We can revise the quote any time before you accept.
+  </p>
+  <p style="color:#516056; font-size: 13px;">Thank you,<br/>Green Park Eco Hotel</p>
+</div>`.trim();
+  return { subject, text, html };
 }

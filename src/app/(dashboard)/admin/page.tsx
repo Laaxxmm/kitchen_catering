@@ -5,7 +5,7 @@ import { gateRolePage } from "@/server/rbac";
 
 const SECTIONS = [
   { href: "/admin/users", title: "Users & roles", desc: "Create, update, deactivate users. ADMIN only." },
-  { href: "/admin/settings", title: "Settings", desc: "Key/value tunables (recipe gate, OTP provider, branding, …)." },
+  { href: "/admin/settings", title: "Settings", desc: "Key/value tunables (recipe gate, email provider, branding, …)." },
   { href: "/admin/audit", title: "Audit log", desc: "Read-only audit trail of every consequential mutation." },
 ];
 

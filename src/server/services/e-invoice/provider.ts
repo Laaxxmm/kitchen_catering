@@ -1,7 +1,7 @@
 /**
  * E-invoice (IRN + signed QR) provider abstraction.
  *
- * Production Indefine Kitchen deployments use a GSP (ClearTax / IRIS / NIC
+ * Production Green Park Eco Hotel deployments use a GSP (ClearTax / IRIS / NIC
  * direct). Dev + this scaffold ship a sandbox provider that issues
  * synthetic IRNs so the rest of the system can be exercised end-to-end
  * without real GSP credentials.

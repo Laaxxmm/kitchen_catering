@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { OrderCreateInputT, OrderItemInputT } from "@/lib/validators";
+import { isNextNavigationError } from "@/lib/next-error";
+import { QuickAddCustomer, type QuickCustomerInput } from "@/components/ik/QuickAddCustomer";
 
 interface CustomerOption { id: string; name: string; stateCode: string }
 interface DishOption { id: string; name: string; code: string | null; unitPrice: string; gstRatePct: string }
@@ -22,6 +24,9 @@ interface Props {
   onSubmit: (input: OrderCreateInputT) => Promise<{ id: string; code: string }>;
   submitLabel?: string;
   redirectOnSuccess?: string;
+  /** Optional inline customer creator — when present, shows a
+   *  "+ Add new customer" toggle under the dropdown. */
+  onQuickAddCustomer?: (input: QuickCustomerInput) => Promise<{ id: string; name: string; stateCode: string }>;
 }
 
 interface DraftLine {
@@ -37,10 +42,13 @@ function emptyLine(): DraftLine {
   return { dishId: "", portions: "1", unitPrice: "0", discountPct: "0", gstRatePct: "5", notes: "" };
 }
 
-export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel = "Create draft", redirectOnSuccess }: Props) {
+export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel = "Create draft", redirectOnSuccess, onQuickAddCustomer }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
+  // Local copy of customers so a quick-add can append immediately
+  // without a router refresh.
+  const [customerOptions, setCustomerOptions] = useState(customers);
   const [customerId, setCustomerId] = useState(defaults?.customerId ?? customers[0]?.id ?? "");
   const [eventDate, setEventDate] = useState(defaults?.eventDate ?? "");
   const [headcount, setHeadcount] = useState(String(defaults?.headcount ?? "10"));
@@ -136,6 +144,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
         if (redirectOnSuccess) router.push(redirectOnSuccess.replace(":id", result.id));
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });
@@ -154,8 +163,18 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
               onChange={(e) => setCustomerId(e.target.value)}
               className="h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
             >
-              {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {customerOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            {onQuickAddCustomer && (
+              <QuickAddCustomer
+                onCreate={onQuickAddCustomer}
+                onCreated={(c) => {
+                  setCustomerOptions((prev) => [c, ...prev]);
+                  setCustomerId(c.id);
+                  setPlaceOfSupplyStateCode(c.stateCode);
+                }}
+              />
+            )}
           </div>
           <div className="grid gap-1">
             <Label htmlFor="placeOfSupplyStateCode">Place of supply (state code)</Label>

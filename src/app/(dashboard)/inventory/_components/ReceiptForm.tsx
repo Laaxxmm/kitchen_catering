@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { IngredientReceiptInputT } from "@/lib/validators";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface IngredientOption {
   id: string;
@@ -49,6 +50,7 @@ export function ReceiptForm({ ingredients, onSubmit, redirectOnSuccess }: Props)
         if (redirectOnSuccess) router.push(redirectOnSuccess);
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

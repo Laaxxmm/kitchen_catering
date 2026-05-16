@@ -200,10 +200,13 @@ export async function submitOrder(id: string) {
     }
     if (!order.deliveryAddress.trim()) throw new Error("Delivery address is required");
 
+    // Workflow v3: every submission goes through admin first, even when
+    // the submitter is themselves an admin. The admin still has to click
+    // "Approve" — self-approval is explicit, never implicit.
     await tx.order.update({
       where: { id },
       data: {
-        status: OrderStatus.PENDING_CHEF_APPROVAL,
+        status: OrderStatus.PENDING_ADMIN_APPROVAL,
         submittedAt: new Date(),
       },
     });
@@ -213,13 +216,72 @@ export async function submitOrder(id: string) {
         action: "ORDER_SUBMITTED",
         entity: "Order",
         entityId: id,
-        payloadHash: sha256Json({ from: order.status, to: OrderStatus.PENDING_CHEF_APPROVAL }),
+        payloadHash: sha256Json({ from: order.status, to: OrderStatus.PENDING_ADMIN_APPROVAL }),
       },
     });
   });
 
   revalidatePath(`/orders/${id}`);
   revalidatePath("/orders");
+  revalidatePath("/queue/admin-approvals");
+}
+
+/**
+ * Admin gate — workflow v3. Every submitted order must pass this stop
+ * before the chef sees it. Approval flips to PENDING_CHEF_APPROVAL and
+ * stamps the admin's decision on the order; rejection is terminal
+ * (REJECTED_BY_ADMIN), with a required reason.
+ */
+export async function adminApproveOrder(
+  id: string,
+  input: { decision: "APPROVED" | "REJECTED"; note: string },
+) {
+  const session = await requireRole([Role.ADMIN]);
+  if (!input.note?.trim()) {
+    throw new Error("A note is required — record why you approved or rejected");
+  }
+  if (input.decision !== "APPROVED" && input.decision !== "REJECTED") {
+    throw new Error("Invalid decision");
+  }
+
+  await db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
+    if (!order) throw new Error("Order not found");
+    if (order.status !== OrderStatus.PENDING_ADMIN_APPROVAL) {
+      throw new AuthorizationError(
+        `Order is not awaiting admin approval (current: ${order.status})`,
+      );
+    }
+
+    const next =
+      input.decision === "APPROVED"
+        ? OrderStatus.PENDING_CHEF_APPROVAL
+        : OrderStatus.REJECTED_BY_ADMIN;
+
+    await tx.order.update({
+      where: { id },
+      data: {
+        status: next,
+        adminReviewedById: session.user.id,
+        adminReviewedAt: new Date(),
+        adminDecision: input.decision === "APPROVED" ? "APPROVED" : "REJECTED",
+        adminReviewNote: input.note.trim(),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: input.decision === "APPROVED" ? "ORDER_ADMIN_APPROVED" : "ORDER_ADMIN_REJECTED",
+        entity: "Order",
+        entityId: id,
+        payloadHash: sha256Json({ decision: input.decision, note: input.note.trim() }),
+      },
+    });
+  });
+
+  revalidatePath(`/orders/${id}`);
+  revalidatePath("/orders");
+  revalidatePath("/queue/admin-approvals");
   revalidatePath("/queue/chef-approvals");
 }
 

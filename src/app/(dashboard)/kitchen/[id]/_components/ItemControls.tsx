@@ -5,21 +5,25 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ProductionJobItemStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
-
-interface Chef { id: string; name: string }
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   itemId: string;
-  chefUserId: string | null;
   status: ProductionJobItemStatus;
-  chefs: Chef[];
-  onAssign: (itemId: string, chefUserId: string) => Promise<void>;
   onStart: (itemId: string) => Promise<void>;
   onReady: (itemId: string) => Promise<void>;
-  mode: "assign" | "actions";
 }
 
-export function ItemControls({ itemId, chefUserId, status, chefs, onAssign, onStart, onReady, mode }: Props) {
+/**
+ * Per-item action button on the kitchen production job. We dropped the
+ * "assign chef" dropdown — the chef is recorded automatically on the
+ * first Start click (see startProductionItem in production-jobs.ts).
+ *
+ * QUEUED  → "Start"          → IN_PROGRESS
+ * IN_PROGRESS → "Mark ready" → READY
+ * READY / CANCELLED → no actions
+ */
+export function ItemControls({ itemId, status, onStart, onReady }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -30,28 +34,10 @@ export function ItemControls({ itemId, chefUserId, status, chefs, onAssign, onSt
         toast.success("Saved");
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Action failed");
       }
     });
-  }
-
-  if (mode === "assign") {
-    return (
-      <select
-        defaultValue={chefUserId ?? ""}
-        onChange={(e) => {
-          const val = e.target.value;
-          if (val) call(() => onAssign(itemId, val));
-        }}
-        disabled={pending || status === ProductionJobItemStatus.READY || status === ProductionJobItemStatus.CANCELLED}
-        className="h-8 rounded border border-ik-rule bg-ik-card px-1 text-[12.5px]"
-      >
-        <option value="">— pick chef —</option>
-        {chefs.map((c) => (
-          <option key={c.id} value={c.id}>{c.name}</option>
-        ))}
-      </select>
-    );
   }
 
   if (status === ProductionJobItemStatus.READY || status === ProductionJobItemStatus.CANCELLED) {
@@ -60,7 +46,7 @@ export function ItemControls({ itemId, chefUserId, status, chefs, onAssign, onSt
   if (status === ProductionJobItemStatus.QUEUED) {
     return (
       <Button size="sm" disabled={pending} onClick={() => call(() => onStart(itemId))}>
-        Start
+        Start cooking
       </Button>
     );
   }

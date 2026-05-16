@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Vendor { id: string; name: string; code: string }
 interface PO { id: string; poNo: string; vendorId: string; vendorName: string }
@@ -22,20 +23,27 @@ interface Props {
     issueDate: string | undefined; dueDate: string | null; notes: string | null;
     lines: DraftLine[];
   }) => Promise<void>;
+  // Pre-fill when the bill is being recorded against a known PO (the
+  // "Record supplier bill" button on the PO/GRN detail page).
+  initialVendorId?: string | null;
+  initialPoId?: string | null;
+  initialLines?: DraftLine[] | null;
 }
 
 function empty(): DraftLine { return { description: "", quantity: "1", unit: "kg", unitPrice: "0", gstRatePct: "5" }; }
 
-export function VendorBillForm({ vendors, pos, onSubmit }: Props) {
+export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initialPoId, initialLines }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const [vendorId, setVendorId] = useState(vendors[0]?.id ?? "");
-  const [poId, setPoId] = useState<string>("");
+  const [vendorId, setVendorId] = useState(initialVendorId || vendors[0]?.id || "");
+  const [poId, setPoId] = useState<string>(initialPoId || "");
   const [vendorBillNo, setVendorBillNo] = useState("");
   const [issueDate, setIssueDate] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState<DraftLine[]>([empty()]);
+  const [lines, setLines] = useState<DraftLine[]>(
+    initialLines && initialLines.length > 0 ? initialLines : [empty()],
+  );
 
   const filteredPos = pos.filter((p) => p.vendorId === vendorId);
 
@@ -70,6 +78,7 @@ export function VendorBillForm({ vendors, pos, onSubmit }: Props) {
           lines: payload,
         });
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

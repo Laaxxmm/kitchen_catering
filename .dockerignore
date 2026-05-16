@@ -1,0 +1,65 @@
+# Pulled from the Docker context to keep image builds fast and lean.
+# Order roughly: VCS, deps, build outputs, IDE, test artefacts, local dev,
+# Capacitor android source, anything secret.
+
+# ---- VCS ----
+.git
+.gitignore
+.gitattributes
+.github
+
+# ---- Node ----
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ---- Next.js ----
+.next
+out
+.vercel
+.turbo
+next-env.d.ts
+
+# ---- Tests / coverage ----
+coverage
+.nyc_output
+playwright-report
+test-results
+
+# ---- IDE / OS ----
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ---- Local dev ----
+.env
+.env.local
+.env.*.local
+*.local
+.husky/_
+
+# ---- Capacitor (Android sources are built locally, not from Docker) ----
+android
+ios
+dist-mobile
+
+# ---- Misc large/derived ----
+*.log
+*.tsbuildinfo
+.eslintcache
+.prettiercache
+.cache
+storybook-static
+
+# ---- Docs and scripts not needed at runtime ----
+docs/PRD.md
+docs/REUSE-MAP.md
+docs/workflow.png
+README.local.md
+
+# Keep `prisma/`, `public/`, `src/`, `scripts/regen-icons.mjs`, configs.

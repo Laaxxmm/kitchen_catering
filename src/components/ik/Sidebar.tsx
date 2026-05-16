@@ -20,6 +20,7 @@ type NavNode = NavItem | NavSep;
 
 const NAV: NavNode[] = [
   { kind: "item", key: "dashboard", label: "Dashboard", icon: "home", href: "/dashboard" },
+  { kind: "item", key: "tasks", label: "Tasks", icon: "report", href: "/tasks" },
 
   { kind: "sep", label: "Sales" },
   { kind: "item", key: "customers", label: "Customers", icon: "building", href: "/customers" },
@@ -32,6 +33,8 @@ const NAV: NavNode[] = [
   { kind: "item", key: "requisitions", label: "Requisitions", icon: "report", href: "/requisitions" },
   { kind: "item", key: "deliveries", label: "Deliveries", icon: "truck", href: "/deliveries" },
   { kind: "item", key: "inventory", label: "Inventory", icon: "box", href: "/inventory" },
+  { kind: "item", key: "housekeeping", label: "Housekeeping", icon: "box", href: "/housekeeping" },
+  { kind: "item", key: "maintenance", label: "Maintenance", icon: "briefcase", href: "/maintenance" },
 
   { kind: "sep", label: "Procurement" },
   { kind: "item", key: "procurement", label: "Procurement", icon: "invoice", href: "/procurement" },
@@ -137,16 +140,14 @@ export function Sidebar({ userName, userRole, footer }: SidebarProps) {
               justifyContent: "center",
             }}
           >
+            {/* Chef's toque — same drawing as the full Wordmark mark.
+                Background is the surrounding green square (this container
+                already paints `IK.accent`), so we draw the toque alone. */}
             <svg width="22" height="22" viewBox="0 0 40 40">
-              <path
-                d="M11 25c0-4 3-6 7-6s7-2 7-6"
-                stroke="#fff"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                fill="none"
-              />
-              <circle cx="11" cy="15" r="2.2" fill="#fff" />
-              <circle cx="29" cy="25" r="2.2" fill="#fff" />
+              <circle cx="14" cy="20" r="5" fill="#fff" />
+              <circle cx="20" cy="17" r="6" fill="#fff" />
+              <circle cx="26" cy="20" r="5" fill="#fff" />
+              <rect x="10" y="25" width="20" height="6.5" rx="1.6" fill="#fff" />
             </svg>
           </div>
         ) : (

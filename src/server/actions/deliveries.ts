@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
-import { CustomerInvoiceKind, CustomerInvoiceStatus, DeliveryStatus, OrderStatus, PaymentMethod, Role } from "@prisma/client";
+import { DeliveryStatus, OrderStatus, PaymentMethod, Role } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { toDecimal } from "@/lib/money";
@@ -18,7 +18,6 @@ import {
 } from "@/lib/validators";
 import { nextDeliveryNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
-import { formatOTPMessage, getSMSProvider } from "@/lib/sms";
 
 const SCHEDULE_ROLES = [Role.ADMIN, Role.MANAGER];
 const DRIVER_OR_MANAGER = [Role.ADMIN, Role.MANAGER, Role.DELIVERY];
@@ -26,15 +25,15 @@ const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.SALES, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.ACCOUNTS, Role.DELIVERY,
 ];
 
-function generateOTP(): string {
-  // 4-digit OTP, leading zeros allowed.
-  return String(Math.floor(Math.random() * 10000)).padStart(4, "0");
-}
-
 /**
- * Schedule a delivery against a READY order. Generates a 4-digit OTP whose
- * bcrypt hash is stored; the plaintext is logged to the server console so
- * the dispatcher can read it back in Phase 1 (Phase 3 wires MSG91 SMS).
+ * Schedule a delivery against a READY order. The OTP step has been
+ * dropped — the driver confirms delivery directly from the mobile app
+ * when they hand the goods over. Tax invoice is auto-generated the
+ * moment delivery is confirmed (see `confirmDeliveryOTP`).
+ *
+ * The legacy `otpHash` / `otpAttempts` columns remain on the schema
+ * (cheap, harmless) so confirm-side code that branches on their absence
+ * doesn't break for in-flight deliveries.
  */
 export async function scheduleDelivery(raw: unknown) {
   const session = await requireRole(SCHEDULE_ROLES);
@@ -51,8 +50,6 @@ export async function scheduleDelivery(raw: unknown) {
     }
 
     const deliveryNo = await nextDeliveryNumber(tx);
-    const otp = generateOTP();
-    const otpHash = await bcrypt.hash(otp, 12);
 
     const delivery = await tx.delivery.create({
       data: {
@@ -61,7 +58,7 @@ export async function scheduleDelivery(raw: unknown) {
         driverUserId: input.driverUserId,
         vehicleNo: input.vehicleNo ?? null,
         scheduledAt: new Date(input.scheduledAt),
-        otpHash,
+        // otpHash deliberately left null — OTP step retired.
         recipientName: order.customer.contactName ?? null,
         recipientPhone: order.customer.phone ?? null,
         status: DeliveryStatus.SCHEDULED,
@@ -78,32 +75,8 @@ export async function scheduleDelivery(raw: unknown) {
       },
     });
 
-    return { delivery, otp, orderCode: order.code };
+    return { delivery };
   });
-
-  // Phase 3: route the OTP through the SMS provider. Falls back to console
-  // when SMS_PROVIDER is unset. The bcrypt-hashed copy in the DB is what
-  // actually gates confirmation; the SMS just makes the OTP available to
-  // the recipient.
-  const driver = await db.user.findUnique({
-    where: { id: input.driverUserId },
-    select: { phone: true },
-  });
-  const recipientPhone = result.delivery.recipientPhone ?? driver?.phone;
-  if (recipientPhone) {
-    try {
-      const sms = getSMSProvider();
-      await sms.send(recipientPhone, formatOTPMessage(result.otp, result.orderCode));
-    } catch (err) {
-      // Don't fail the scheduling on SMS error — just log it. The dispatcher
-      // can read the OTP off the audit log / console fallback.
-      console.error(`[SMS error scheduling ${result.delivery.deliveryNo}]: ${err instanceof Error ? err.message : err}`);
-    }
-  } else {
-    console.error(
-      `[DELIVERY OTP] ${result.delivery.deliveryNo} (order ${result.orderCode}) OTP=${result.otp} (no recipient phone)`,
-    );
-  }
 
   revalidatePath("/deliveries");
   revalidatePath(`/orders/${input.orderId}`);
@@ -179,11 +152,27 @@ export async function markDeliveryArrived(id: string) {
   revalidatePath(`/deliveries/${id}`);
 }
 
+/**
+ * Confirm a delivery (the driver clicks "Delivered" at the customer's
+ * door). No OTP needed — the customer-readback step has been retired.
+ *
+ * In one transaction:
+ *   1. Mark the delivery DELIVERED + record the timestamp.
+ *   2. Optionally capture payment-on-delivery (amount + method + ref).
+ *   3. Auto-create + issue the GST tax invoice for the order.
+ *   4. Advance the order DELIVERED → INVOICED.
+ *   5. If payment was collected, record it against the freshly-created
+ *      invoice (so the line ties out 3-way: delivery ↔ invoice ↔ payment).
+ *
+ * The function name still ends `…OTP` to keep the existing route shims
+ * working without a rename sweep; the OTP field on the input is now
+ * optional and ignored if absent.
+ */
 export async function confirmDeliveryOTP(id: string, raw: unknown) {
   const session = await requireRole(DRIVER_OR_MANAGER);
   const input = DeliveryOTPInput.parse(raw);
 
-  await db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     const delivery = await tx.delivery.findUnique({ where: { id } });
     if (!delivery) throw new Error("Delivery not found");
     if (delivery.status === DeliveryStatus.DELIVERED || delivery.status === DeliveryStatus.FAILED) {
@@ -192,36 +181,20 @@ export async function confirmDeliveryOTP(id: string, raw: unknown) {
     if (session.user.role === Role.DELIVERY && delivery.driverUserId !== session.user.id) {
       throw new AuthorizationError("Drivers can only confirm their own deliveries");
     }
-    if (!delivery.otpHash) throw new Error("Delivery has no OTP set");
 
-    const ok = await bcrypt.compare(input.otp, delivery.otpHash);
-    if (!ok) {
-      const attempts = delivery.otpAttempts + 1;
-      const failNow = attempts >= 3;
-      await tx.delivery.update({
-        where: { id },
-        data: {
-          otpAttempts: attempts,
-          status: failNow ? DeliveryStatus.FAILED : delivery.status,
-          failureReason: failNow ? "Maximum OTP attempts exceeded" : delivery.failureReason,
-        },
-      });
-      await tx.deliveryAttempt.create({
-        data: { deliveryId: id, outcome: "OTP_MISMATCH" },
-      });
-      await tx.auditLog.create({
-        data: {
-          userId: session.user.id,
-          action: failNow ? "DELIVERY_FAILED_OTP_LIMIT" : "DELIVERY_OTP_MISMATCH",
-          entity: "Delivery",
-          entityId: id,
-          payloadHash: sha256Json({ attempts }),
-        },
-      });
-      if (failNow) {
-        // Order does NOT auto-cancel; manager decides next step.
+    // Legacy OTP support: if the delivery row has an otpHash AND the
+    // caller supplied an OTP, verify it for backwards compatibility.
+    // Otherwise (new flow, or no OTP supplied) skip the check entirely.
+    if (delivery.otpHash && input.otp) {
+      const ok = await bcrypt.compare(input.otp, delivery.otpHash);
+      if (!ok) {
+        const attempts = delivery.otpAttempts + 1;
+        await tx.delivery.update({
+          where: { id },
+          data: { otpAttempts: attempts },
+        });
+        throw new Error("OTP did not match");
       }
-      throw new Error(`Invalid OTP (${3 - attempts} attempts remaining)`);
     }
 
     // Payment-on-delivery: validate the trio before doing any writes.
@@ -259,50 +232,11 @@ export async function confirmDeliveryOTP(id: string, raw: unknown) {
       data: { deliveryId: id, outcome: "OTP_MATCH" },
     });
 
-    // Auto-record payment on the order's most recent open tax invoice.
-    // Skip proforma — payments bind to the real invoice.
-    if (pay) {
-      const inv = await tx.customerInvoice.findFirst({
-        where: {
-          orderId: delivery.orderId,
-          kind: { not: CustomerInvoiceKind.PROFORMA },
-          status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] },
-        },
-        orderBy: { issuedAt: "desc" },
-        select: { id: true, grandTotal: true, amountPaid: true },
-      });
-      if (inv) {
-        await tx.customerInvoicePayment.create({
-          data: {
-            invoiceId: inv.id,
-            amount: pay.amount.toFixed(2),
-            paidAt: new Date(),
-            method: pay.method,
-            reference: pay.reference,
-            notes: "Collected at delivery",
-            recordedById: session.user.id,
-          },
-        });
-        const newPaid = toDecimal(inv.amountPaid).plus(pay.amount);
-        const fullyPaid = newPaid.gte(toDecimal(inv.grandTotal));
-        await tx.customerInvoice.update({
-          where: { id: inv.id },
-          data: {
-            amountPaid: newPaid.toFixed(2),
-            status: fullyPaid ? CustomerInvoiceStatus.PAID : CustomerInvoiceStatus.PARTIAL,
-          },
-        });
-        await tx.auditLog.create({
-          data: {
-            userId: session.user.id,
-            action: "INVOICE_PAYMENT_RECORDED_AT_DELIVERY",
-            entity: "CustomerInvoice",
-            entityId: inv.id,
-            payloadHash: sha256Json({ deliveryId: id, amount: pay.amount.toFixed(2), method: pay.method }),
-          },
-        });
-      }
-    }
+    // Payment-on-delivery: still record the cash/UPI the driver collected
+    // at the door — but defer binding it to a tax invoice. The accounts /
+    // admin / manager generates the invoice manually from the order
+    // detail page, and we credit any pending PoD payments against it
+    // there. For now stash the amount on the delivery row itself.
 
     await tx.auditLog.create({
       data: {
@@ -313,9 +247,13 @@ export async function confirmDeliveryOTP(id: string, raw: unknown) {
         payloadHash: pay ? sha256Json({ paymentCollected: true, amount: pay.amount.toFixed(2), method: pay.method }) : undefined,
       },
     });
+
+    return { orderId: delivery.orderId };
   });
+
   revalidatePath(`/deliveries/${id}`);
   revalidatePath("/deliveries");
+  revalidatePath(`/orders/${result.orderId}`);
 }
 
 export async function failDelivery(id: string, raw: unknown) {

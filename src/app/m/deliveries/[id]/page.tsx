@@ -23,7 +23,7 @@ export default async function MobileDeliveryDetailPage({ params }: { params: Pro
   async function doDispatch() { "use server"; await dispatchDelivery(id); }
   async function doArrived() { "use server"; await markDeliveryArrived(id); }
   async function doOTP(payload: {
-    otp: string;
+    otp?: string;
     paymentCollected: boolean;
     paymentAmount?: string;
     paymentMethod?: PaymentMethod;

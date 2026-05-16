@@ -15,6 +15,7 @@ import {
 } from "@/server/actions/procurement";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
+import { NotifyVendorBlock } from "./_components/NotifyVendorBlock";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +61,28 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
         {po.approvedAt && <span className="text-ik-ink-3">· Approved {formatIST(po.approvedAt)} by {po.approvedBy?.name ?? "—"}</span>}
         {po.sentAt && <span className="text-ik-ink-3">· Sent {formatIST(po.sentAt)}</span>}
       </div>
+
+      {/* Action panel — explains what happens now and surfaces the right
+          buttons so the user never feels stranded mid-chain. */}
+      {po.status === VendorPOStatus.APPROVED && canSend ? (
+        <div className="mb-4">
+          <NotifyVendorBlock
+            vendor={{ name: po.vendor.name, phone: po.vendor.phone, email: po.vendor.email }}
+            poNo={po.poNo}
+            messageText={buildVendorMessage(po)}
+            emailSubject={`Purchase order ${po.poNo} from Green Park Eco Hotel`}
+            receiveHref={`/procurement/grns/new?poId=${po.id}`}
+            onMarkSent={doSend}
+          />
+        </div>
+      ) : (
+        <NextStep
+          status={po.status}
+          canReceive={canReceive}
+          receiveHref={`/procurement/grns/new?poId=${po.id}`}
+        />
+      )}
+
 
       <div className="grid gap-6 md:grid-cols-3">
         <section className="md:col-span-2 grid gap-4">
@@ -138,5 +161,119 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
         </aside>
       </div>
     </>
+  );
+}
+
+interface NextStepProps {
+  status: VendorPOStatus;
+  canReceive: boolean;
+  receiveHref: string;
+}
+
+/**
+ * Status-specific guidance panel for the non-APPROVED states. APPROVED
+ * gets the richer NotifyVendorBlock with WhatsApp/email/mark-sent actions;
+ * everything else just needs a one-liner pointing at the next button.
+ */
+function NextStep({ status, canReceive, receiveHref }: NextStepProps) {
+  if (status === VendorPOStatus.CANCELLED || status === VendorPOStatus.CLOSED) return null;
+
+  let body: React.ReactNode = null;
+
+  if (status === VendorPOStatus.DRAFT) {
+    body = (
+      <>
+        <strong>Next:</strong> Submit this PO when you&apos;re ready. Under ₹1L it auto-approves; bigger
+        ones go to the manager (up to ₹10L) or admin (above).
+      </>
+    );
+  } else if (status === VendorPOStatus.PENDING_APPROVAL) {
+    body = (
+      <>
+        <strong>Next:</strong> Waiting on approval — manager up to ₹10L, admin above. The Approve button
+        appears in the header for the right approver.
+      </>
+    );
+  } else if (status === VendorPOStatus.SENT) {
+    body = (
+      <>
+        <strong>Next:</strong> Supplier has been notified — waiting on the delivery. When the goods arrive
+        at the kitchen, the storekeeper presses the button below. Stock and average cost update
+        automatically.
+        <div className="mt-2">
+          {canReceive && (
+            <Link href={receiveHref}>
+              <Button size="sm">Goods arrived — log delivery</Button>
+            </Link>
+          )}
+        </div>
+      </>
+    );
+  } else if (status === VendorPOStatus.PARTIALLY_RECEIVED) {
+    body = (
+      <>
+        <strong>Next:</strong> Some items have arrived. Log another delivery when the rest comes in. The
+        supplier&apos;s bill can wait until everything is in.
+        <div className="mt-2">
+          {canReceive && (
+            <Link href={receiveHref}>
+              <Button size="sm">Log another delivery</Button>
+            </Link>
+          )}
+        </div>
+      </>
+    );
+  } else if (status === VendorPOStatus.RECEIVED) {
+    body = (
+      <>
+        <strong>Next:</strong> All goods received. When the supplier sends the bill, record it — the
+        system checks it against this PO + the delivery notes before letting accounts pay.
+        <div className="mt-2">
+          <Link href="/procurement/vendor-bills/new">
+            <Button size="sm" variant="outline">Record supplier bill</Button>
+          </Link>
+        </div>
+      </>
+    );
+  }
+
+  if (!body) return null;
+
+  return (
+    <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">
+      {body}
+    </div>
+  );
+}
+
+/**
+ * Compose the plain-text body that goes into WhatsApp / email when
+ * notifying a supplier of a new order. Kept readable on a phone keyboard
+ * — short greeting, bulleted item list, total, expected date.
+ */
+function buildVendorMessage(po: {
+  poNo: string;
+  vendor: { name: string };
+  expectedDate: Date | null;
+  grandTotal: { toString(): string };
+  lines: Array<{
+    description: string;
+    quantity: { toString(): string };
+    unit: string;
+  }>;
+}): string {
+  const lines = po.lines
+    .map((l) => `• ${l.description} — ${l.quantity.toString()} ${l.unit}`)
+    .join("\n");
+  const expected = po.expectedDate
+    ? `\nExpected delivery: ${formatIST(po.expectedDate, "EEE d MMM yyyy")}`
+    : "";
+  return (
+    `Hi ${po.vendor.name},\n\n` +
+    `This is Green Park Eco Hotel. Please supply the following items against PO ${po.poNo}:\n\n` +
+    `${lines}\n\n` +
+    `Total (incl. GST): ₹${po.grandTotal.toString()}${expected}\n\n` +
+    `Please confirm receipt of this order and the expected delivery time.\n\n` +
+    `Thank you,\nGreen Park Eco Hotel`
   );
 }

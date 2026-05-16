@@ -11,7 +11,12 @@ import {
   PaymentMethod,
   ProductionJobStatus,
   QuoteStatus,
+  MaintenanceActivityStatus,
+  MaintenanceCategory,
   Role,
+  RoomType,
+  TaskPriority,
+  TaskStatus,
   VendorPaymentTerms,
 } from "@prisma/client";
 
@@ -192,24 +197,25 @@ export const QuoteLineInput = z.object({
   id: z.string().optional(),
   dishId: z.string().nullable().optional(),
   description: z.string().min(1).max(500),
-  portions: decimalString,
+  quantity: decimalString,
+  unit: z.string().min(1).max(20),
   unitPrice: decimalString,
   discountPct: decimalString.optional(),
   gstRatePct: decimalString.optional(),
-  notes: z.string().max(500).nullable().optional(),
+  hsnSac: z.string().max(20).nullable().optional(),
 });
 export type QuoteLineInputT = z.infer<typeof QuoteLineInput>;
 
 export const QuoteHeaderInput = z.object({
   customerId: z.string(),
-  eventDate: isoDate,
-  headcount: z.number().int().positive(),
-  mealType: z.nativeEnum(MealType),
-  deliveryAddress: z.string().min(1).max(500),
-  deliveryWindowStart: isoDate,
-  deliveryWindowEnd: isoDate,
+  title: z.string().min(1).max(200),
+  eventDate: isoDate.optional(),
+  headcount: z.number().int().positive().optional(),
+  mealType: z.nativeEnum(MealType).optional(),
+  deliveryAddress: z.string().max(500).optional(),
   placeOfSupplyStateCode: stateCode,
   notes: z.string().max(2000).nullable().optional(),
+  termsMd: z.string().max(10000).nullable().optional(),
   validUntil: isoDate.optional(),
 });
 export type QuoteHeaderInputT = z.infer<typeof QuoteHeaderInput>;
@@ -321,11 +327,14 @@ export const DeliveryAssignInput = z.object({
 });
 
 export const DeliveryOTPInput = z.object({
-  otp: z.string().regex(/^[0-9]{4}$/, "OTP must be 4 digits"),
+  // OTP is now optional. We dropped the customer-readback step — the
+  // driver just confirms delivery directly. The schema still accepts an
+  // OTP for backwards-compatible payloads, but it is no longer required.
+  otp: z.string().regex(/^[0-9]{4}$/, "OTP must be 4 digits").optional(),
   // Payment-on-delivery: driver records whether they collected payment
   // at the door. When `paymentCollected` is true, the other fields are
   // required and a CustomerInvoicePayment row is auto-recorded against
-  // the order's most recent open tax invoice.
+  // the auto-created tax invoice for the order.
   paymentCollected: z.boolean().optional(),
   paymentAmount: decimalString.optional(),
   paymentMethod: z.nativeEnum(PaymentMethod).optional(),
@@ -443,6 +452,10 @@ export type VendorPOLineInputT = z.infer<typeof VendorPOLineInput>;
 export const VendorPOCreateInput = z.object({
   vendorId: z.string(),
   orderId: z.string().nullable().optional(),
+  // When the PO is being created from an approved purchase requisition,
+  // pass the PR id so the action can mark the PR ISSUED in the same
+  // transaction and prevent it from being re-issued accidentally.
+  prId: z.string().nullable().optional(),
   placeOfSupplyStateCode: stateCode,
   expectedDate: isoDate.optional(),
   notes: z.string().max(2000).nullable().optional(),
@@ -537,6 +550,167 @@ export const SalaryRunCreateInput = z.object({
 });
 
 // =====================================================================
+// TASK ASSIGNMENT
+// =====================================================================
+
+export const TaskTemplateInput = z.object({
+  id: z.string().optional(),
+  title: z.string().min(2).max(160),
+  description: z.string().max(2000).nullable().optional(),
+  active: z.boolean().optional(),
+});
+
+export const TaskAssignInput = z.object({
+  assignedToId: z.string().min(1, "Pick an assignee"),
+  title: z.string().min(2, "Title is required").max(160),
+  description: z.string().max(4000).nullable().optional(),
+  priority: z.nativeEnum(TaskPriority).default(TaskPriority.NORMAL),
+  targetDate: isoDate,
+  templateId: z.string().nullable().optional(),
+});
+
+export const TaskUpdateInput = z.object({
+  id: z.string().min(1),
+  title: z.string().min(2).max(160).optional(),
+  description: z.string().max(4000).nullable().optional(),
+  priority: z.nativeEnum(TaskPriority).optional(),
+  targetDate: isoDate.optional(),
+  assignedToId: z.string().min(1).optional(),
+});
+
+export const TaskSubmitInput = z.object({
+  id: z.string().min(1),
+  // Mandatory — short enough to enforce a real note, long enough for context.
+  completionRemarks: z.string().trim().min(3, "Remarks are required").max(4000),
+  completedAt: isoDate.optional(),
+});
+
+export const TaskReviewInput = z.object({
+  id: z.string().min(1),
+  decision: z.enum(["APPROVE", "REJECT"]),
+  // Required when rejecting.
+  rejectionReason: z.string().max(1000).optional(),
+});
+
+export const TaskCancelInput = z.object({
+  id: z.string().min(1),
+  reason: z.string().max(500).optional(),
+});
+
+// =====================================================================
+// HOUSEKEEPING
+// =====================================================================
+
+export const RoomInput = z.object({
+  number: z.string().min(1).max(40),
+  name: z.string().max(120).nullable().optional(),
+  type: z.nativeEnum(RoomType).default(RoomType.STANDARD),
+  floor: z.string().max(40).nullable().optional(),
+  active: z.boolean().optional(),
+});
+
+export const HousekeepingStaffInput = z.object({
+  name: z.string().min(2).max(120),
+  phone: z.string().max(20).nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+  active: z.boolean().optional(),
+});
+
+export const HousekeepingItemInput = z.object({
+  name: z.string().min(2).max(160),
+  sku: z.string().max(60).nullable().optional(),
+  unit: z.string().min(1).max(20).default("piece"),
+  minStock: decimalString.nullable().optional(),
+  // Opening balance — applied only on CREATE. Server records an internal
+  // "Opening balance" receipt for the audit trail and bumps currentStock.
+  // Ignored on UPDATE (use the regular receipt flow to correct stock).
+  openingStock: decimalString.nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+  active: z.boolean().optional(),
+});
+
+const ReceiptLineInput = z.object({
+  itemId: z.string().min(1),
+  quantity: decimalString,
+  costPerUnit: decimalString.nullable().optional(),
+});
+
+export const HousekeepingReceiptInput = z.object({
+  receivedAt: isoDate,
+  sourceNote: z.string().max(500).nullable().optional(),
+  sourceContact: z.string().max(160).nullable().optional(),
+  lines: z.array(ReceiptLineInput).min(1, "Add at least one line"),
+});
+
+const IssueLineInput = z.object({
+  itemId: z.string().min(1),
+  quantity: decimalString,
+});
+
+export const HousekeepingIssueInput = z.object({
+  issuedAt: isoDate,
+  staffId: z.string().min(1, "Pick a staff member"),
+  roomId: z.string().min(1, "Pick a room"),
+  purpose: z.string().max(200).nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+  lines: z.array(IssueLineInput).min(1, "Add at least one item"),
+});
+
+// =====================================================================
+// MAINTENANCE
+// =====================================================================
+
+export const MaintenanceStaffInput = z.object({
+  name: z.string().min(2).max(120),
+  phone: z.string().max(20).nullable().optional(),
+  category: z.nativeEnum(MaintenanceCategory).default(MaintenanceCategory.GENERAL),
+  notes: z.string().max(500).nullable().optional(),
+  active: z.boolean().optional(),
+});
+
+export const MaintenanceItemInput = z.object({
+  name: z.string().min(2).max(160),
+  sku: z.string().max(60).nullable().optional(),
+  unit: z.string().min(1).max(20).default("piece"),
+  category: z.nativeEnum(MaintenanceCategory).default(MaintenanceCategory.GENERAL),
+  minStock: decimalString.nullable().optional(),
+  openingStock: decimalString.nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+  active: z.boolean().optional(),
+});
+
+const MaintReceiptLineInput = z.object({
+  itemId: z.string().min(1),
+  quantity: decimalString,
+  costPerUnit: decimalString.nullable().optional(),
+});
+
+export const MaintenanceReceiptInput = z.object({
+  receivedAt: isoDate,
+  sourceNote: z.string().max(500).nullable().optional(),
+  sourceContact: z.string().max(160).nullable().optional(),
+  lines: z.array(MaintReceiptLineInput).min(1, "Add at least one line"),
+});
+
+const MaintActivityLineInput = z.object({
+  itemId: z.string().min(1),
+  quantity: decimalString,
+});
+
+export const MaintenanceActivityInput = z.object({
+  performedAt: isoDate,
+  staffId: z.string().min(1, "Pick a staff member"),
+  roomId: z.string().min(1, "Pick a room"),
+  category: z.nativeEnum(MaintenanceCategory),
+  status: z.nativeEnum(MaintenanceActivityStatus).default(MaintenanceActivityStatus.COMPLETED),
+  issueReported: z.string().min(2, "Describe the issue").max(500),
+  workDone: z.string().max(1000).nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+  // Items consumed are optional — many activities are pure labour.
+  lines: z.array(MaintActivityLineInput).optional().default([]),
+});
+
+// =====================================================================
 // SETTINGS
 // =====================================================================
 
@@ -558,4 +732,6 @@ export {
   ProductionJobStatus,
   QuoteStatus,
   Role,
+  TaskPriority,
+  TaskStatus,
 };

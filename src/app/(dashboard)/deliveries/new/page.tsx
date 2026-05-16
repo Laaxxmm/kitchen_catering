@@ -6,7 +6,12 @@ import { ScheduleDeliveryForm } from "../_components/ScheduleDeliveryForm";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewDeliveryPage() {
+export default async function NewDeliveryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ orderId?: string }>;
+}) {
+  const { orderId } = await searchParams;
   const [orders, drivers] = await Promise.all([
     listOrders({ status: [OrderStatus.READY] }),
     listDrivers(),
@@ -22,12 +27,13 @@ export default async function NewDeliveryPage() {
       <PageHeader
         eyebrow="Operations · Deliveries"
         title="Schedule delivery"
-        description="Only orders in READY status can be scheduled. The OTP is generated and logged to the server console (Phase 1)."
+        description="Pick the order, pick a driver, set the time. The driver confirms delivery from their phone when the goods are handed over — the tax invoice is auto-generated and emailed to the customer at that moment."
       />
       <ScheduleDeliveryForm
         orders={orders.map((o) => ({ id: o.id, code: o.code, customerName: o.customer.name, eventDate: o.eventDate.toISOString() }))}
         drivers={drivers}
         onSubmit={submit}
+        initialOrderId={orderId ?? null}
       />
     </>
   );

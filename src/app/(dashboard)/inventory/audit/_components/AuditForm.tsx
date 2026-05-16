@@ -7,6 +7,7 @@ import { Decimal } from "decimal.js";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Ingredient { id: string; sku: string; name: string; unit: string; system: string; avgCost: string }
 
@@ -46,6 +47,7 @@ export function AuditForm({ ingredients, onSubmit }: Props) {
         toast.success(`Posted ${r.changes.length} adjustment(s).`);
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

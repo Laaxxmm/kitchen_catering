@@ -34,21 +34,17 @@ export function MobileHeader({ userName, role, tone = "paper", onSignOut }: Prop
       <div className="flex items-center justify-between px-5 py-3">
         <div className="flex items-center gap-2">
           <span className="flex h-[26px] w-[26px] items-center justify-center rounded-[5px] bg-brand-500">
+            {/* Chef toque — matches the desktop mark. */}
             <svg width="18" height="18" viewBox="0 0 40 40">
-              <path
-                d="M11 25c0-4 3-6 7-6s7-2 7-6"
-                stroke="#fff"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                fill="none"
-              />
-              <circle cx="11" cy="15" r="2.2" fill="#fff" />
-              <circle cx="29" cy="25" r="2.2" fill="#fff" />
+              <circle cx="14" cy="20" r="5" fill="#fff" />
+              <circle cx="20" cy="17" r="6" fill="#fff" />
+              <circle cx="26" cy="20" r="5" fill="#fff" />
+              <rect x="10" y="25" width="20" height="6.5" rx="1.6" fill="#fff" />
             </svg>
           </span>
           <div className="leading-[1.1]">
             <div className="font-ik-sans text-[13px] font-semibold tracking-[-0.01em]">
-              Indefine Kitchen
+              Green Park Eco Hotel
             </div>
             <div
               className={

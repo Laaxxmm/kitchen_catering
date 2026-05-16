@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   defaults?: { name?: string; email?: string; role?: Role; phone?: string | null; active?: boolean };
@@ -43,6 +44,7 @@ export function UserForm({ defaults, requirePassword, onSubmit, submitLabel = "S
         if (redirectOnSuccess && targetId) router.push(redirectOnSuccess.replace(":id", targetId));
         else router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });

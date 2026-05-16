@@ -104,7 +104,7 @@ export async function startProductionItem(itemId: string) {
   await db.$transaction(async (tx) => {
     const item = await tx.productionJobItem.findUnique({
       where: { id: itemId },
-      select: { id: true, status: true, jobId: true },
+      select: { id: true, status: true, jobId: true, chefUserId: true },
     });
     if (!item) throw new Error("Production item not found");
     if (item.status !== ProductionJobItemStatus.QUEUED) {
@@ -112,7 +112,14 @@ export async function startProductionItem(itemId: string) {
     }
     await tx.productionJobItem.update({
       where: { id: itemId },
-      data: { status: ProductionJobItemStatus.IN_PROGRESS, startedAt: new Date() },
+      data: {
+        status: ProductionJobItemStatus.IN_PROGRESS,
+        startedAt: new Date(),
+        // Auto-attribute the chef on first "Start" — no manual
+        // assignment step. Only set if not already assigned, so re-runs
+        // don't overwrite a deliberate prior assignment.
+        ...(item.chefUserId ? {} : { chefUserId: session.user.id }),
+      },
     });
 
     // If this is the first item in PREP, cascade the parent job.

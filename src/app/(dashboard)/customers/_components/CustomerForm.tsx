@@ -1,6 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -9,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { CustomerInputT } from "@/lib/validators";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   defaults?: Partial<CustomerInputT> & { id?: string };
@@ -57,6 +59,7 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
         if (redirectOnSuccess) router.push(redirectOnSuccess.replace(":id", result.id));
         router.refresh();
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });
@@ -96,7 +99,7 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
           <Input id="stateCode" maxLength={2} {...register("stateCode", { required: true })} />
         </div>
         <div className="grid gap-2 sm:col-span-2">
-          <Label htmlFor="groupId">Group</Label>
+          <Label htmlFor="groupId">Group (optional)</Label>
           <select
             id="groupId"
             {...register("groupId")}
@@ -107,6 +110,26 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
               <option key={g.id} value={g.id}>{g.name}</option>
             ))}
           </select>
+          <p className="text-[11.5px] text-ik-ink-3">
+            {groups.length === 0 ? (
+              <>
+                Groups are optional buckets — useful when one parent company has many branches (e.g.
+                &ldquo;Infosys → Bangalore office, Pune office&rdquo;), or for a category tag like
+                &ldquo;Corporate&rdquo; vs &ldquo;Walk-in&rdquo;. None exist yet —{" "}
+                <Link href="/customers/groups" target="_blank" className="text-brand hover:underline">
+                  create one
+                </Link>
+                {" "}if you need it. Otherwise just leave as &ldquo;No group&rdquo;.
+              </>
+            ) : (
+              <>
+                Optional. Use to bucket related customers (e.g. branches of the same company).{" "}
+                <Link href="/customers/groups" target="_blank" className="text-brand hover:underline">
+                  Manage groups →
+                </Link>
+              </>
+            )}
+          </p>
         </div>
       </div>
 

@@ -29,6 +29,8 @@ enum Role {
   SALES
   DELIVERY
   ACCOUNTS
+  HOUSEKEEPING_MANAGER
+  MAINTENANCE_MANAGER
 }
 
 enum EmploymentType {
@@ -73,9 +75,14 @@ enum MealType {
 
 enum OrderStatus {
   DRAFT
-  // Chef-first workflow (v2). The chef reviews feasibility before any other
-  // approval; the manager only steps in when the chef proposes changes.
-  PENDING_CHEF_APPROVAL // sales/manager submitted; chef to review feasibility
+  // Workflow v3 (CRM-style): admin sees every new order before the
+  // kitchen does, even self-created ones — so commercial guardrails are
+  // applied uniformly.
+  PENDING_ADMIN_APPROVAL // sales/manager/admin submitted; admin must approve
+  REJECTED_BY_ADMIN // admin declined to take the order
+  // Chef-first workflow (v2 stages kept). Admin approval flows the order
+  // into PENDING_CHEF_APPROVAL automatically.
+  PENDING_CHEF_APPROVAL // admin approved; chef to review feasibility
   CHANGES_PROPOSED_BY_CHEF // chef wants menu/timing changes; manager to OK
   CHEF_APPROVED // chef confirmed (after any manager-approved changes)
   CHEF_REQUISITION_PENDING // chef to raise the requisition for store
@@ -347,6 +354,7 @@ model User {
   ordersManagerReviewed           Order[]                  @relation("OrderManagerReviewedBy")
   ordersChefReviewed              Order[]                  @relation("OrderChefReviewedBy")
   ordersManagerChangeReviewed     Order[]                  @relation("OrderManagerChangeReviewedBy")
+  ordersAdminReviewed             Order[]                  @relation("OrderAdminReviewedBy")
   chefRequisitionsCreated         ChefRequisition[]        @relation("ChefRequisitionCreatedBy")
   chefRequisitionsFulfilled       ChefRequisition[]        @relation("ChefRequisitionFulfilledBy")
   prRequested                     PurchaseRequisition[]    @relation("PRRequester")
@@ -366,6 +374,19 @@ model User {
   salaryStructures                SalaryStructure[]        @relation("SalaryStructureEmployee")
   salaryRunsCreated               SalaryRun[]              @relation("SalaryRunCreatedBy")
   salaryRunsApproved              SalaryRun[]              @relation("SalaryRunApprovedBy")
+
+  // Task assignment
+  tasksAssignedTo                 Task[]                   @relation("TaskAssignedTo")
+  tasksAssignedBy                 Task[]                   @relation("TaskAssignedBy")
+  tasksReviewed                   Task[]                   @relation("TaskReviewedBy")
+
+  // Housekeeping
+  housekeepingReceiptsRecorded    HousekeepingReceipt[]    @relation("HousekeepingReceiptRecordedBy")
+  housekeepingIssuesRecorded      HousekeepingIssue[]      @relation("HousekeepingIssueRecordedBy")
+
+  // Maintenance
+  maintenanceReceiptsRecorded     MaintenanceReceipt[]     @relation("MaintenanceReceiptRecordedBy")
+  maintenanceActivitiesRecorded   MaintenanceActivity[]    @relation("MaintenanceActivityRecordedBy")
 
   // Mobile
   mobileSessions MobileSession[] @relation("MobileSessions")
@@ -782,11 +803,22 @@ model Order {
   // overrode because Y".
   managerOverrideReason String?
 
+  // Admin gate (workflow v3). Every submitted order — including those
+  // raised by an admin themselves — sits at PENDING_ADMIN_APPROVAL until
+  // an ADMIN approves it. Approval flips the status to
+  // PENDING_CHEF_APPROVAL so the kitchen flow takes over.
+  adminReviewedById   String?
+  adminReviewedBy     User?             @relation("OrderAdminReviewedBy", fields: [adminReviewedById], references: [id])
+  adminReviewedAt     DateTime?
+  adminDecision       ApprovalDecision?
+  adminReviewNote     String?
+
   // Chef-first review (workflow v2).
-  // On submit the order lands at PENDING_CHEF_APPROVAL. The chef either
-  // confirms (chefDecision=APPROVED, advances to CHEF_REQUISITION_PENDING)
-  // or proposes changes (chefDecision=SUGGESTED_CHANGES, chefSuggestionNotes
-  // populated, advances to CHANGES_PROPOSED_BY_CHEF for the manager).
+  // After admin approval the order lands at PENDING_CHEF_APPROVAL. The
+  // chef either confirms (chefDecision=APPROVED, advances to
+  // CHEF_REQUISITION_PENDING) or proposes changes
+  // (chefDecision=SUGGESTED_CHANGES, chefSuggestionNotes populated,
+  // advances to CHANGES_PROPOSED_BY_CHEF for the manager).
   chefReviewedById     String?
   chefReviewedBy       User?             @relation("OrderChefReviewedBy", fields: [chefReviewedById], references: [id])
   chefReviewedAt       DateTime?
@@ -834,6 +866,7 @@ model Order {
   @@index([managerReviewedById])
   @@index([chefReviewedById])
   @@index([managerChangeReviewedById])
+  @@index([adminReviewedById])
 }
 
 model OrderItem {
@@ -1749,4 +1782,343 @@ model SalaryRunNumberSequence {
 model ChefRequisitionNumberSequence {
   year Int @id
   next Int @default(1)
+}
+
+// =====================================================================
+// TASK ASSIGNMENT
+// =====================================================================
+// Admin/manager-assigned ad-hoc tasks. Distinct from operational workflow
+// (orders, requisitions) — these are line-management tasks ("recount
+// freezer A", "call client X", "fix POS printer"). Assignee submits with
+// mandatory remarks; assigner approves or rejects.
+
+enum TaskStatus {
+  ASSIGNED // freshly assigned, not yet submitted
+  SUBMITTED // assignee has marked done and provided remarks
+  COMPLETED // assigner has approved the submission
+  REJECTED // assigner rejected; assignee can resubmit
+  CANCELLED // assigner cancelled before completion
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+}
+
+// Optional library of preset task titles the admin can pick from
+// (instead of typing every time). Editable in admin UI; soft-deleted.
+model TaskTemplate {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tasks Task[] @relation("TaskFromTemplate")
+
+  @@index([active])
+}
+
+model Task {
+  id             String       @id @default(cuid())
+  title          String
+  description    String?
+  priority       TaskPriority @default(NORMAL)
+  status         TaskStatus   @default(ASSIGNED)
+
+  assignedToId   String
+  assignedTo     User         @relation("TaskAssignedTo", fields: [assignedToId], references: [id])
+  assignedById   String
+  assignedBy     User         @relation("TaskAssignedBy", fields: [assignedById], references: [id])
+
+  targetDate     DateTime     // when assigner wants it done by (UTC, displayed IST)
+  assignedAt     DateTime     @default(now())
+
+  // Submission (filled when assignee submits)
+  submittedAt    DateTime?
+  completionRemarks String?    // MANDATORY at submit; nullable in DB to allow re-submit cycles
+  completedAt    DateTime?    // event date entered by assignee (when they actually did the work)
+
+  // Review (filled when assigner approves or rejects)
+  reviewedAt     DateTime?
+  reviewedById   String?
+  reviewedBy     User?        @relation("TaskReviewedBy", fields: [reviewedById], references: [id])
+  rejectionReason String?
+
+  // Optional preset link
+  templateId     String?
+  template       TaskTemplate? @relation("TaskFromTemplate", fields: [templateId], references: [id])
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([assignedToId, status])
+  @@index([assignedById])
+  @@index([status, targetDate])
+  @@index([targetDate])
+}
+
+// =====================================================================
+// HOUSEKEEPING (hotel side — distinct from kitchen inventory)
+// =====================================================================
+// Separate stockroom for guest-facing supplies (soap, towel, shampoo,
+// bedsheets …). The maintenance / purchasing team gives stock to the
+// housekeeping department; the housekeeping manager records receipts,
+// then logs every issue-to-room with the housekeeping staff member who
+// took the items. Current on-hand is denormalised on HousekeepingItem.
+
+enum RoomType {
+  STANDARD
+  DELUXE
+  SUITE
+  COMMON_AREA // lobby, corridor, gym etc. — supplies that aren't room-specific
+  OTHER
+}
+
+model Room {
+  id        String   @id @default(cuid())
+  number    String   @unique // "101", "L-12", "POOL-1"
+  name      String? // optional friendly name ("Garden Suite")
+  type      RoomType @default(STANDARD)
+  floor     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  housekeepingIssues    HousekeepingIssue[]
+  maintenanceActivities MaintenanceActivity[]
+
+  @@index([active])
+}
+
+model HousekeepingStaff {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String?
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  housekeepingIssues HousekeepingIssue[]
+
+  @@index([active])
+}
+
+// Catalog of housekeeping supplies. Stock kept here is hotel-side only —
+// totally separate from kitchen Ingredient stock. `currentStock` is
+// denormalised (sum of receipts − sum of issues, maintained inside
+// transactions when receipts/issues are recorded).
+model HousekeepingItem {
+  id           String   @id @default(cuid())
+  name         String
+  sku          String? // optional internal SKU
+  unit         String   @default("piece") // "piece", "set", "ml", "kg", "pair"
+  currentStock Decimal  @default(0) @db.Decimal(14, 3)
+  minStock     Decimal? @db.Decimal(14, 3) // optional low-stock threshold
+  notes        String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  receiptLines HousekeepingReceiptLine[]
+  issueLines   HousekeepingIssueLine[]
+
+  @@unique([name])
+  @@index([active])
+}
+
+// Stock IN — maintenance team handing over supplies. The housekeeping
+// manager (or admin) records this. `sourceNote` captures who supplied
+// it (e.g. "Maintenance — Mr Kumar, GRN-9183").
+model HousekeepingReceipt {
+  id           String   @id @default(cuid())
+  receivedAt   DateTime
+  recordedById String
+  recordedBy   User     @relation("HousekeepingReceiptRecordedBy", fields: [recordedById], references: [id])
+  sourceNote   String? // free-text — "from kitchen store", "vendor delivery"
+  sourceContact String? // name of the maintenance person who handed over
+  createdAt    DateTime @default(now())
+
+  lines HousekeepingReceiptLine[]
+
+  @@index([receivedAt])
+}
+
+model HousekeepingReceiptLine {
+  id        String   @id @default(cuid())
+  receiptId String
+  receipt   HousekeepingReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      HousekeepingItem    @relation(fields: [itemId], references: [id])
+  quantity  Decimal             @db.Decimal(14, 3)
+  // Optional cost tracking — useful for the admin consumption-value report.
+  costPerUnit Decimal? @db.Decimal(12, 2)
+
+  @@index([receiptId])
+  @@index([itemId])
+}
+
+// Stock OUT — housekeeping staff took items to a room (or common area).
+// One issue = one trip by one staff member to one room. Lines are the
+// items they carried.
+model HousekeepingIssue {
+  id           String   @id @default(cuid())
+  issuedAt     DateTime
+  recordedById String
+  recordedBy   User     @relation("HousekeepingIssueRecordedBy", fields: [recordedById], references: [id])
+  staffId      String
+  staff        HousekeepingStaff @relation(fields: [staffId], references: [id])
+  roomId       String
+  room         Room              @relation(fields: [roomId], references: [id])
+  // Free-text e.g. "guest checkout cleaning", "fresh linen swap"
+  purpose      String?
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  lines HousekeepingIssueLine[]
+
+  @@index([issuedAt])
+  @@index([roomId])
+  @@index([staffId])
+}
+
+model HousekeepingIssueLine {
+  id       String   @id @default(cuid())
+  issueId  String
+  issue    HousekeepingIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  itemId   String
+  item     HousekeepingItem  @relation(fields: [itemId], references: [id])
+  quantity Decimal           @db.Decimal(14, 3)
+
+  @@index([issueId])
+  @@index([itemId])
+}
+
+// =====================================================================
+// MAINTENANCE (electrical / mechanical work + spares inventory)
+// =====================================================================
+// Mirrors housekeeping in shape but with a category dimension
+// (ELECTRICAL / MECHANICAL / GENERAL) and a richer "Activity" record at
+// the room (issueReported + workDone) instead of a plain issue. Rooms
+// are reused from the housekeeping Room model.
+
+enum MaintenanceCategory {
+  ELECTRICAL
+  MECHANICAL
+  GENERAL // catch-all (plumbing tools, consumables that span both)
+}
+
+enum MaintenanceActivityStatus {
+  PENDING       // logged but the work hasn't been started yet
+  IN_PROGRESS   // staff is on it
+  COMPLETED     // resolved
+  CANCELLED     // false alarm / not needed
+}
+
+model MaintenanceStaff {
+  id        String              @id @default(cuid())
+  name      String
+  phone     String?
+  category  MaintenanceCategory @default(GENERAL) // primary skill
+  notes     String?
+  active    Boolean             @default(true)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  activities MaintenanceActivity[]
+
+  @@index([active])
+  @@index([category])
+}
+
+model MaintenanceItem {
+  id           String              @id @default(cuid())
+  name         String
+  sku          String?
+  unit         String              @default("piece") // "piece", "m", "kg", "set", "L"
+  category     MaintenanceCategory @default(GENERAL)
+  currentStock Decimal             @default(0) @db.Decimal(14, 3)
+  minStock     Decimal?            @db.Decimal(14, 3)
+  notes        String?
+  active       Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  receiptLines  MaintenanceReceiptLine[]
+  activityLines MaintenanceActivityLine[]
+
+  @@unique([name])
+  @@index([active])
+  @@index([category])
+}
+
+// Stock IN — purchased / handed-over to maintenance.
+model MaintenanceReceipt {
+  id            String   @id @default(cuid())
+  receivedAt    DateTime
+  recordedById  String
+  recordedBy    User     @relation("MaintenanceReceiptRecordedBy", fields: [recordedById], references: [id])
+  sourceNote    String?
+  sourceContact String?
+  createdAt     DateTime @default(now())
+
+  lines MaintenanceReceiptLine[]
+
+  @@index([receivedAt])
+}
+
+model MaintenanceReceiptLine {
+  id          String   @id @default(cuid())
+  receiptId   String
+  receipt     MaintenanceReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        MaintenanceItem    @relation(fields: [itemId], references: [id])
+  quantity    Decimal            @db.Decimal(14, 3)
+  costPerUnit Decimal?           @db.Decimal(12, 2)
+
+  @@index([receiptId])
+  @@index([itemId])
+}
+
+// Activity — one work visit at a room. The "issueReported" captures what
+// the housekeeping / front-desk reported; "workDone" is what was actually
+// fixed. Items consumed are recorded on `lines` and decrement stock.
+model MaintenanceActivity {
+  id             String                    @id @default(cuid())
+  performedAt    DateTime
+  recordedById   String
+  recordedBy     User                      @relation("MaintenanceActivityRecordedBy", fields: [recordedById], references: [id])
+  staffId        String
+  staff          MaintenanceStaff          @relation(fields: [staffId], references: [id])
+  roomId         String
+  room           Room                      @relation(fields: [roomId], references: [id])
+  category       MaintenanceCategory
+  status         MaintenanceActivityStatus @default(COMPLETED)
+  issueReported  String // "AC not cooling", "tap dripping"
+  workDone       String? // "replaced capacitor", "tightened washer"
+  notes          String?
+  createdAt      DateTime                  @default(now())
+
+  lines MaintenanceActivityLine[]
+
+  @@index([performedAt])
+  @@index([roomId])
+  @@index([staffId])
+  @@index([status])
+  @@index([category])
+}
+
+model MaintenanceActivityLine {
+  id         String   @id @default(cuid())
+  activityId String
+  activity   MaintenanceActivity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  itemId     String
+  item       MaintenanceItem     @relation(fields: [itemId], references: [id])
+  quantity   Decimal             @db.Decimal(14, 3)
+
+  @@index([activityId])
+  @@index([itemId])
 }

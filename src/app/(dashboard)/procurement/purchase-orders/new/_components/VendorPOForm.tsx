@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { isNextNavigationError } from "@/lib/next-error";
 
 interface Vendor { id: string; name: string; code: string; stateCode: string }
 interface Ingredient { id: string; sku: string; name: string; unit: string; gstRatePct: string }
@@ -32,20 +33,26 @@ interface Props {
     notes: string | null;
     lines: Array<{ ingredientId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
   }) => Promise<void>;
+  // Pre-fill when the PO is being spun out of an approved PR — the lines
+  // come straight from the request so the user only has to fill in prices.
+  initialVendorId?: string | null;
+  initialLines?: DraftLine[] | null;
 }
 
 function emptyLine(): DraftLine {
   return { ingredientId: "", sku: "", description: "", unit: "kg", quantity: "1", unitPrice: "0", gstRatePct: "5" };
 }
 
-export function VendorPOForm({ vendors, ingredients, onSubmit }: Props) {
+export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, initialLines }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const [vendorId, setVendorId] = useState(vendors[0]?.id ?? "");
+  const [vendorId, setVendorId] = useState(initialVendorId || vendors[0]?.id || "");
   const [placeOfSupplyStateCode, setPos] = useState("29");
   const [expectedDate, setExpectedDate] = useState("");
   const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
+  const [lines, setLines] = useState<DraftLine[]>(
+    initialLines && initialLines.length > 0 ? initialLines : [emptyLine()],
+  );
 
   const totals = useMemo(() => {
     let subtotal = new Decimal(0);
@@ -100,6 +107,7 @@ export function VendorPOForm({ vendors, ingredients, onSubmit }: Props) {
           })),
         });
       } catch (err) {
+        if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });
@@ -131,6 +139,13 @@ export function VendorPOForm({ vendors, ingredients, onSubmit }: Props) {
           <h3 className="font-medium text-[14px] text-ik-ink">Lines</h3>
           <Button type="button" size="sm" variant="outline" onClick={() => setLines((p) => [...p, emptyLine()])}>+ Add line</Button>
         </div>
+        <p className="mb-3 rounded border border-ik-rule bg-ik-paper-alt p-2 text-[11.5px] text-ik-ink-2">
+          <strong>About the prices:</strong> the <em>Est. unit ₹</em> and <em>GST %</em> are an
+          estimate — they pre-fill from each ingredient&apos;s last paid cost so the system can compute a
+          total and decide whether the manager or admin needs to approve. The supplier&apos;s actual price
+          is captured later, when you record their bill against the delivery. Leave a row at 0 if you
+          have no estimate.
+        </p>
         <div className="overflow-x-auto">
           <table className="w-full text-[12.5px]">
             <thead className="border-b border-ik-rule text-left text-ik-ink-3">
@@ -140,9 +155,9 @@ export function VendorPOForm({ vendors, ingredients, onSubmit }: Props) {
                 <th className="py-1 pr-2">Description</th>
                 <th className="py-1 pr-2">Unit</th>
                 <th className="w-20 py-1 pr-2 text-right">Qty</th>
-                <th className="w-24 py-1 pr-2 text-right">Unit ₹</th>
+                <th className="w-24 py-1 pr-2 text-right" title="Estimated supplier rate — used to compute approval tier. Actual rate comes from the bill at delivery.">Est. unit ₹</th>
                 <th className="w-16 py-1 pr-2 text-right">GST %</th>
-                <th className="w-28 py-1 pr-2 text-right">Total ₹</th>
+                <th className="w-28 py-1 pr-2 text-right">Est. total ₹</th>
                 <th></th>
               </tr>
             </thead>
@@ -171,9 +186,9 @@ export function VendorPOForm({ vendors, ingredients, onSubmit }: Props) {
               })}
             </tbody>
             <tfoot className="font-mono">
-              <tr><td colSpan={7} className="py-1 pr-2 text-right text-ik-ink-3">Subtotal</td><td className="py-1 pr-2 text-right">{totals.subtotal.toString()}</td><td></td></tr>
-              <tr><td colSpan={7} className="py-1 pr-2 text-right text-ik-ink-3">Tax</td><td className="py-1 pr-2 text-right">{totals.tax.toString()}</td><td></td></tr>
-              <tr className="font-medium"><td colSpan={7} className="py-1 pr-2 text-right">Total</td><td className="py-1 pr-2 text-right">₹{totals.total.toString()}</td><td></td></tr>
+              <tr><td colSpan={7} className="py-1 pr-2 text-right text-ik-ink-3">Est. subtotal</td><td className="py-1 pr-2 text-right">{totals.subtotal.toString()}</td><td></td></tr>
+              <tr><td colSpan={7} className="py-1 pr-2 text-right text-ik-ink-3">Est. tax</td><td className="py-1 pr-2 text-right">{totals.tax.toString()}</td><td></td></tr>
+              <tr className="font-medium"><td colSpan={7} className="py-1 pr-2 text-right">Est. total</td><td className="py-1 pr-2 text-right">₹{totals.total.toString()}</td><td></td></tr>
             </tfoot>
           </table>
         </div>

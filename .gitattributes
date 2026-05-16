@@ -1,0 +1,35 @@
+# Pin everything to LF on checkout so Windows clones don't introduce CRLF
+# into shell scripts (docker-entrypoint.sh would silently fail in alpine).
+# Binary files declared explicitly so Git doesn't try to normalise them.
+
+* text=auto eol=lf
+
+# Shell scripts must be LF, no exceptions.
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf
+
+# Source: enforce LF.
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.prisma text eol=lf
+*.sql text eol=lf
+
+# Binary assets — don't touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
