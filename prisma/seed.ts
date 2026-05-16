@@ -4,17 +4,28 @@ import bcrypt from "bcryptjs";
 const db = new PrismaClient();
 
 async function main() {
-  // Refuse to run in production. See docs/SECURITY.md §2.
-  if (process.env.NODE_ENV === "production") {
+  // Refuse to run in production unless the operator has *explicitly*
+  // opted in via SEED_DB=true. That's the documented bootstrap flow
+  // (see docs/DEPLOYMENT.md) used on the very first Railway deploy.
+  //
+  // The guard is here to prevent accidents — someone running `npm run
+  // db:seed` against a prod DATABASE_URL without realising it. It is
+  // NOT meant to block the legitimate first-deploy seed, which is
+  // gated by removing the SEED_DB env var after the first successful
+  // deploy. The seed is idempotent (upserts), so re-runs are safe.
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.SEED_DB !== "true"
+  ) {
     throw new Error(
-      "Seed script must never run in production. Use the one-time `setup` script to create the first ADMIN.",
+      "Seed refused: NODE_ENV=production and SEED_DB!=true. To bootstrap a fresh production database, set SEED_DB=true in the environment, run the seed, then unset SEED_DB.",
     );
   }
 
   // ─── Users ──────────────────────────────────────────────────────
-  // Placeholder password "changeme123" — dev-only. The seed refuses to run
-  // when NODE_ENV=production (guard above). Real prod admins are created
-  // by the one-time setup script with a strong password.
+  // Placeholder password "changeme123" — dev/bootstrap only. Real prod
+  // passwords should be rotated via /admin/users immediately after the
+  // first deploy completes.
   const passwordHash = await bcrypt.hash("changeme123", 12);
   const users: Array<{ email: string; name: string; role: Role }> = [
     { email: "admin@indefine.in",    name: "Admin User",      role: Role.ADMIN },
