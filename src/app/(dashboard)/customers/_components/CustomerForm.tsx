@@ -36,11 +36,15 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
       phone: defaults?.phone ?? "",
       notes: defaults?.notes ?? "",
       groupId: defaults?.groupId ?? "",
+      billingCompanyName: defaults?.billingCompanyName ?? "",
+      creditLimit: defaults?.creditLimit ?? "0",
+      creditDays: defaults?.creditDays ?? 0,
     },
   });
 
   function submit(values: CustomerInputT) {
-    // Empty strings → null for nullable fields
+    // Empty strings → null for nullable fields. Phone is REQUIRED so
+    // we let the validator catch the empty case server-side.
     const cleaned: CustomerInputT = {
       ...values,
       gstin: values.gstin ? values.gstin : null,
@@ -48,9 +52,9 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
       shippingAddress: values.shippingAddress ? values.shippingAddress : null,
       contactName: values.contactName ? values.contactName : null,
       email: values.email ? values.email : null,
-      phone: values.phone ? values.phone : null,
       notes: values.notes ? values.notes : null,
       groupId: values.groupId ? values.groupId : null,
+      billingCompanyName: values.billingCompanyName ? values.billingCompanyName : null,
     };
     startTransition(async () => {
       try {
@@ -154,8 +158,67 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
           </p>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="phone">Phone</Label>
-          <Input id="phone" {...register("phone")} />
+          <Label htmlFor="phone">
+            Phone <span className="text-alert">*</span>
+          </Label>
+          <Input
+            id="phone"
+            placeholder="+91…"
+            {...register("phone", { required: true, minLength: 7 })}
+          />
+          {errors.phone && (
+            <span className="text-[11px] text-alert">
+              Phone is required (min 7 digits)
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* "Bill to" + credit terms — drives invoice header + approval routing. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid gap-2 sm:col-span-3">
+          <Label htmlFor="billingCompanyName">Bill to company (optional)</Label>
+          <Input
+            id="billingCompanyName"
+            placeholder="Defaults to customer name when blank"
+            {...register("billingCompanyName")}
+          />
+          <p className="text-[11.5px] text-ik-ink-3">
+            When the legal entity on the invoice differs from the contact
+            (e.g. branch contact, parent company billing).
+          </p>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="creditLimit">Credit limit (₹)</Label>
+          <Input
+            id="creditLimit"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            placeholder="0"
+            {...register("creditLimit")}
+          />
+          <p className="text-[11.5px] text-ik-ink-3">
+            Max outstanding allowed across open invoices.
+          </p>
+        </div>
+        <div className="grid gap-2 sm:col-span-2">
+          <Label htmlFor="creditDays">Credit duration (days)</Label>
+          <Input
+            id="creditDays"
+            type="number"
+            min="0"
+            max="365"
+            placeholder="0"
+            {...register("creditDays", { valueAsNumber: true })}
+          />
+          <p className="text-[11.5px] text-ik-ink-3">
+            <span className="font-medium">0</span> = cash / immediate ·{" "}
+            <span className="font-medium">1–15</span> needs manager approval ·{" "}
+            <span className="font-medium">&gt;15</span> needs admin approval.
+            The save will fail if your role can&apos;t approve the duration
+            you enter.
+          </p>
         </div>
       </div>
 

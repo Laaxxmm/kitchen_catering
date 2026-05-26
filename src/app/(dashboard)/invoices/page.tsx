@@ -4,10 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/ui/status-badge";
-import {
-  listCustomerInvoices,
-  markCustomerInvoicePaid,
-} from "@/server/actions/customer-invoices";
+import { listCustomerInvoices } from "@/server/actions/customer-invoices";
 import { auth } from "@/server/auth";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
@@ -57,10 +54,9 @@ export default async function InvoicesPage() {
                 inv.status !== CustomerInvoiceStatus.PAID &&
                 inv.status !== CustomerInvoiceStatus.CANCELLED &&
                 inv.status !== CustomerInvoiceStatus.DRAFT;
-              async function markPaid() {
-                "use server";
-                await markCustomerInvoicePaid(inv.id);
-              }
+              // Inline list-row mark-paid removed in Phase 1 — full
+              // capture (ref / method / date) needs the modal on the
+              // detail page, so we link the operator there instead.
               return (
                 <TableRow key={inv.id}>
                   <TableCell>
@@ -79,9 +75,11 @@ export default async function InvoicesPage() {
                   {canMarkPaid && (
                     <TableCell>
                       {canMark ? (
-                        <form action={markPaid}>
-                          <Button type="submit" size="sm" variant="outline">Mark paid</Button>
-                        </form>
+                        <Link href={`/invoices/${inv.id}`}>
+                          <Button type="button" size="sm" variant="outline">
+                            Mark paid…
+                          </Button>
+                        </Link>
                       ) : (
                         <span className="text-[12px] text-ik-ink-3">—</span>
                       )}

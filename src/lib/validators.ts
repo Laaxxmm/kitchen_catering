@@ -75,12 +75,23 @@ export const CustomerInput = z.object({
   stateCode,
   contactName: z.string().max(120).nullable().optional(),
   email: z.string().email().nullable().optional(),
-  phone: z.string().max(20).nullable().optional(),
+  // Phone is now mandatory per the Workflow doc — needed for
+  // WhatsApp feedback and OTP delivery flows.
+  phone: z
+    .string()
+    .min(7, "Phone number is required (min 7 digits)")
+    .max(20),
   notes: z.string().max(2000).nullable().optional(),
   groupId: z.string().nullable().optional(),
   defaultTdsRatePct: decimalString.nullable().optional(),
   defaultTdsSection: z.string().max(20).nullable().optional(),
+  // Optional "bill to" entity when the legal name on the invoice
+  // differs from the customer's display name. Defaults to `name`.
+  billingCompanyName: z.string().max(200).nullable().optional(),
   creditLimit: decimalString.optional(),
+  // Duration in days (0 = cash). Drives approval routing on orders:
+  // ≤15 → Manager; >15 → Admin (enforced server-side).
+  creditDays: z.coerce.number().int().min(0).max(365).optional(),
   paymentTerms: z.nativeEnum(VendorPaymentTerms).optional(),
 });
 export type CustomerInputT = z.infer<typeof CustomerInput>;

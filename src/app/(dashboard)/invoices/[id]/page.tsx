@@ -13,11 +13,9 @@ import {
   issueCustomerInvoice,
   markCustomerInvoicePaid,
 } from "@/server/actions/customer-invoices";
-import {
-  recordCustomerInvoicePayment,
-  reverseCustomerInvoicePayment,
-} from "@/server/actions/payments";
+import { recordCustomerInvoicePayment } from "@/server/actions/payments";
 import { RecordPaymentForm } from "./_components/RecordPaymentForm";
+import { MarkPaidModal } from "@/components/ik/finance/MarkPaidModal";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 
@@ -43,9 +41,20 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     "use server";
     await emailTaxInvoice(id, { force: true });
   }
-  async function doMarkPaid() {
+  async function doMarkPaid(input: {
+    method: PaymentMethod;
+    reference: string | null;
+    paidAt: string;
+    notes: string | null;
+  }) {
     "use server";
-    await markCustomerInvoicePaid(id);
+    await markCustomerInvoicePaid({
+      invoiceId: id,
+      method: input.method,
+      reference: input.reference,
+      paidAt: input.paidAt,
+      notes: input.notes,
+    });
   }
   async function doCancel(formData: FormData) {
     "use server";
@@ -64,13 +73,6 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       paidAt: input.paidAt,
     });
   }
-  async function doReverse(paymentId: string, formData: FormData) {
-    "use server";
-    const reason = String(formData.get("reason") ?? "").trim();
-    if (!reason) return;
-    await reverseCustomerInvoicePayment({ paymentId, reason });
-  }
-
   return (
     <>
       <PageHeader
@@ -90,9 +92,12 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               && invoice.status !== CustomerInvoiceStatus.CANCELLED
               && invoice.status !== CustomerInvoiceStatus.DRAFT
               && canMarkPaid && (
-                <form action={doMarkPaid}>
-                  <Button type="submit" variant="outline">Mark paid</Button>
-                </form>
+                <MarkPaidModal
+                  outstanding={(
+                    Number(invoice.grandTotal) - Number(invoice.amountPaid)
+                  ).toFixed(2)}
+                  onSubmit={doMarkPaid}
+                />
               )}
             <Link href="/invoices"><Button variant="outline">Back</Button></Link>
             {invoice.status === CustomerInvoiceStatus.DRAFT && canIssue && (
@@ -180,7 +185,6 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                     <TableHead>Method</TableHead>
                     <TableHead>Reference</TableHead>
                     <TableHead>Recorded by</TableHead>
-                    <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -191,14 +195,6 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                       <TableCell>{p.method}</TableCell>
                       <TableCell className="font-mono text-[12px]">{p.reference ?? "—"}</TableCell>
                       <TableCell>{p.recordedBy?.name}</TableCell>
-                      <TableCell>
-                        {canPay && (
-                          <form action={doReverse.bind(null, p.id)} className="inline">
-                            <input name="reason" placeholder="Reason" className="h-6 w-24 rounded border border-ik-rule bg-ik-card px-1 text-[11px]" />
-                            <Button type="submit" size="sm" variant="outline" className="ml-1">Reverse</Button>
-                          </form>
-                        )}
-                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

@@ -760,12 +760,39 @@ export async function emailTaxInvoice(
  * For richer cases (split payments, TDS, etc.) accounts uses the
  * existing RecordPaymentForm.
  */
-export async function markCustomerInvoicePaid(invoiceId: string) {
+interface MarkPaidInput {
+  invoiceId: string;
+  /** Payment method recorded against the balance closure. */
+  method: PaymentMethod;
+  /** External reference — UPI ref / cheque no / NEFT ref. */
+  reference?: string | null;
+  /** ISO date string for the paidAt timestamp. Defaults to now. */
+  paidAt?: string | null;
+  /** Optional free-text notes. */
+  notes?: string | null;
+}
+
+/**
+ * One-shot "mark this invoice fully paid" with a proper payment record.
+ *
+ * Workflow doc: this used to default `method=OTHER` and leave the
+ * reference blank, which the client flagged in the proforma screenshot.
+ * Callers MUST now supply method + reference (popup on the invoice
+ * page collects them).
+ *
+ * For partial payments use `recordCustomerInvoicePayment` instead.
+ */
+export async function markCustomerInvoicePaid(input: MarkPaidInput) {
   // Tighter gate than the rest of the WRITE_ROLES set — admin / manager
   // only. Accounts records detailed payments through the RecordPayment
   // form; this one-click action belongs to the people who can also
   // approve orders.
   const session = await requireRole([Role.ADMIN, Role.MANAGER]);
+  const { invoiceId } = input;
+  const paidAtDate = input.paidAt ? new Date(input.paidAt) : new Date();
+  if (Number.isNaN(paidAtDate.getTime())) {
+    throw new Error("paidAt is not a valid date");
+  }
   await db.$transaction(async (tx) => {
     const invoice = await tx.customerInvoice.findUnique({
       where: { id: invoiceId },
@@ -793,10 +820,11 @@ export async function markCustomerInvoicePaid(invoiceId: string) {
         data: {
           invoiceId,
           amount: balance.toFixed(2),
-          paidAt: new Date(),
-          method: "OTHER",
-          notes: "Marked paid (no detailed breakdown)",
+          paidAt: paidAtDate,
+          method: input.method,
+          reference: input.reference ?? null,
           recordedById: session.user.id,
+          notes: input.notes ?? null,
         },
       });
       await tx.customerInvoice.update({

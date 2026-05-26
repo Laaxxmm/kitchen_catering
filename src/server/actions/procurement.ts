@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Decimal } from "decimal.js";
 import {
   GRNStatus,
+  PaymentMethod,
   PurchaseRequisitionStatus,
   Role,
   VendorBillStatus,
@@ -577,12 +578,22 @@ export async function approveVendorBill(id: string) {
  * note "Marked paid". For richer cases (TDS, split payments) use the
  * existing BillPaymentForm.
  */
-export async function markVendorBillPaid(id: string) {
+export async function markVendorBillPaid(input: {
+  id: string;
+  method: PaymentMethod;
+  reference?: string | null;
+  paidAt?: string | null;
+  notes?: string | null;
+}) {
   // Vendor side: accounts is the one who actually pays the supplier,
-  // so they get the one-click mark-paid action (plus admin/manager).
-  // Customer side stays admin/manager only — see
-  // markCustomerInvoicePaid for that gate.
+  // so they get the mark-paid action (plus admin/manager). Customer
+  // side stays admin/manager only — see markCustomerInvoicePaid.
   const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
+  const { id } = input;
+  const paidAtDate = input.paidAt ? new Date(input.paidAt) : new Date();
+  if (Number.isNaN(paidAtDate.getTime())) {
+    throw new Error("paidAt is not a valid date");
+  }
   await db.$transaction(async (tx) => {
     const bill = await tx.vendorBill.findUnique({
       where: { id },
@@ -601,9 +612,10 @@ export async function markVendorBillPaid(id: string) {
         data: {
           vendorBillId: id,
           amount: balance.toFixed(2),
-          paidAt: new Date(),
-          method: "OTHER",
-          notes: "Marked paid (no detailed breakdown)",
+          paidAt: paidAtDate,
+          method: input.method,
+          reference: input.reference ?? null,
+          notes: input.notes ?? null,
           recordedById: session.user.id,
         },
       });
@@ -613,7 +625,7 @@ export async function markVendorBillPaid(id: string) {
       data: {
         amountPaid: bill.grandTotal.toString(),
         status: VendorBillStatus.PAID,
-        paidAt: new Date(),
+        paidAt: paidAtDate,
       },
     });
     await tx.auditLog.create({

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { auth } from "@/server/auth";
-import { listVendorBills, markVendorBillPaid } from "@/server/actions/procurement";
+import { listVendorBills } from "@/server/actions/procurement";
 import { formatINR } from "@/lib/money";
 
 
@@ -50,10 +50,9 @@ export default async function VendorBillsPage() {
                 b.status !== VendorBillStatus.PAID &&
                 b.status !== VendorBillStatus.DRAFT &&
                 b.status !== VendorBillStatus.PENDING_MATCH;
-              async function markPaid() {
-                "use server";
-                await markVendorBillPaid(b.id);
-              }
+              // Inline list-row mark-paid removed in Phase 1 — full
+              // capture (ref / method / date) needs the modal on the
+              // detail page.
               return (
                 <TableRow key={b.id}>
                   <TableCell><Link href={`/procurement/vendor-bills/${b.id}`} className="font-mono text-brand hover:underline">{b.billNo}</Link></TableCell>
@@ -66,9 +65,11 @@ export default async function VendorBillsPage() {
                   {canMark && (
                     <TableCell>
                       {eligible ? (
-                        <form action={markPaid}>
-                          <Button type="submit" size="sm" variant="outline">Mark paid</Button>
-                        </form>
+                        <Link href={`/procurement/vendor-bills/${b.id}`}>
+                          <Button type="button" size="sm" variant="outline">
+                            Mark paid…
+                          </Button>
+                        </Link>
                       ) : (
                         <span className="text-[12px] text-ik-ink-3">—</span>
                       )}

@@ -448,8 +448,24 @@ model Customer {
   defaultTdsRatePct Decimal? @db.Decimal(5, 2)
   defaultTdsSection String?
 
+  // Optional "bill to" company — when the legal entity on the invoice
+  // differs from the contact person on the order (e.g. branch contact
+  // vs. parent company). Falls back to `name` when null.
+  billingCompanyName String?
+
   // Credit & terms
+  // creditLimit:   max outstanding the customer can hold across open
+  //                invoices before sales is blocked from raising a new
+  //                order (enforced at order creation in Phase 1+).
+  // creditDays:    payment duration in days. Authoritative integer for
+  //                approval routing per the Workflow doc:
+  //                  ≤15 → Manager approval is sufficient
+  //                  >15 → Admin approval mandatory
+  //                Null/0 = cash / immediate. Replaces the older
+  //                paymentTerms enum, which we keep around for the
+  //                payment-form preset dropdown.
   creditLimit  Decimal            @default(0) @db.Decimal(14, 2)
+  creditDays   Int                @default(0)
   paymentTerms VendorPaymentTerms @default(NET_30)
 
   createdAt DateTime @default(now())

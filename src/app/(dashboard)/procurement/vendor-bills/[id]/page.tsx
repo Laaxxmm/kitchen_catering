@@ -6,9 +6,15 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { auth } from "@/server/auth";
-import { approveVendorBill, getVendorBill, matchVendorBill } from "@/server/actions/procurement";
+import {
+  approveVendorBill,
+  getVendorBill,
+  markVendorBillPaid,
+  matchVendorBill,
+} from "@/server/actions/procurement";
 import { recordVendorBillPayment, reverseVendorBillPayment } from "@/server/actions/payments";
 import { BillPaymentForm } from "./_components/BillPaymentForm";
+import { MarkPaidModal } from "@/components/ik/finance/MarkPaidModal";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 
@@ -35,6 +41,15 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
     "use server";
     return recordVendorBillPayment({ billId: id, ...input });
   }
+  async function doMarkPaid(input: {
+    method: PaymentMethod;
+    reference: string | null;
+    paidAt: string;
+    notes: string | null;
+  }) {
+    "use server";
+    await markVendorBillPaid({ id, ...input });
+  }
   async function doReverse(paymentId: string, formData: FormData) {
     "use server";
     const reason = String(formData.get("reason") ?? "").trim();
@@ -56,6 +71,12 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
             <Link href="/procurement/vendor-bills"><Button variant="outline">Back</Button></Link>
             {canMatch && <form action={doMatch}><Button type="submit">Run 3-way match</Button></form>}
             {canApprove && <form action={doApprove}><Button type="submit">Approve</Button></form>}
+            {canPay && (
+              <MarkPaidModal
+                outstanding={(Number(bill.grandTotal) - Number(bill.amountPaid)).toFixed(2)}
+                onSubmit={doMarkPaid}
+              />
+            )}
           </div>
         }
       />

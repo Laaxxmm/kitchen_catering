@@ -63,9 +63,12 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
           stateCode: customer.stateCode,
           contactName: customer.contactName,
           email: customer.email,
-          phone: customer.phone,
+          phone: customer.phone ?? "",
           notes: customer.notes,
           groupId: customer.groupId,
+          billingCompanyName: customer.billingCompanyName,
+          creditLimit: customer.creditLimit.toString(),
+          creditDays: customer.creditDays,
         }}
         groups={groups.map((g) => ({ id: g.id, name: g.name }))}
         onSubmit={update}

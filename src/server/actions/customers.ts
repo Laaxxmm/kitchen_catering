@@ -10,6 +10,30 @@ import { sha256Json } from "@/lib/audit";
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.SALES];
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.SALES, Role.ACCOUNTS, Role.KITCHEN_HEAD, Role.STORE_KEEPER];
 
+/**
+ * Credit-duration approval rule from the Workflow doc:
+ *   creditDays = 0          → cash; any sales/manager/admin can create
+ *   creditDays 1..15        → manager or admin only
+ *   creditDays > 15         → admin only
+ *
+ * Returns null when allowed, or a human-readable reason when not.
+ */
+function checkCreditDurationGate(role: Role, creditDays: number | undefined): string | null {
+  const days = creditDays ?? 0;
+  if (days === 0) return null;
+  if (days <= 15) {
+    if (role === Role.SALES) {
+      return "Credit duration 1–15 days needs manager or admin approval. Ask a manager to create / update this customer.";
+    }
+    return null;
+  }
+  // days > 15
+  if (role !== Role.ADMIN) {
+    return "Credit duration >15 days needs admin approval. Ask an admin to create / update this customer.";
+  }
+  return null;
+}
+
 function customerDataFromInput(input: CustomerInputT) {
   return {
     name: input.name,
@@ -20,12 +44,15 @@ function customerDataFromInput(input: CustomerInputT) {
     stateCode: input.stateCode,
     contactName: input.contactName ?? null,
     email: input.email ?? null,
-    phone: input.phone ?? null,
+    // Phone is now required by the validator; pass straight through.
+    phone: input.phone,
     notes: input.notes ?? null,
     groupId: input.groupId ?? null,
     defaultTdsRatePct: input.defaultTdsRatePct ?? null,
     defaultTdsSection: input.defaultTdsSection ?? null,
+    billingCompanyName: input.billingCompanyName ?? null,
     ...(input.creditLimit !== undefined ? { creditLimit: input.creditLimit } : {}),
+    ...(input.creditDays !== undefined ? { creditDays: input.creditDays } : {}),
     ...(input.paymentTerms !== undefined ? { paymentTerms: input.paymentTerms } : {}),
   };
 }
@@ -33,6 +60,8 @@ function customerDataFromInput(input: CustomerInputT) {
 export async function createCustomer(raw: unknown) {
   const session = await requireRole(WRITE_ROLES);
   const input = CustomerInput.parse(raw);
+  const block = checkCreditDurationGate(session.user.role, input.creditDays);
+  if (block) throw new Error(block);
 
   const customer = await db.$transaction(async (tx) => {
     const row = await tx.customer.create({ data: customerDataFromInput(input) });
@@ -55,6 +84,8 @@ export async function createCustomer(raw: unknown) {
 export async function updateCustomer(id: string, raw: unknown) {
   const session = await requireRole(WRITE_ROLES);
   const input = CustomerInput.parse(raw);
+  const block = checkCreditDurationGate(session.user.role, input.creditDays);
+  if (block) throw new Error(block);
 
   await db.$transaction(async (tx) => {
     await tx.customer.update({ where: { id }, data: customerDataFromInput(input) });
