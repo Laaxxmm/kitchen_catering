@@ -361,6 +361,8 @@ model User {
   prRequested                     PurchaseRequisition[]    @relation("PRRequester")
   prApproved                      PurchaseRequisition[]    @relation("PRApprover")
   vendorPosApproved               VendorPO[]               @relation("VendorPOApprovedBy")
+  vendorPosManagerApproved        VendorPO[]               @relation("VendorPOManagerApprovedBy")
+  vendorPosAdminApproved          VendorPO[]               @relation("VendorPOAdminApprovedBy")
   grnsReceived                    GRN[]                    @relation("GRNReceivedBy")
   vendorBillsMatched              VendorBill[]             @relation("VendorBillMatchedBy")
   customerInvoicePaymentsRecorded CustomerInvoicePayment[] @relation("CustomerInvoicePaymentRecordedBy")
@@ -1228,10 +1230,28 @@ model VendorPO {
   subtotal               Decimal        @default(0) @db.Decimal(14, 2)
   taxTotal               Decimal        @default(0) @db.Decimal(14, 2)
   grandTotal             Decimal        @default(0) @db.Decimal(14, 2)
-  approvalTier           String // 'auto' | 'manager' | 'admin'
+  // approvalTier:
+  //   "auto"   — skip approval entirely (rare, explicit override)
+  //   "tiered" — apply Settings.po.approvalTiers thresholds:
+  //              Manager always required; Admin required when grandTotal
+  //              ≥ adminMin (default ₹5000 per Workflow doc).
+  //   Legacy values "manager" / "admin" from earlier rollouts are treated
+  //   as "tiered" by the engine.
+  approvalTier           String         @default("tiered")
+  // Final approver — the person who clicked "Approve" on the LAST step
+  // (manager-alone for <threshold POs, admin for ≥threshold).
   approvedByUserId       String?
   approvedBy             User?          @relation("VendorPOApprovedBy", fields: [approvedByUserId], references: [id])
   approvedAt             DateTime?
+  // Per-step approval breadcrumbs. Both populate on a tiered approval;
+  // on a sub-threshold PO only managerApproved* is set + approvedAt
+  // points to that timestamp.
+  managerApprovedById    String?
+  managerApprovedBy      User?          @relation("VendorPOManagerApprovedBy", fields: [managerApprovedById], references: [id])
+  managerApprovedAt      DateTime?
+  adminApprovedById      String?
+  adminApprovedBy        User?          @relation("VendorPOAdminApprovedBy", fields: [adminApprovedById], references: [id])
+  adminApprovedAt        DateTime?
   sentAt                 DateTime?
   closedAt               DateTime?
   notes                  String?

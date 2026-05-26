@@ -27,19 +27,49 @@ import { newMovingAverage } from "@/lib/inventory-cost";
 import { toDecimal } from "@/lib/money";
 import { indefineStateCode } from "@/lib/org";
 import { summarise } from "@/lib/gst";
+import { getSettingOr } from "@/lib/settings";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
+// Workflow doc: "Payment - Finance to be able to add vendor invoice".
+// Accounts gets bill creation access in addition to the store-side write
+// roles. They can raise a bill directly (no-PO path) for service vendors
+// + statutory payments.
+const BILL_WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.ACCOUNTS];
 const APPROVE_ROLES = [Role.ADMIN, Role.MANAGER];
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.ACCOUNTS, Role.KITCHEN_HEAD];
 
-// Tier thresholds — match the spec defaults; tunable via Settings later.
-const TIER_AUTO_MAX = new Decimal(100_000);     // ≤ ₹1L  -> auto
-const TIER_MANAGER_MAX = new Decimal(1_000_000); // ≤ ₹10L -> manager
+/**
+ * PO approval rule from the Workflow doc:
+ *   Manager approval is always required.
+ *   Admin approval is ALSO required when grandTotal ≥ adminMin.
+ *
+ * Stored as Setting key `po.approvalTiers`:
+ *   { "adminMin": 5000 }
+ *
+ * Defaults to ₹5000 if the setting is missing — matches the doc's
+ * "Procurement approval to be done by Admin >5000".
+ */
+interface PoApprovalTiers {
+  /** PO grand total at-or-above which Admin approval is required. */
+  adminMin: number;
+}
 
-function approvalTierFor(total: Decimal): "auto" | "manager" | "admin" {
-  if (total.lte(TIER_AUTO_MAX)) return "auto";
-  if (total.lte(TIER_MANAGER_MAX)) return "manager";
-  return "admin";
+async function loadApprovalTiers(): Promise<PoApprovalTiers> {
+  const value = await getSettingOr<PoApprovalTiers>("po.approvalTiers", {
+    adminMin: 5000,
+  });
+  // Defensive — Settings is JSON so callers could persist a malformed
+  // shape. Fall back to defaults rather than throwing.
+  const adminMin =
+    typeof value?.adminMin === "number" && value.adminMin >= 0
+      ? value.adminMin
+      : 5000;
+  return { adminMin };
+}
+
+/** Returns true when this PO total needs Admin approval on top of Manager. */
+function needsAdminApproval(total: Decimal, tiers: PoApprovalTiers): boolean {
+  return total.gte(tiers.adminMin);
 }
 
 // =====================================================================
@@ -61,7 +91,9 @@ export async function createVendorPO(raw: unknown) {
     supplierStateCode: supplierState,
     placeOfSupplyStateCode: input.placeOfSupplyStateCode,
   });
-  const tier = approvalTierFor(summary.grandTotal);
+  // All POs default to the tiered approval engine. Admins can still
+  // explicitly mark a PO "auto" (out-of-band) for edge cases.
+  const tier = "tiered";
 
   const po = await db.$transaction(async (tx) => {
     // If we're spinning the PO out of an approved PR, validate first so
@@ -183,26 +215,114 @@ export async function submitVendorPO(id: string) {
   revalidatePath(`/procurement/purchase-orders/${id}`);
 }
 
+/**
+ * Two-step PO approval per the Workflow doc.
+ *
+ * Flow when approvalTier = "tiered":
+ *   1. Manager (or Admin) clicks Approve  →  manager step recorded
+ *      ─ If grandTotal < adminMin           →  status APPROVED (done)
+ *      ─ If grandTotal ≥ adminMin           →  status stays
+ *                                              PENDING_APPROVAL but
+ *                                              UI shows "awaiting admin"
+ *   2. Admin clicks Approve                →  admin step recorded,
+ *                                              status APPROVED
+ *
+ * Admin can complete BOTH steps in one click on a fresh PO (their
+ * approval implicitly satisfies the manager step too).
+ *
+ * Legacy approvalTier values ("manager" / "admin") are routed through
+ * this tiered engine — no special casing.
+ */
 export async function approveVendorPO(id: string) {
   const session = await requireRole(APPROVE_ROLES);
   await db.$transaction(async (tx) => {
-    const po = await tx.vendorPO.findUnique({ where: { id }, select: { status: true, approvalTier: true } });
+    const po = await tx.vendorPO.findUnique({
+      where: { id },
+      select: {
+        status: true,
+        approvalTier: true,
+        grandTotal: true,
+        managerApprovedAt: true,
+        managerApprovedById: true,
+      },
+    });
     if (!po) throw new Error("PO not found");
     if (po.status !== VendorPOStatus.PENDING_APPROVAL) {
       throw new AuthorizationError("PO is not awaiting approval");
     }
-    if (po.approvalTier === "admin" && session.user.role !== Role.ADMIN) {
-      throw new AuthorizationError("This PO tier requires ADMIN approval");
+
+    const tiers = await loadApprovalTiers();
+    const adminRequired = needsAdminApproval(toDecimal(po.grandTotal), tiers);
+    const now = new Date();
+    const role = session.user.role;
+
+    const managerStepDone = po.managerApprovedAt != null;
+
+    if (!managerStepDone) {
+      // Manager step — Manager OR Admin can perform it.
+      if (role !== Role.MANAGER && role !== Role.ADMIN) {
+        throw new AuthorizationError("Only Manager or Admin can approve");
+      }
+      const fullyApproved = !adminRequired || role === Role.ADMIN;
+      await tx.vendorPO.update({
+        where: { id },
+        data: {
+          managerApprovedById: session.user.id,
+          managerApprovedAt: now,
+          ...(role === Role.ADMIN && adminRequired
+            ? { adminApprovedById: session.user.id, adminApprovedAt: now }
+            : {}),
+          ...(fullyApproved
+            ? {
+                status: VendorPOStatus.APPROVED,
+                approvedByUserId: session.user.id,
+                approvedAt: now,
+              }
+            : {}),
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: fullyApproved
+            ? "VENDOR_PO_APPROVED"
+            : "VENDOR_PO_MANAGER_APPROVED",
+          entity: "VendorPO",
+          entityId: id,
+        },
+      });
+      return;
+    }
+
+    // Manager step already done. Admin step needed (we only get here when
+    // adminRequired was true — sub-threshold POs would have been fully
+    // approved in the manager step).
+    if (role !== Role.ADMIN) {
+      throw new AuthorizationError(
+        "This PO needs Admin approval (already approved by Manager).",
+      );
     }
     await tx.vendorPO.update({
       where: { id },
-      data: { status: VendorPOStatus.APPROVED, approvedByUserId: session.user.id, approvedAt: new Date() },
+      data: {
+        adminApprovedById: session.user.id,
+        adminApprovedAt: now,
+        status: VendorPOStatus.APPROVED,
+        approvedByUserId: session.user.id,
+        approvedAt: now,
+      },
     });
     await tx.auditLog.create({
-      data: { userId: session.user.id, action: "VENDOR_PO_APPROVED", entity: "VendorPO", entityId: id },
+      data: {
+        userId: session.user.id,
+        action: "VENDOR_PO_ADMIN_APPROVED",
+        entity: "VendorPO",
+        entityId: id,
+      },
     });
   });
   revalidatePath(`/procurement/purchase-orders/${id}`);
+  revalidatePath("/procurement/purchase-orders");
 }
 
 export async function sendVendorPO(id: string) {
@@ -388,7 +508,7 @@ const PRICE_TOLERANCE_PCT = new Decimal(0.5); // ±0.5%
 const TAX_TOLERANCE_ABS = new Decimal(1); // ±₹1
 
 export async function createVendorBill(raw: unknown) {
-  const session = await requireRole(WRITE_ROLES);
+  const session = await requireRole(BILL_WRITE_ROLES);
   const input = VendorBillCreateInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {
@@ -676,6 +796,9 @@ export async function getVendorPO(id: string) {
       grns: { select: { id: true, grnNo: true, status: true, receivedAt: true } },
       bills: { select: { id: true, billNo: true, status: true, issueDate: true } },
       approvedBy: { select: { name: true } },
+      // Two-step approval breadcrumbs — surfaced in the detail-page header.
+      managerApprovedBy: { select: { name: true } },
+      adminApprovedBy: { select: { name: true } },
     },
   });
 }

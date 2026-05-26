@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { PettyCashVoucherStatus } from "@prisma/client";
+import { DocumentEntityType, PettyCashVoucherStatus } from "@prisma/client";
+import { DocumentUploader } from "@/components/ik/DocumentUploader";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -136,12 +137,19 @@ export default async function PettyCashFloatDetailPage({ params }: { params: Pro
                   <TableCell className="text-right font-mono">{formatINR(v.amount)}</TableCell>
                   <TableCell>{v.status}</TableCell>
                   <TableCell>
-                    {v.status === PettyCashVoucherStatus.POSTED && (
-                      <form action={reverse.bind(null, v.id)} className="inline">
-                        <input name="reason" placeholder="Reason" className="h-6 w-24 rounded border border-ik-rule bg-ik-card px-1 text-[11px]" />
-                        <Button type="submit" size="sm" variant="outline" className="ml-1">Reverse</Button>
-                      </form>
-                    )}
+                    <div className="flex flex-col gap-1">
+                      <DocumentUploader
+                        entityType={DocumentEntityType.PETTY_CASH_VOUCHER}
+                        entityId={v.id}
+                        label="Attach bill"
+                      />
+                      {v.status === PettyCashVoucherStatus.POSTED && (
+                        <form action={reverse.bind(null, v.id)} className="inline">
+                          <input name="reason" placeholder="Reason" className="h-6 w-24 rounded border border-ik-rule bg-ik-card px-1 text-[11px]" />
+                          <Button type="submit" size="sm" variant="outline" className="ml-1">Reverse</Button>
+                        </form>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

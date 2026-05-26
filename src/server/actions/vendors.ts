@@ -115,3 +115,106 @@ export async function getVendor(id: string) {
   await requireRole(READ_ROLES);
   return db.vendor.findUnique({ where: { id } });
 }
+
+/**
+ * Full per-vendor activity timeline: every bill issued against this
+ * vendor, every payment recorded, and a running outstanding total.
+ *
+ * Used by the vendor detail page's "History" panel. The result is
+ * sorted reverse-chronologically so the latest event shows at the
+ * top; the `runningOutstanding` field shows what the balance was
+ * AFTER each event landed.
+ */
+export type VendorTimelineEntry =
+  | {
+      kind: "BILL";
+      id: string;
+      occurredAt: Date;
+      billNo: string;
+      vendorBillNo: string | null;
+      status: string;
+      grandTotal: string;
+      amountPaid: string;
+      runningOutstanding: string;
+    }
+  | {
+      kind: "PAYMENT";
+      id: string;
+      occurredAt: Date;
+      billNo: string;
+      method: string;
+      reference: string | null;
+      amount: string;
+      runningOutstanding: string;
+    };
+
+export async function getVendorHistory(vendorId: string) {
+  await requireRole(READ_ROLES);
+  const bills = await db.vendorBill.findMany({
+    where: { vendorId },
+    include: {
+      payments: {
+        where: { reversedAt: null },
+        orderBy: { paidAt: "asc" },
+      },
+    },
+    orderBy: { issueDate: "asc" },
+  });
+
+  // Build chronological timeline (oldest -> newest), then reverse for
+  // display. Running balance accumulates across all bills + payments.
+  type Raw =
+    | { type: "BILL"; at: Date; bill: (typeof bills)[number] }
+    | { type: "PAYMENT"; at: Date; bill: (typeof bills)[number]; payment: (typeof bills)[number]["payments"][number] };
+  const events: Raw[] = [];
+  for (const b of bills) {
+    events.push({ type: "BILL", at: b.issueDate, bill: b });
+    for (const p of b.payments) {
+      events.push({ type: "PAYMENT", at: p.paidAt, bill: b, payment: p });
+    }
+  }
+  events.sort((a, b) => a.at.getTime() - b.at.getTime());
+
+  let running = 0;
+  const out: VendorTimelineEntry[] = [];
+  let totalBilled = 0;
+  let totalPaid = 0;
+  for (const e of events) {
+    if (e.type === "BILL") {
+      running += Number(e.bill.grandTotal);
+      totalBilled += Number(e.bill.grandTotal);
+      out.push({
+        kind: "BILL",
+        id: e.bill.id,
+        occurredAt: e.at,
+        billNo: e.bill.billNo,
+        vendorBillNo: e.bill.vendorBillNo,
+        status: e.bill.status,
+        grandTotal: e.bill.grandTotal.toString(),
+        amountPaid: e.bill.amountPaid.toString(),
+        runningOutstanding: running.toFixed(2),
+      });
+    } else {
+      running -= Number(e.payment.amount);
+      totalPaid += Number(e.payment.amount);
+      out.push({
+        kind: "PAYMENT",
+        id: e.payment.id,
+        occurredAt: e.at,
+        billNo: e.bill.billNo,
+        method: e.payment.method,
+        reference: e.payment.reference,
+        amount: e.payment.amount.toString(),
+        runningOutstanding: running.toFixed(2),
+      });
+    }
+  }
+  return {
+    timeline: out.reverse(),
+    totals: {
+      billed: totalBilled.toFixed(2),
+      paid: totalPaid.toFixed(2),
+      outstanding: running.toFixed(2),
+    },
+  };
+}

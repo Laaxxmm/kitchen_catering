@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { deactivateVendor, getVendor, updateVendor } from "@/server/actions/vendors";
 import { VendorForm } from "../_components/VendorForm";
+import { VendorHistoryPanel } from "./_components/VendorHistoryPanel";
 import type { VendorInputT } from "@/lib/validators";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +49,7 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
         onSubmit={update}
         submitLabel="Save changes"
       />
+      <VendorHistoryPanel vendorId={id} />
     </>
   );
 }

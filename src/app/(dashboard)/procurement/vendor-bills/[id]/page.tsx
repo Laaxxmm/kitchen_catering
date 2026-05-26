@@ -15,6 +15,9 @@ import {
 import { recordVendorBillPayment, reverseVendorBillPayment } from "@/server/actions/payments";
 import { BillPaymentForm } from "./_components/BillPaymentForm";
 import { MarkPaidModal } from "@/components/ik/finance/MarkPaidModal";
+import { DocumentUploader } from "@/components/ik/DocumentUploader";
+import { DocumentList } from "@/components/ik/DocumentList";
+import { DocumentEntityType } from "@prisma/client";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 
@@ -167,6 +170,19 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
           </Table>
         </section>
       )}
+
+      <section className="mt-5 grid gap-3">
+        <DocumentUploader
+          entityType={DocumentEntityType.VENDOR_BILL}
+          entityId={bill.id}
+          label="Upload supplier bill"
+        />
+        <DocumentList
+          entityType={DocumentEntityType.VENDOR_BILL}
+          entityId={bill.id}
+          title="Supplier-bill attachments"
+        />
+      </section>
 
       {canPay && <BillPaymentForm outstanding={Number(bill.grandTotal) - Number(bill.amountPaid)} onSubmit={doPay} />}
     </>

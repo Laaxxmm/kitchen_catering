@@ -25,7 +25,13 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
   if (!po) notFound();
   const role = session?.user?.role;
   const canSubmit = po.status === VendorPOStatus.DRAFT && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
-  const canApprove = po.status === VendorPOStatus.PENDING_APPROVAL && (role === Role.ADMIN || (role === Role.MANAGER && po.approvalTier !== "admin"));
+  // Two-step approval: Manager (or Admin) handles the first step; Admin
+  // is required when the PO total is at-or-above the Settings threshold
+  // (default ₹5000). Once Manager has approved, only Admin can finish.
+  const managerStepDone = po.managerApprovedAt != null;
+  const canApprove =
+    po.status === VendorPOStatus.PENDING_APPROVAL &&
+    (role === Role.ADMIN || (role === Role.MANAGER && !managerStepDone));
   const canSend = po.status === VendorPOStatus.APPROVED && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
   const canReceive = (po.status === VendorPOStatus.APPROVED || po.status === VendorPOStatus.SENT || po.status === VendorPOStatus.PARTIALLY_RECEIVED) && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
 
@@ -43,7 +49,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
       <PageHeader
         eyebrow="Procurement"
         title={po.poNo}
-        description={`${po.vendor.name} · tier ${po.approvalTier} · ${formatINR(po.grandTotal)}`}
+        description={`${po.vendor.name} · ${formatINR(po.grandTotal)}`}
         actions={
           <div className="flex gap-2">
             <Link href="/procurement/purchase-orders"><Button variant="outline">Back</Button></Link>
@@ -54,11 +60,25 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
           </div>
         }
       />
-      <div className="mb-4 flex items-center gap-3 text-[13px]">
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
         <StatusBadge status={po.status} />
+        {po.status === VendorPOStatus.PENDING_APPROVAL && managerStepDone && (
+          <span className="text-[11.5px] font-medium uppercase tracking-wide text-amber-700">
+            Manager approved · awaiting Admin
+          </span>
+        )}
         <span className="text-ik-ink-3">Issued {formatIST(po.issueDate, "yyyy-MM-dd")}</span>
         {po.expectedDate && <span className="text-ik-ink-3">· Expected {formatIST(po.expectedDate, "yyyy-MM-dd")}</span>}
-        {po.approvedAt && <span className="text-ik-ink-3">· Approved {formatIST(po.approvedAt)} by {po.approvedBy?.name ?? "—"}</span>}
+        {po.managerApprovedAt && (
+          <span className="text-ik-ink-3">
+            · Manager: {formatIST(po.managerApprovedAt)} ({po.managerApprovedBy?.name ?? "—"})
+          </span>
+        )}
+        {po.adminApprovedAt && (
+          <span className="text-ik-ink-3">
+            · Admin: {formatIST(po.adminApprovedAt)} ({po.adminApprovedBy?.name ?? "—"})
+          </span>
+        )}
         {po.sentAt && <span className="text-ik-ink-3">· Sent {formatIST(po.sentAt)}</span>}
       </div>
 
