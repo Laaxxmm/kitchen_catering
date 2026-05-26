@@ -33,6 +33,7 @@ export function IngredientForm({ defaults, onSubmit, submitLabel = "Save", redir
       reorderLevel: defaults?.reorderLevel ?? "0",
       hsnSac: defaults?.hsnSac ?? "",
       gstRatePct: defaults?.gstRatePct ?? "0",
+      subStore: defaults?.subStore ?? "OTHER",
     },
   });
 
@@ -69,10 +70,27 @@ export function IngredientForm({ defaults, onSubmit, submitLabel = "Save", redir
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <div className="grid gap-1">
           <Label htmlFor="category">Category</Label>
           <Input id="category" placeholder="Dairy, Spices, …" {...register("category")} />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="subStore">Sub-store</Label>
+          <select
+            id="subStore"
+            {...register("subStore")}
+            className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
+          >
+            <option value="VEGETABLE">Vegetable</option>
+            <option value="GROCERY">Grocery</option>
+            <option value="MILK">Milk / dairy</option>
+            <option value="WATER">Water bottles</option>
+            <option value="OTHER">Other</option>
+          </select>
+          <p className="text-[10.5px] text-ik-ink-3">
+            Drives the approval rule for chef requisitions.
+          </p>
         </div>
         <div className="grid gap-1">
           <Label htmlFor="unit">Unit</Label>

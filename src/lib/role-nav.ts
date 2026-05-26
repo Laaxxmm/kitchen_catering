@@ -13,13 +13,13 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
     "kitchen", "requisitions", "deliveries", "inventory",
     "procurement", "invoices", "payments", "pettycash", "salary", "reports",
-    "housekeeping", "maintenance", "admin",
+    "housekeeping", "maintenance", "banquet", "admin",
   ]),
   MANAGER: new Set([
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
     "kitchen", "requisitions", "deliveries", "inventory",
     "procurement", "invoices", "payments", "pettycash", "salary", "reports",
-    "housekeeping", "maintenance",
+    "housekeeping", "maintenance", "banquet",
   ]),
   SALES: new Set([
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
@@ -55,11 +55,11 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   MAINTENANCE_MANAGER: new Set([
     "dashboard", "tasks", "maintenance",
   ]),
-  // F&B service: takes room-service / alacarte / management orders.
-  // For Phase 0 they get tasks + the dashboard. Banquet store comes in
-  // Phase 3, order-channel UI comes in Phase 4.
+  // F&B service: takes room-service / alacarte / management orders and
+  // drives the banquet store (Phase 3). Order-channel UI lands in
+  // Phase 4.
   FNB_SERVICE: new Set([
-    "dashboard", "tasks",
+    "dashboard", "tasks", "banquet",
   ]),
 };
 

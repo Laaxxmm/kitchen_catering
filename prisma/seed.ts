@@ -114,6 +114,63 @@ async function main() {
     update: {},
   });
 
+  // ─── Banquet store packaging (Phase 3) ──────────────────────────
+  // 44 SKUs from the client's "FnB Store's Report On Daily Basis" Excel.
+  // Idempotent: keyed on item name (unique constraint in schema).
+  const banquetItems: Array<{ name: string; category: string; unit: string }> = [
+    { name: "Ripple Tea Cups [100 ml]",                       category: "Packaging",  unit: "pcs" },
+    { name: "Ripple Water Cups [200 ml]",                     category: "Packaging",  unit: "pcs" },
+    { name: "Printed Tissue Paper",                           category: "Tissue",     unit: "Bag" },
+    { name: "Tissue Paper [Without Print]",                   category: "Tissue",     unit: "Bag" },
+    { name: "5 Compartment Meal Tray",                        category: "Trays",      unit: "Pcs" },
+    { name: "3 Compartment Meal Tray [10.5 inch]",            category: "Trays",      unit: "Pcs" },
+    { name: "Baggase Plates Round [7 inch]",                  category: "Plates",     unit: "Pcs" },
+    { name: "Tomato Ketchup [1/2 kg]",                        category: "Condiments", unit: "Pkt" },
+    { name: "Butter Paper",                                   category: "Packaging",  unit: "Roll" },
+    { name: "Round Printed Logo Sticker",                     category: "Stickers",   unit: "Sheets" },
+    { name: "Printed Square Logo Sticker",                    category: "Stickers",   unit: "Pcs" },
+    { name: "Table Roll",                                     category: "Packaging",  unit: "Roll" },
+    { name: "Cling Wrap",                                     category: "Packaging",  unit: "Roll" },
+    { name: "Windsor 8 Compartment Box",                      category: "Boxes",      unit: "Pcs" },
+    { name: "Windsor 5 Compartment Box",                      category: "Boxes",      unit: "Pcs" },
+    { name: "Wooden Spoon [16 MM]",                           category: "Cutlery",    unit: "Pcs" },
+    { name: "Wooden Fork [16 MM]",                            category: "Cutlery",    unit: "Pcs" },
+    { name: "Plastic Containers [500 ml]",                    category: "Containers", unit: "Pcs" },
+    { name: "Plastic Containers [100 ml]",                    category: "Containers", unit: "Pcs" },
+    { name: "Cello Tape [1 inch]",                            category: "Tape",       unit: "Roll" },
+    { name: "Brown Tape [2.5 inch]",                          category: "Tape",       unit: "Roll" },
+    { name: "Double Tape",                                    category: "Tape",       unit: "Roll" },
+    { name: "Seal Dispenser",                                 category: "Tools",      unit: "Pcs" },
+    { name: "Cello Tape [2.5 inch]",                          category: "Tape",       unit: "Roll" },
+    { name: "Aluminium Paper Plates [7 inch]",                category: "Plates",     unit: "Pcs" },
+    { name: "Baggse Bowl [250 ml]",                           category: "Bowls",      unit: "Pcs" },
+    { name: "Baggase Bowl [150 ml]",                          category: "Bowls",      unit: "Pcs" },
+    { name: "Fomex Bowl [350 ml]",                            category: "Bowls",      unit: "Pcs" },
+    { name: "White Cake Box [9*8*4]",                         category: "Boxes",      unit: "Pcs" },
+    { name: "Brown Cake Box [9*8*4]",                         category: "Boxes",      unit: "Pcs" },
+    { name: "3 cp Areca Plates [10 inch]",                    category: "Plates",     unit: "Pcs" },
+    { name: "Brown Paper Bag",                                category: "Packaging",  unit: "Pcs" },
+    { name: "Aluminium Foil",                                 category: "Packaging",  unit: "Roll" },
+    { name: "Hair Net",                                       category: "Hygiene",    unit: "pouch" },
+    { name: "Burger Clam Shell [6*6]",                        category: "Boxes",      unit: "pcs" },
+    { name: "Burger Clam Shell [9*9]",                        category: "Boxes",      unit: "Pcs" },
+    { name: "Sandwich Clam Shell",                            category: "Boxes",      unit: "Pcs" },
+    { name: "Fuel",                                           category: "Other",      unit: "Pcs" },
+    { name: "Corn Starch 8 CP Meal Box",                      category: "Boxes",      unit: "Pcs" },
+    { name: "Disposable Plastic Juice Cups with lid [300 ml]", category: "Cups",      unit: "Pcs" },
+    { name: "Plastic Container [750 ml]",                     category: "Containers", unit: "Pcs" },
+    { name: "Paper Straw [8 mm]",                             category: "Cutlery",    unit: "Pkt" },
+    { name: "Black Hand Gloves",                              category: "Hygiene",    unit: "Pouch" },
+    { name: "Ketchup Sachet",                                 category: "Condiments", unit: "Pkt" },
+  ];
+  for (const item of banquetItems) {
+    await db.banquetItem.upsert({
+      where: { name: item.name },
+      create: item,
+      update: {}, // don't overwrite category/unit/stock if it already exists
+    });
+  }
+
   console.log("Seed done.");
 }
 

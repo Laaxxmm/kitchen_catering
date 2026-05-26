@@ -45,6 +45,7 @@ export default async function IngredientDetailPage({ params }: { params: Promise
           sku: ingredient.sku,
           name: ingredient.name,
           category: ingredient.category,
+          subStore: ingredient.subStore,
           unit: ingredient.unit,
           reorderLevel: ingredient.reorderLevel.toString(),
           hsnSac: ingredient.hsnSac,

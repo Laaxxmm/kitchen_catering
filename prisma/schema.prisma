@@ -391,6 +391,10 @@ model User {
   maintenanceReceiptsRecorded     MaintenanceReceipt[]     @relation("MaintenanceReceiptRecordedBy")
   maintenanceActivitiesRecorded   MaintenanceActivity[]    @relation("MaintenanceActivityRecordedBy")
 
+  // Banquet (F&B store)
+  banquetReceiptsRecorded         BanquetReceipt[]         @relation("BanquetReceiptRecordedBy")
+  banquetIssuesRecorded           BanquetIssue[]           @relation("BanquetIssueRecordedBy")
+
   // Mobile
   mobileSessions MobileSession[] @relation("MobileSessions")
   mobileOps      MobileOp[]      @relation("MobileOps")
@@ -893,6 +897,7 @@ model Order {
   vendorPos        VendorPO[]                @relation("VendorPOToOrder")
   timeEntries      TimeEntry[]               @relation("TimeEntryToOrder")
   chefRequisitions ChefRequisition[]
+  banquetIssues    BanquetIssue[]            @relation("BanquetIssueOrder")
 
   @@index([status])
   @@index([customerId])
@@ -2174,5 +2179,104 @@ model MaintenanceActivityLine {
   quantity   Decimal             @db.Decimal(14, 3)
 
   @@index([activityId])
+  @@index([itemId])
+}
+
+// =====================================================================
+// BANQUET STORE (F&B service-side packaging — Phase 3)
+// =====================================================================
+// Mirrors HousekeepingItem in shape. Holds service-side disposables:
+// paper cups, meal trays, tissue, foil, cake boxes, takeaway containers
+// etc. The FnB Store Excel from the client seeds this catalog at ~44
+// SKUs across packaging, condiments, and event materials.
+//
+// Approval flow (per the workflow doc matrix):
+//   F&B raises requisition → Purchase (Store) raises PO →
+//   Manager + Admin double-approve always.
+// The current PO engine handles the threshold rule; per-category
+// override comes in a later phase.
+
+model BanquetItem {
+  id           String   @id @default(cuid())
+  name         String
+  sku          String?
+  // Free-text sub-grouping for the catalog: "Packaging", "Tissue",
+  // "Tape", "Ketchup", "Cutlery", "Foil"… seeded from the FnB Excel.
+  category     String?
+  unit         String   @default("piece")
+  currentStock Decimal  @default(0) @db.Decimal(14, 3)
+  minStock     Decimal? @db.Decimal(14, 3)
+  notes        String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  receiptLines BanquetReceiptLine[]
+  issueLines   BanquetIssueLine[]
+
+  @@unique([name])
+  @@index([active])
+  @@index([category])
+}
+
+// Stock IN — bought from vendor (or transferred in from another store).
+model BanquetReceipt {
+  id            String   @id @default(cuid())
+  receivedAt    DateTime
+  recordedById  String
+  recordedBy    User     @relation("BanquetReceiptRecordedBy", fields: [recordedById], references: [id])
+  sourceNote    String?
+  sourceContact String?
+  createdAt     DateTime @default(now())
+
+  lines BanquetReceiptLine[]
+
+  @@index([receivedAt])
+}
+
+model BanquetReceiptLine {
+  id          String         @id @default(cuid())
+  receiptId   String
+  receipt     BanquetReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        BanquetItem    @relation(fields: [itemId], references: [id])
+  quantity    Decimal        @db.Decimal(14, 3)
+  costPerUnit Decimal?       @db.Decimal(12, 2)
+
+  @@index([receiptId])
+  @@index([itemId])
+}
+
+// Stock OUT — issued from the banquet store to a service area / event.
+// Unlike HK (issued to a room), banquet items typically go to "today's
+// catering ODC" or "Room service prep" — captured as a free-text
+// purpose plus optional Order link.
+model BanquetIssue {
+  id           String   @id @default(cuid())
+  issuedAt     DateTime
+  recordedById String
+  recordedBy   User     @relation("BanquetIssueRecordedBy", fields: [recordedById], references: [id])
+  purpose      String   // e.g. "Wipro lunch ODC", "Floor 3 cleaning"
+  // Optional link to the catering order this stock served.
+  orderId      String?
+  order        Order?   @relation("BanquetIssueOrder", fields: [orderId], references: [id], onDelete: SetNull)
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  lines BanquetIssueLine[]
+
+  @@index([issuedAt])
+  @@index([orderId])
+}
+
+model BanquetIssueLine {
+  id       String       @id @default(cuid())
+  issueId  String
+  issue    BanquetIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  itemId   String
+  item     BanquetItem  @relation(fields: [itemId], references: [id])
+  quantity Decimal      @db.Decimal(14, 3)
+
+  @@index([issueId])
   @@index([itemId])
 }

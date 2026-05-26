@@ -17,6 +17,7 @@ import { MyTasksPanel } from "@/components/ik/dashboard/MyTasksPanel";
 import { TasksAdminPanel } from "@/components/ik/dashboard/TasksAdminPanel";
 import { HousekeepingPanel } from "@/components/ik/dashboard/HousekeepingPanel";
 import { MaintenancePanel } from "@/components/ik/dashboard/MaintenancePanel";
+import { BanquetPanel } from "@/components/ik/dashboard/BanquetPanel";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -42,6 +43,7 @@ export default async function DashboardPage() {
   const isDriver = role === "DELIVERY";
   const isHousekeeping = role === "HOUSEKEEPING_MANAGER";
   const isMaintenance = role === "MAINTENANCE_MANAGER";
+  const isFnb = role === "FNB_SERVICE";
 
   // Housekeeping manager gets a focused dashboard scoped to their module.
   // Skips the heavy operational getDashboardSummary call entirely.
@@ -90,6 +92,31 @@ export default async function DashboardPage() {
         <div className="grid gap-5">
           <MyTasksPanel />
           <MaintenancePanel />
+        </div>
+      </>
+    );
+  }
+
+  // F&B service — focused dashboard for the banquet store + tasks.
+  // Order-channel UI (room service, alacarte, management) lands in
+  // Phase 4 and will surface here too.
+  if (isFnb) {
+    return (
+      <>
+        <PageHeader
+          eyebrow="Overview"
+          title={`Welcome, ${name}`}
+          description="Banquet store + service desk. Record stock IN from vendors and stock OUT to today's events."
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Link href="/banquet/issues/new"><Button>Issue to event</Button></Link>
+              <Link href="/banquet/receipts/new"><Button variant="outline">Record receipt</Button></Link>
+            </div>
+          }
+        />
+        <div className="grid gap-5">
+          <MyTasksPanel />
+          <BanquetPanel />
         </div>
       </>
     );

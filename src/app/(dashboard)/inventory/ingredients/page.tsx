@@ -57,6 +57,7 @@ export default async function IngredientsPage({
             <TableRow>
               <TableHead>SKU</TableHead>
               <TableHead>Name</TableHead>
+              <TableHead>Sub-store</TableHead>
               <TableHead>Category</TableHead>
               <TableHead>Unit</TableHead>
               <TableHead className="text-right">On hand</TableHead>
@@ -72,6 +73,9 @@ export default async function IngredientsPage({
                   <Link href={`/inventory/ingredients/${i.id}`} className="text-brand hover:underline">
                     {i.name}
                   </Link>
+                </TableCell>
+                <TableCell className="text-[11.5px] uppercase tracking-wide text-ik-ink-2">
+                  {i.subStore.replace("_", " ").toLowerCase()}
                 </TableCell>
                 <TableCell>{i.category ?? "—"}</TableCell>
                 <TableCell>{i.unit}</TableCell>

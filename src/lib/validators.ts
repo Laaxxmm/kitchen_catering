@@ -111,6 +111,12 @@ export const IngredientInput = z.object({
   sku: z.string().min(1).max(40),
   name: z.string().min(1).max(160),
   category: z.string().max(60).nullable().optional(),
+  // Sub-store discriminator — drives the per-category requisition
+  // approval rules from the Workflow doc matrix. See
+  // IngredientSubStore enum in schema.prisma.
+  subStore: z
+    .enum(["VEGETABLE", "GROCERY", "MILK", "WATER", "OTHER"])
+    .optional(),
   unit: z.string().min(1).max(20),
   openingQty: decimalString.optional(),
   openingAvgCost: decimalString.optional(),
@@ -719,6 +725,47 @@ export const MaintenanceActivityInput = z.object({
   notes: z.string().max(500).nullable().optional(),
   // Items consumed are optional — many activities are pure labour.
   lines: z.array(MaintActivityLineInput).optional().default([]),
+});
+
+// =====================================================================
+// BANQUET STORE (F&B service-side packaging)
+// =====================================================================
+
+export const BanquetItemInput = z.object({
+  name: z.string().min(2).max(160),
+  sku: z.string().max(60).nullable().optional(),
+  category: z.string().max(60).nullable().optional(),
+  unit: z.string().min(1).max(20).default("piece"),
+  minStock: decimalString.nullable().optional(),
+  openingStock: decimalString.nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+  active: z.boolean().optional(),
+});
+
+const BanquetReceiptLineInput = z.object({
+  itemId: z.string().min(1),
+  quantity: decimalString,
+  costPerUnit: decimalString.nullable().optional(),
+});
+
+export const BanquetReceiptInput = z.object({
+  receivedAt: isoDate,
+  sourceNote: z.string().max(500).nullable().optional(),
+  sourceContact: z.string().max(160).nullable().optional(),
+  lines: z.array(BanquetReceiptLineInput).min(1, "Add at least one line"),
+});
+
+const BanquetIssueLineInput = z.object({
+  itemId: z.string().min(1),
+  quantity: decimalString,
+});
+
+export const BanquetIssueInput = z.object({
+  issuedAt: isoDate,
+  purpose: z.string().min(2, "Describe the purpose").max(200),
+  orderId: z.string().nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+  lines: z.array(BanquetIssueLineInput).min(1, "Add at least one item"),
 });
 
 // =====================================================================

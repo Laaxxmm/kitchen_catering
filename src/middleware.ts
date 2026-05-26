@@ -87,6 +87,9 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Maintenance — electrical/mechanical work + spares inventory.
   { pattern: /^\/maintenance(\/|$)/, allow: ["ADMIN", "MANAGER", "MAINTENANCE_MANAGER"] },
 
+  // Banquet — F&B service-side packaging store.
+  { pattern: /^\/banquet(\/|$)/, allow: ["ADMIN", "MANAGER", "FNB_SERVICE"] },
+
   // Finance
   { pattern: /^\/invoices(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "SALES"] },
   { pattern: /^\/payments(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },

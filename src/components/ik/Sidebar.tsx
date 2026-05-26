@@ -36,6 +36,7 @@ const NAV: NavNode[] = [
   { kind: "item", key: "inventory", label: "Inventory", icon: "box", href: "/inventory" },
   { kind: "item", key: "housekeeping", label: "Housekeeping", icon: "box", href: "/housekeeping" },
   { kind: "item", key: "maintenance", label: "Maintenance", icon: "briefcase", href: "/maintenance" },
+  { kind: "item", key: "banquet", label: "Banquet store", icon: "box", href: "/banquet" },
 
   { kind: "sep", label: "Procurement" },
   { kind: "item", key: "procurement", label: "Procurement", icon: "invoice", href: "/procurement" },
