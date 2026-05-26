@@ -83,6 +83,7 @@ export async function createOrder(raw: unknown) {
       data: {
         code,
         customerId: input.customerId,
+        channel: input.channel,
         eventDate: new Date(input.eventDate),
         headcount: input.headcount,
         mealType: input.mealType,
@@ -90,6 +91,8 @@ export async function createOrder(raw: unknown) {
         deliveryWindowStart: new Date(input.deliveryWindowStart),
         deliveryWindowEnd: new Date(input.deliveryWindowEnd),
         placeOfSupplyStateCode: input.placeOfSupplyStateCode,
+        roomNumber: input.roomNumber?.trim() || null,
+        tableNumber: input.tableNumber?.trim() || null,
         notes: input.notes ?? null,
         contractValue: contractValue.toString(),
         status: OrderStatus.DRAFT,

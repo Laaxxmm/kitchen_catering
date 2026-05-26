@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { DeliveryStatus, OrderStatus, PaymentMethod, Role } from "@prisma/client";
 import { Decimal } from "decimal.js";
@@ -18,6 +19,15 @@ import {
 } from "@/lib/validators";
 import { nextDeliveryNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
+
+/**
+ * 24-byte random token, base64url-encoded — used for the public
+ * feedback link minted on delivery completion. Same shape as the
+ * existing CustomerInvoice.shareToken.
+ */
+function randomFeedbackToken(): string {
+  return randomBytes(24).toString("base64url");
+}
 
 const SCHEDULE_ROLES = [Role.ADMIN, Role.MANAGER];
 const DRIVER_OR_MANAGER = [Role.ADMIN, Role.MANAGER, Role.DELIVERY];
@@ -224,9 +234,34 @@ export async function confirmDeliveryOTP(id: string, raw: unknown) {
         paymentRecordedAt: pay ? new Date() : null,
       },
     });
+    // Generate a feedback token when the order goes DELIVERED. The
+    // public form at /f/<token> opens for ROOM_SERVICE / PACKET / ODC
+    // / ALACARTE channels — banquet + management skip it (no public
+    // customer to chase). Token is 24 random bytes base64url-encoded.
+    // The actual WhatsApp/SMS send happens in a later phase; for now
+    // the link is just persisted on the Order row so it's reachable.
+    const fullOrder = await tx.order.findUnique({
+      where: { id: delivery.orderId },
+      select: { channel: true, feedbackToken: true },
+    });
+    const wantsFeedback =
+      fullOrder &&
+      !fullOrder.feedbackToken &&
+      (fullOrder.channel === "ROOM_SERVICE" ||
+        fullOrder.channel === "PACKET" ||
+        fullOrder.channel === "ODC" ||
+        fullOrder.channel === "ALACARTE");
     await tx.order.update({
       where: { id: delivery.orderId },
-      data: { status: OrderStatus.DELIVERED },
+      data: {
+        status: OrderStatus.DELIVERED,
+        ...(wantsFeedback
+          ? {
+              feedbackToken: randomFeedbackToken(),
+              feedbackSentAt: new Date(),
+            }
+          : {}),
+      },
     });
     await tx.deliveryAttempt.create({
       data: { deliveryId: id, outcome: "OTP_MATCH" },

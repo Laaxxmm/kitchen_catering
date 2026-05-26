@@ -3,7 +3,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { MealType } from "@prisma/client";
+import { MealType, OrderChannel } from "@prisma/client";
 import { toast } from "sonner";
 import { Decimal } from "decimal.js";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,11 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
   // without a router refresh.
   const [customerOptions, setCustomerOptions] = useState(customers);
   const [customerId, setCustomerId] = useState(defaults?.customerId ?? customers[0]?.id ?? "");
+  const [channel, setChannel] = useState<OrderChannel>(
+    (defaults?.channel as OrderChannel) ?? OrderChannel.BANQUET,
+  );
+  const [roomNumber, setRoomNumber] = useState(defaults?.roomNumber ?? "");
+  const [tableNumber, setTableNumber] = useState(defaults?.tableNumber ?? "");
   const [eventDate, setEventDate] = useState(defaults?.eventDate ?? "");
   const [headcount, setHeadcount] = useState(String(defaults?.headcount ?? "10"));
   const [mealType, setMealType] = useState<MealType>((defaults?.mealType as MealType) ?? MealType.LUNCH);
@@ -124,8 +129,18 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
       }));
     if (items.length === 0) return toast.error("Add at least one dish line");
 
+    // Client-side validation that mirrors the server refinement —
+    // friendlier inline message than the Zod default.
+    if (channel === OrderChannel.ROOM_SERVICE && !roomNumber.trim()) {
+      return toast.error("Room service orders need a room number");
+    }
+    if (channel === OrderChannel.ALACARTE && !tableNumber.trim()) {
+      return toast.error("À la carte orders need a table number");
+    }
+
     const payload: OrderCreateInputT = {
       customerId,
+      channel,
       eventDate,
       headcount: Number(headcount),
       mealType,
@@ -133,6 +148,8 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
       deliveryWindowStart: deliveryWindowStart || eventDate,
       deliveryWindowEnd: deliveryWindowEnd || eventDate,
       placeOfSupplyStateCode,
+      roomNumber: roomNumber.trim() || null,
+      tableNumber: tableNumber.trim() || null,
       notes: notes || null,
       items,
     };
@@ -207,6 +224,62 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
               {Object.values(MealType).map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
+        </div>
+
+        {/* Channel — drives line rendering (ODC/PACKET hide rates),
+            requires roomNumber for ROOM_SERVICE or tableNumber for
+            ALACARTE. Defaults to BANQUET so the original corporate-
+            catering flow keeps working untouched. */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid gap-1">
+            <Label htmlFor="channel">Channel</Label>
+            <select
+              id="channel"
+              value={channel}
+              onChange={(e) => setChannel(e.target.value as OrderChannel)}
+              className="h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
+            >
+              <option value={OrderChannel.BANQUET}>Banquet (corporate catering)</option>
+              <option value={OrderChannel.ODC}>ODC (outdoor catering)</option>
+              <option value={OrderChannel.PACKET}>Packet food / take-away</option>
+              <option value={OrderChannel.ROOM_SERVICE}>Room service</option>
+              <option value={OrderChannel.ALACARTE}>À la carte (dine-in)</option>
+              <option value={OrderChannel.MANAGEMENT}>Management (internal)</option>
+            </select>
+          </div>
+          {channel === OrderChannel.ROOM_SERVICE && (
+            <div className="grid gap-1">
+              <Label htmlFor="roomNumber">
+                Room number <span className="text-alert">*</span>
+              </Label>
+              <Input
+                id="roomNumber"
+                placeholder="e.g. 203"
+                value={roomNumber}
+                onChange={(e) => setRoomNumber(e.target.value)}
+              />
+            </div>
+          )}
+          {channel === OrderChannel.ALACARTE && (
+            <div className="grid gap-1">
+              <Label htmlFor="tableNumber">
+                Table number <span className="text-alert">*</span>
+              </Label>
+              <Input
+                id="tableNumber"
+                placeholder="e.g. T-7"
+                value={tableNumber}
+                onChange={(e) => setTableNumber(e.target.value)}
+              />
+            </div>
+          )}
+          {(channel === OrderChannel.ODC || channel === OrderChannel.PACKET) && (
+            <div className="col-span-2 self-end text-[11.5px] text-ik-ink-3">
+              On the invoice + quote, lines for this channel appear as
+              sub-heads only — no per-item rate or quantity. The total
+              package price still applies.
+            </div>
+          )}
         </div>
 
         <div className="grid gap-1">

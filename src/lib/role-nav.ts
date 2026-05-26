@@ -55,11 +55,10 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   MAINTENANCE_MANAGER: new Set([
     "dashboard", "tasks", "maintenance",
   ]),
-  // F&B service: takes room-service / alacarte / management orders and
-  // drives the banquet store (Phase 3). Order-channel UI lands in
-  // Phase 4.
+  // F&B service: takes room-service / alacarte / management orders
+  // (Phase 4) and drives the banquet store (Phase 3).
   FNB_SERVICE: new Set([
-    "dashboard", "tasks", "banquet",
+    "dashboard", "tasks", "orders", "banquet",
   ]),
 };
 

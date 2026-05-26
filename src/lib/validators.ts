@@ -7,6 +7,7 @@ import {
   CustomerInvoiceStatus,
   DeliveryStatus,
   MealType,
+  OrderChannel,
   OrderStatus,
   PaymentMethod,
   ProductionJobStatus,
@@ -258,8 +259,15 @@ export const OrderItemInput = z.object({
 });
 export type OrderItemInputT = z.infer<typeof OrderItemInput>;
 
-export const OrderCreateInput = z.object({
+// Raw shape kept un-refined so OrderUpdateInput can call .partial() on
+// it. The channel-conditional check applies only on create (where all
+// fields are present); updates re-check via the same logic inside the
+// server action when channel changes.
+const orderCreateBase = z.object({
   customerId: z.string(),
+  // Channel defaults to BANQUET to preserve old semantics for legacy
+  // clients that don't send the field yet.
+  channel: z.nativeEnum(OrderChannel).default(OrderChannel.BANQUET),
   eventDate: isoDate,
   headcount: z.number().int().positive(),
   mealType: z.nativeEnum(MealType),
@@ -267,12 +275,32 @@ export const OrderCreateInput = z.object({
   deliveryWindowStart: isoDate,
   deliveryWindowEnd: isoDate,
   placeOfSupplyStateCode: stateCode,
+  // Required-IF-channel — enforced by the refinement on OrderCreateInput.
+  roomNumber: z.string().max(40).nullable().optional(),
+  tableNumber: z.string().max(40).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
   items: z.array(OrderItemInput).min(1, "At least one item is required"),
 });
+
+export const OrderCreateInput = orderCreateBase.refine(
+  (v) => {
+    if (v.channel === OrderChannel.ROOM_SERVICE) {
+      return !!(v.roomNumber && v.roomNumber.trim().length > 0);
+    }
+    if (v.channel === OrderChannel.ALACARTE) {
+      return !!(v.tableNumber && v.tableNumber.trim().length > 0);
+    }
+    return true;
+  },
+  {
+    message:
+      "Room service orders require a room number; à la carte orders require a table number",
+    path: ["roomNumber"],
+  },
+);
 export type OrderCreateInputT = z.infer<typeof OrderCreateInput>;
 
-export const OrderUpdateInput = OrderCreateInput.partial().extend({
+export const OrderUpdateInput = orderCreateBase.partial().extend({
   items: z.array(OrderItemInput).optional(),
 });
 

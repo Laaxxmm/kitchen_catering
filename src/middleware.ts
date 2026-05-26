@@ -53,7 +53,7 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
 
   // Orders — broad read access; per-action role checks are server-side
   { pattern: /^\/orders\/[^/]+\/requisition(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD"] },
-  { pattern: /^\/orders(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "STORE_KEEPER", "KITCHEN_HEAD", "ACCOUNTS"] },
+  { pattern: /^\/orders(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "STORE_KEEPER", "KITCHEN_HEAD", "ACCOUNTS", "FNB_SERVICE"] },
 
   // Operations
   { pattern: /^\/kitchen(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "SALES", "STORE_KEEPER"] },
@@ -116,6 +116,7 @@ export default auth((req) => {
     pathname === "/favicon.ico" ||
     pathname.startsWith("/q/") ||
     pathname.startsWith("/i/") ||
+    pathname.startsWith("/f/") ||
     pathname.startsWith("/api/pdf/public/") ||
     pathname === "/forbidden"
   ) {

@@ -72,6 +72,24 @@ enum MealType {
   CUSTOM
 }
 
+// How the order was taken — different channels have different UI, line
+// rendering, approval rules, and downstream flow. Workflow doc Phase 4:
+//   BANQUET       — corporate catering (the original flow; default)
+//   ODC           — outdoor catering / banquet onsite. Items as
+//                   sub-heads, total package price only.
+//   PACKET        — packed lunch / take-away batches. Same rule as ODC.
+//   ROOM_SERVICE  — hotel room service. Requires roomNumber.
+//   ALACARTE      — in-house dining table service. Requires tableNumber.
+//   MANAGEMENT    — internal staff meals, no invoicing required.
+enum OrderChannel {
+  BANQUET
+  ODC
+  PACKET
+  ROOM_SERVICE
+  ALACARTE
+  MANAGEMENT
+}
+
 // ---------- Order ----------
 
 enum OrderStatus {
@@ -795,6 +813,10 @@ model Order {
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
 
+  // How this order was taken. Drives line rendering, room/table
+  // tracking, approval routing in later phases.
+  channel             OrderChannel @default(BANQUET)
+
   // Catering-specific
   eventDate           DateTime
   headcount           Int
@@ -802,6 +824,22 @@ model Order {
   deliveryAddress     String
   deliveryWindowStart DateTime
   deliveryWindowEnd   DateTime
+
+  // F&B service identifiers — required at the validator level when
+  // channel is ROOM_SERVICE / ALACARTE; one of room or table is enough.
+  roomNumber  String?
+  tableNumber String?
+
+  // WhatsApp / public feedback link. Generated on order completion
+  // (Phase 4 stub — actual WhatsApp send wires up later). Customers
+  // click /f/<token> to leave a review. feedbackRating is 1..5;
+  // feedbackComment is free text. Both null until the customer fills
+  // in the public form.
+  feedbackToken     String?   @unique
+  feedbackSentAt    DateTime?
+  feedbackRating    Int?
+  feedbackComment   String?
+  feedbackSubmittedAt DateTime?
 
   status                 OrderStatus @default(DRAFT)
   contractValue          Decimal     @db.Decimal(14, 2)

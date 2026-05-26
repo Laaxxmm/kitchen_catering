@@ -238,30 +238,58 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">
               {chefOnlyView ? "Items to prepare" : "Items"}
             </h3>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Dish</TableHead>
-                  <TableHead className="text-right">Portions</TableHead>
-                  {!chefOnlyView && <TableHead className="text-right">Unit ₹</TableHead>}
-                  {!chefOnlyView && <TableHead className="text-right">Disc %</TableHead>}
-                  {!chefOnlyView && <TableHead className="text-right">GST %</TableHead>}
-                  {!chefOnlyView && <TableHead className="text-right">Total ₹</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {order.items.map((it) => (
-                  <TableRow key={it.id}>
-                    <TableCell>{it.dish.name}</TableCell>
-                    <TableCell className="text-right font-mono">{it.portions.toString()}</TableCell>
-                    {!chefOnlyView && <TableCell className="text-right font-mono">{it.unitPrice.toString()}</TableCell>}
-                    {!chefOnlyView && <TableCell className="text-right font-mono">{it.discountPct.toString()}</TableCell>}
-                    {!chefOnlyView && <TableCell className="text-right font-mono">{it.gstRatePct.toString()}</TableCell>}
-                    {!chefOnlyView && <TableCell className="text-right font-mono">{it.lineTotal.toString()}</TableCell>}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            {(() => {
+              // Workflow doc: ODC + Packet show items as sub-heads with no
+              // rate/qty column — only the package total applies. Chef
+              // view is already qty-only; the financial channels keep
+              // full columns.
+              const packageMode =
+                order.channel === "ODC" || order.channel === "PACKET";
+              if (packageMode) {
+                return (
+                  <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+                    <p className="mb-3 text-[12px] text-ik-ink-3">
+                      {order.channel === "ODC" ? "Outdoor catering" : "Packet food"}{" "}
+                      package — items included, no per-item pricing:
+                    </p>
+                    <ul className="grid list-disc gap-1 pl-5 text-[13px]">
+                      {order.items.map((it) => (
+                        <li key={it.id}>{it.dish.name}</li>
+                      ))}
+                    </ul>
+                    <p className="mt-3 text-[12.5px] text-ik-ink-2">
+                      Package total: <span className="font-mono">{order.contractValue.toString()}</span>
+                    </p>
+                  </div>
+                );
+              }
+              return (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Dish</TableHead>
+                      <TableHead className="text-right">Portions</TableHead>
+                      {!chefOnlyView && <TableHead className="text-right">Unit ₹</TableHead>}
+                      {!chefOnlyView && <TableHead className="text-right">Disc %</TableHead>}
+                      {!chefOnlyView && <TableHead className="text-right">GST %</TableHead>}
+                      {!chefOnlyView && <TableHead className="text-right">Total ₹</TableHead>}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {order.items.map((it) => (
+                      <TableRow key={it.id}>
+                        <TableCell>{it.dish.name}</TableCell>
+                        <TableCell className="text-right font-mono">{it.portions.toString()}</TableCell>
+                        {!chefOnlyView && <TableCell className="text-right font-mono">{it.unitPrice.toString()}</TableCell>}
+                        {!chefOnlyView && <TableCell className="text-right font-mono">{it.discountPct.toString()}</TableCell>}
+                        {!chefOnlyView && <TableCell className="text-right font-mono">{it.gstRatePct.toString()}</TableCell>}
+                        {!chefOnlyView && <TableCell className="text-right font-mono">{it.lineTotal.toString()}</TableCell>}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              );
+            })()}
           </section>
 
           {/* Proforma invoice — financial document, hidden from the chef. */}
