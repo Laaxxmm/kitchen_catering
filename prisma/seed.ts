@@ -37,6 +37,7 @@ async function main() {
     { email: "accounts@indefine.in", name: "Accounts User",   role: Role.ACCOUNTS },
     { email: "housekeeping@indefine.in", name: "Housekeeping Manager", role: Role.HOUSEKEEPING_MANAGER },
     { email: "maintenance@indefine.in", name: "Maintenance Manager", role: Role.MAINTENANCE_MANAGER },
+    { email: "fnb@indefine.in",         name: "F&B Service",          role: Role.FNB_SERVICE },
   ];
   for (const u of users) {
     await db.user.upsert({

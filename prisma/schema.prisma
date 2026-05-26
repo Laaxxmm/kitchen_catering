@@ -31,6 +31,7 @@ enum Role {
   ACCOUNTS
   HOUSEKEEPING_MANAGER
   MAINTENANCE_MANAGER
+  FNB_SERVICE
 }
 
 enum EmploymentType {
@@ -550,11 +551,27 @@ model RecipeSubRecipe {
 // INGREDIENT (renamed from Material) + INVENTORY
 // =====================================================================
 
+// Sub-store discriminator for chef-side stock. The Workflow doc + the
+// "General Information" approval matrix treat Vegetable and Grocery
+// (and Water bottles, Milk/Curd) as separate stores with different
+// approval rules. We keep one Ingredient table (so Recipe + OrderItem
+// links stay untouched) and route requisition approvals on this enum.
+enum IngredientSubStore {
+  VEGETABLE // chef-side produce
+  GROCERY   // chef-side staples (dals, rice, flours, spices, oils)
+  MILK      // milk, curd, dairy
+  WATER     // packaged water bottles, cans
+  OTHER     // anything that doesn't fit; default for backfills
+}
+
 model Ingredient {
   id                String   @id @default(cuid())
   sku               String   @unique
   name              String
-  category          String? // produce/dairy/grocery/...
+  category          String? // free-text legacy category — kept for backwards compat
+  // Single source of truth for approval routing per the workflow matrix.
+  // Backfilled to OTHER on existing rows; UI lets you reclassify.
+  subStore          IngredientSubStore @default(OTHER)
   unit              String // 'kg' | 'g' | 'L' | 'mL' | 'pcs' | 'pkt' ...
   openingQty        Decimal  @default(0) @db.Decimal(14, 3)
   openingAvgCost    Decimal  @default(0) @db.Decimal(12, 4)
@@ -580,6 +597,7 @@ model Ingredient {
 
   @@index([active])
   @@index([category])
+  @@index([subStore])
   @@index([preferredVendorId])
 }
 

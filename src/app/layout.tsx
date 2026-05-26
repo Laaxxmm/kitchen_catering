@@ -18,14 +18,14 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Green Park Eco Hotel",
+  title: "Greenpath",
   description:
     "B2B catering operations — orders, kitchen, deliveries, invoicing and P&L.",
   manifest: "/manifest.webmanifest",
-  applicationName: "Green Park Eco Hotel",
+  applicationName: "Greenpath",
   appleWebApp: {
     capable: true,
-    title: "Green Park Eco Hotel",
+    title: "Greenpath",
     statusBarStyle: "default",
   },
   icons: {

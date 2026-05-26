@@ -70,7 +70,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
             vendor={{ name: po.vendor.name, phone: po.vendor.phone, email: po.vendor.email }}
             poNo={po.poNo}
             messageText={buildVendorMessage(po)}
-            emailSubject={`Purchase order ${po.poNo} from Green Park Eco Hotel`}
+            emailSubject={`Purchase order ${po.poNo} from Greenpath`}
             receiveHref={`/procurement/grns/new?poId=${po.id}`}
             onMarkSent={doSend}
           />
@@ -270,10 +270,10 @@ function buildVendorMessage(po: {
     : "";
   return (
     `Hi ${po.vendor.name},\n\n` +
-    `This is Green Park Eco Hotel. Please supply the following items against PO ${po.poNo}:\n\n` +
+    `This is Greenpath. Please supply the following items against PO ${po.poNo}:\n\n` +
     `${lines}\n\n` +
     `Total (incl. GST): ₹${po.grandTotal.toString()}${expected}\n\n` +
     `Please confirm receipt of this order and the expected delivery time.\n\n` +
-    `Thank you,\nGreen Park Eco Hotel`
+    `Thank you,\nGreenpath`
   );
 }

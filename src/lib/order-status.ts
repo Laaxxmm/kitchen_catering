@@ -25,11 +25,13 @@ export const STATUS_LABEL: Record<OrderStatus, string> = {
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
   REJECTED_BY_MANAGER: "Rejected by manager",
-  // Legacy v1 (no new orders take these but old rows might).
-  PENDING_STORE_APPROVAL: "[legacy] Pending store approval",
-  PENDING_MANAGER_APPROVAL: "[legacy] Pending manager approval",
-  REJECTED_BY_STORE: "[legacy] Rejected by store",
-  APPROVED: "[legacy] Approved",
+  // Workflow-v1 statuses — no new orders take these but old rows might
+  // still carry them. Clean labels (no "[legacy]" prefix) so the UI
+  // reads consistently for the operator.
+  PENDING_STORE_APPROVAL: "Pending store approval",
+  PENDING_MANAGER_APPROVAL: "Pending manager approval",
+  REJECTED_BY_STORE: "Rejected by store",
+  APPROVED: "Approved",
 };
 
 /**

@@ -55,6 +55,12 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   MAINTENANCE_MANAGER: new Set([
     "dashboard", "tasks", "maintenance",
   ]),
+  // F&B service: takes room-service / alacarte / management orders.
+  // For Phase 0 they get tasks + the dashboard. Banquet store comes in
+  // Phase 3, order-channel UI comes in Phase 4.
+  FNB_SERVICE: new Set([
+    "dashboard", "tasks",
+  ]),
 };
 
 export function canSeeSidebarKey(role: Role | undefined, key: string): boolean {

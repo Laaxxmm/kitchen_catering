@@ -1,6 +1,6 @@
 # Deployment — Railway
 
-End-to-end runbook for shipping Green Park Eco Hotel to Railway. Repeat
+End-to-end runbook for shipping Greenpath to Railway. Repeat
 the same steps for staging and production by creating two separate
 services on Railway.
 
@@ -41,7 +41,7 @@ to sensible defaults.
 |---|---|---|
 | `DATABASE_URL` | `${{ Postgres.DATABASE_URL }}` | Use the curly-brace reference syntax — Railway substitutes at runtime. |
 | `AUTH_SECRET` | `<random 32+ chars>` | Generate via `openssl rand -base64 32`. Keep it secret. |
-| `NEXTAUTH_URL` | `https://kitchen.greenparkecohotel.in` | Public origin. **Must include `https://`** and match the domain you set in step 1. |
+| `NEXTAUTH_URL` | `https://kitchen.greenpath.in` | Public origin. **Must include `https://`** and match the domain you set in step 1. |
 
 ### Optional but recommended
 
@@ -49,7 +49,7 @@ to sensible defaults.
 |---|---|
 | `NODE_ENV=production` | Always set on Railway. |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | Auto-send invoices via email. When unset, `lib/email.ts` falls back to console mode. |
-| `EMAIL_FROM` | Friendly "From" header. Defaults to `Green Park Eco Hotel <SMTP_USER>`. |
+| `EMAIL_FROM` | Friendly "From" header. Defaults to `Greenpath <SMTP_USER>`. |
 | `SMS_PROVIDER=msg91` + `MSG91_AUTHKEY` | Production OTP delivery. Otherwise OTPs print to logs. |
 | `INDEFINE_GSTIN` / `INDEFINE_ADDRESS` / `INDEFINE_BANK_DETAILS` | Override org-level constants used on invoice PDFs. |
 | `EINVOICE_PROVIDER` + `CLEARTAX_API_KEY` + `CLEARTAX_GSP_GSTIN` | Live e-invoicing. Defaults to `nic-sandbox`. |
@@ -109,7 +109,7 @@ Railway provisions Let's Encrypt automatically for custom domains.
 Steps:
 
 1. Service → Settings → Networking → **Add Domain** → enter
-   `kitchen.greenparkecohotel.in` (or whichever).
+   `kitchen.greenpath.in` (or whichever).
 2. Add the CNAME Railway shows you to your DNS provider.
 3. Wait 1–5 min for verification + cert issuance.
 4. Update `NEXTAUTH_URL` to the new origin.

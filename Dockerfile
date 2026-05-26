@@ -1,4 +1,4 @@
-# Green Park Eco Hotel — multi-stage build for Railway.
+# Greenpath — multi-stage build for Railway.
 #
 #   deps    → install npm deps + generate Prisma client (cached layer)
 #   builder → compile Next.js + Tailwind

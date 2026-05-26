@@ -10,6 +10,7 @@ import { listUsers } from "@/server/actions/users";
 import { listSalaryStructures, upsertSalaryStructure } from "@/server/actions/salary";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
+import { roleLabel } from "@/lib/role-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,7 @@ export default async function SalaryStructuresPage() {
           <div className="grid gap-1">
             <Label htmlFor="employeeId">Employee</Label>
             <select id="employeeId" name="employeeId" className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
-              {users.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+              {users.map((u) => <option key={u.id} value={u.id}>{u.name} ({roleLabel(u.role)})</option>)}
             </select>
           </div>
           <div className="grid gap-1">
@@ -95,7 +96,7 @@ export default async function SalaryStructuresPage() {
             {structures.map((s) => (
               <TableRow key={s.id}>
                 <TableCell>{s.employee.name}</TableCell>
-                <TableCell className="text-[12px]">{s.employee.role}</TableCell>
+                <TableCell className="text-[12px]">{roleLabel(s.employee.role)}</TableCell>
                 <TableCell>{s.type}</TableCell>
                 <TableCell className="text-right font-mono">{s.hourlyRate ? formatINR(s.hourlyRate) : "—"}</TableCell>
                 <TableCell className="text-right font-mono">{s.monthlySalary ? formatINR(s.monthlySalary) : "—"}</TableCell>

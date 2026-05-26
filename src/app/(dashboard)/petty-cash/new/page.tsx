@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { listUsers } from "@/server/actions/users";
 import { createPettyCashFloat } from "@/server/actions/petty-cash";
 import { gateRolePage } from "@/server/rbac";
+import { roleLabel } from "@/lib/role-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,7 @@ export default async function NewPettyCashFloatPage() {
         <div className="grid gap-1">
           <Label htmlFor="custodianId">Custodian</Label>
           <select id="custodianId" name="custodianId" className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
-            {users.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+            {users.map((u) => <option key={u.id} value={u.id}>{u.name} ({roleLabel(u.role)})</option>)}
           </select>
         </div>
         <div className="grid gap-1">

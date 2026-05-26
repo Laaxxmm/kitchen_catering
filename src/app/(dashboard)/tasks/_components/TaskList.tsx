@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { formatIST } from "@/lib/time";
+import { roleLabel } from "@/lib/role-labels";
 
 interface TaskRow {
   id: string;
@@ -94,7 +95,7 @@ export function TaskList({
                 <TableCell>
                   <span className="text-[13px]">{t.assignedTo.name}</span>
                   <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">
-                    {t.assignedTo.role}
+                    {roleLabel(t.assignedTo.role)}
                   </div>
                 </TableCell>
               )}

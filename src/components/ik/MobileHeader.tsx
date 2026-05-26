@@ -44,7 +44,7 @@ export function MobileHeader({ userName, role, tone = "paper", onSignOut }: Prop
           </span>
           <div className="leading-[1.1]">
             <div className="font-ik-sans text-[13px] font-semibold tracking-[-0.01em]">
-              Green Park Eco Hotel
+              Greenpath
             </div>
             <div
               className={

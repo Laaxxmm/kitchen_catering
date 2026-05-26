@@ -76,5 +76,5 @@ export function getSMSProvider(): SMSProvider {
 
 /** Format a friendly OTP SMS body. */
 export function formatOTPMessage(otp: string, orderCode?: string): string {
-  return `Green Park Eco Hotel: your delivery OTP is ${otp}${orderCode ? ` for order ${orderCode}` : ""}. Do not share. Valid for one delivery only.`;
+  return `Greenpath: your delivery OTP is ${otp}${orderCode ? ` for order ${orderCode}` : ""}. Do not share. Valid for one delivery only.`;
 }

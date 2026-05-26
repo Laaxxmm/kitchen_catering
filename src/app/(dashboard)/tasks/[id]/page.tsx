@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { gateRolePage } from "@/server/rbac";
 import { getTaskById } from "@/server/actions/tasks";
 import { formatIST } from "@/lib/time";
+import { roleLabel } from "@/lib/role-labels";
 import { SubmitTaskForm } from "../_components/SubmitTaskForm";
 import { ReviewControls } from "../_components/ReviewControls";
 
@@ -191,7 +192,7 @@ export default async function TaskDetailPage({
             </div>
             <div className="mt-1 font-medium">{task.assignedTo.name}</div>
             <div className="text-[11px] text-ik-ink-3">
-              {task.assignedTo.role} · {task.assignedTo.email}
+              {roleLabel(task.assignedTo.role)} · {task.assignedTo.email}
             </div>
           </div>
           <div className="rounded-md border border-ik-rule bg-ik-card p-4">
@@ -199,7 +200,7 @@ export default async function TaskDetailPage({
               Assigned by
             </div>
             <div className="mt-1 font-medium">{task.assignedBy.name}</div>
-            <div className="text-[11px] text-ik-ink-3">{task.assignedBy.role}</div>
+            <div className="text-[11px] text-ik-ink-3">{roleLabel(task.assignedBy.role)}</div>
           </div>
           {task.template && (
             <div className="rounded-md border border-ik-rule bg-ik-card p-4">

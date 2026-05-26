@@ -1,4 +1,5 @@
 import { auth } from "@/server/auth";
+import { roleLabel } from "@/lib/role-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export default async function MobileMePage() {
         </div>
         <div>
           <dt className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Role</dt>
-          <dd>{session.user.role}</dd>
+          <dd>{roleLabel(session.user.role)}</dd>
         </div>
       </dl>
     </>

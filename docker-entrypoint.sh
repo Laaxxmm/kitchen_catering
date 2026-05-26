@@ -1,5 +1,5 @@
 #!/bin/sh
-# Green Park Eco Hotel — container entrypoint.
+# Greenpath — container entrypoint.
 #
 # Boot order:
 #   1. validate critical env vars (shell — catches missing values fast)
@@ -16,7 +16,7 @@ PORT="${PORT:-8080}"
 HOSTNAME="${HOSTNAME:-0.0.0.0}"
 
 echo "============================================================"
-echo "  Green Park Eco Hotel — container boot"
+echo "  Greenpath — container boot"
 echo "------------------------------------------------------------"
 echo "  NODE_ENV     = ${NODE_ENV:-development}"
 echo "  PORT         = ${PORT}"

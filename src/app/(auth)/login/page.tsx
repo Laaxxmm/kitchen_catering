@@ -52,7 +52,7 @@ export default async function LoginPage({
             </span>
             <div className="flex flex-col leading-[1.1]">
               <span className="text-[14px] font-medium tracking-[-0.01em]">
-                Green Park Eco Hotel
+                Greenpath
               </span>
               <span className="font-ik-mono text-[10px] font-medium uppercase tracking-[0.12em] text-white/60">
                 Catering operations
@@ -113,7 +113,7 @@ export default async function LoginPage({
               </span>
               <div className="flex flex-col leading-[1.1]">
                 <span className="font-ik-sans text-[14px] font-medium tracking-[-0.01em] text-ik-ink">
-                  Green Park Eco Hotel
+                  Greenpath
                 </span>
                 <span className="font-ik-mono text-[10px] font-medium uppercase tracking-[0.12em] text-ik-ink-3">
                   Catering operations
@@ -128,7 +128,7 @@ export default async function LoginPage({
                   Sign in
                 </h2>
                 <p className="mt-1 font-ik-sans text-[13px] text-ik-ink-3">
-                  Use your Green Park Eco Hotel credentials to continue.
+                  Use your Greenpath credentials to continue.
                 </p>
               </div>
               <LoginForm callbackUrl={sp.callbackUrl} error={sp.error} />

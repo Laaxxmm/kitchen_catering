@@ -6,9 +6,9 @@ import nodemailer, { type Transporter } from "nodemailer";
  *      Default tuned for Outlook / Office 365:
  *        SMTP_HOST=smtp.office365.com
  *        SMTP_PORT=587
- *        SMTP_USER=ops@greenparkecohotel.in
+ *        SMTP_USER=ops@greenpath.in
  *        SMTP_PASS=<outlook app password>
- *        EMAIL_FROM="Green Park Eco Hotel <ops@greenparkecohotel.in>"
+ *        EMAIL_FROM="Greenpath <ops@greenpath.in>"
  *
  *   2. Console (dev)      — when SMTP_HOST / SMTP_USER aren't set, logs the
  *      message to stderr instead of sending. Useful for local dev.
@@ -70,7 +70,7 @@ function getTransport(): Transporter | null {
 function emailFrom(): string {
   return (
     process.env.EMAIL_FROM ??
-    (process.env.SMTP_USER ? `Green Park Eco Hotel <${process.env.SMTP_USER}>` : "Green Park Eco Hotel <no-reply@localhost>")
+    (process.env.SMTP_USER ? `Greenpath <${process.env.SMTP_USER}>` : "Greenpath <no-reply@localhost>")
   );
 }
 
@@ -117,26 +117,26 @@ export function buildInvoiceEmail(input: {
   publicUrl: string;
 }): { subject: string; text: string; html: string } {
   const kindLabel = input.invoiceKind === "PROFORMA" ? "Proforma invoice" : "Tax invoice";
-  const subject = `${kindLabel} ${input.invoiceNo} from Green Park Eco Hotel`;
+  const subject = `${kindLabel} ${input.invoiceNo} from Greenpath`;
   const text =
     `Hi ${input.customerName},\n\n` +
-    `Please find your ${kindLabel.toLowerCase()} from Green Park Eco Hotel attached.\n\n` +
+    `Please find your ${kindLabel.toLowerCase()} from Greenpath attached.\n\n` +
     `Invoice no:  ${input.invoiceNo}\n` +
     `Amount:      ${input.grandTotal}\n` +
     (input.eventDateLabel ? `For event on: ${input.eventDateLabel}\n` : "") +
     `\nYou can also view the invoice online at:\n${input.publicUrl}\n\n` +
-    `Thank you,\nGreen Park Eco Hotel\n`;
+    `Thank you,\nGreenpath\n`;
   const html = `
 <div style="font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; color:#1F2A24; line-height:1.5;">
   <p>Hi ${escapeHtml(input.customerName)},</p>
-  <p>Please find your <strong>${escapeHtml(kindLabel.toLowerCase())}</strong> from Green Park Eco Hotel attached.</p>
+  <p>Please find your <strong>${escapeHtml(kindLabel.toLowerCase())}</strong> from Greenpath attached.</p>
   <table style="border-collapse:collapse; margin:12px 0;">
     <tr><td style="padding:4px 12px 4px 0; color:#516056;">Invoice no</td><td style="font-family:monospace;">${escapeHtml(input.invoiceNo)}</td></tr>
     <tr><td style="padding:4px 12px 4px 0; color:#516056;">Amount</td><td style="font-weight:600;">${escapeHtml(input.grandTotal)}</td></tr>
     ${input.eventDateLabel ? `<tr><td style="padding:4px 12px 4px 0; color:#516056;">Event date</td><td>${escapeHtml(input.eventDateLabel)}</td></tr>` : ""}
   </table>
   <p>You can also view the invoice online here: <a href="${escapeHtml(input.publicUrl)}" style="color:#0F6E56;">View invoice</a>.</p>
-  <p style="color:#516056; font-size: 13px;">Thank you,<br/>Green Park Eco Hotel</p>
+  <p style="color:#516056; font-size: 13px;">Thank you,<br/>Greenpath</p>
 </div>`.trim();
   return { subject, text, html };
 }
@@ -167,10 +167,10 @@ export function buildQuoteEmail(input: {
   publicUrl: string;
   notes?: string | null;
 }): { subject: string; text: string; html: string } {
-  const subject = `Quote ${input.quoteNo} from Green Park Eco Hotel`;
+  const subject = `Quote ${input.quoteNo} from Greenpath`;
   const text =
     `Hi ${input.customerName},\n\n` +
-    `Please find your quote — "${input.title}" — from Green Park Eco Hotel.\n\n` +
+    `Please find your quote — "${input.title}" — from Greenpath.\n\n` +
     `Quote no:    ${input.quoteNo}\n` +
     `Amount:      ${input.grandTotal}\n` +
     (input.eventDateLabel ? `Event date:  ${input.eventDateLabel}\n` : "") +
@@ -179,11 +179,11 @@ export function buildQuoteEmail(input: {
     (input.notes ? `Notes from us:\n${input.notes}\n\n` : "") +
     `Reply to this email or call us if you'd like to change anything — menu, dates, headcount, ` +
     `whatever. We can revise the quote any time before you accept.\n\n` +
-    `Thank you,\nGreen Park Eco Hotel\n`;
+    `Thank you,\nGreenpath\n`;
   const html = `
 <div style="font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; color:#1F2A24; line-height:1.5;">
   <p>Hi ${escapeHtml(input.customerName)},</p>
-  <p>Please find your quote — <strong>${escapeHtml(input.title)}</strong> — from Green Park Eco Hotel.</p>
+  <p>Please find your quote — <strong>${escapeHtml(input.title)}</strong> — from Greenpath.</p>
   <table style="border-collapse:collapse; margin:12px 0;">
     <tr><td style="padding:4px 12px 4px 0; color:#516056;">Quote no</td><td style="font-family:monospace;">${escapeHtml(input.quoteNo)}</td></tr>
     <tr><td style="padding:4px 12px 4px 0; color:#516056;">Amount</td><td style="font-weight:600;">${escapeHtml(input.grandTotal)}</td></tr>
@@ -200,7 +200,7 @@ export function buildQuoteEmail(input: {
     Reply to this email or call us if you'd like to change anything — menu, dates, headcount,
     whatever. We can revise the quote any time before you accept.
   </p>
-  <p style="color:#516056; font-size: 13px;">Thank you,<br/>Green Park Eco Hotel</p>
+  <p style="color:#516056; font-size: 13px;">Thank you,<br/>Greenpath</p>
 </div>`.trim();
   return { subject, text, html };
 }

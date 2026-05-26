@@ -9,6 +9,7 @@ import { Wordmark } from "./Wordmark";
 import { IK } from "./tokens";
 import { istFyLabel } from "@/lib/time";
 import { SIDEBAR_KEYS_BY_ROLE } from "@/lib/role-nav";
+import { roleLabel } from "@/lib/role-labels";
 import type { Role } from "@prisma/client";
 
 // Left-rail app shell — fixed 236px, collapsible. Sections separated by mono eyebrows.
@@ -330,7 +331,7 @@ export function Sidebar({ userName, userRole, footer }: SidebarProps) {
               className="ik-caps"
               style={{ fontSize: 9.5, letterSpacing: ".08em" }}
             >
-              {userRole} · {istFyLabel(new Date())}
+              {roleLabel(userRole)} · {istFyLabel(new Date())}
             </div>
           </div>
           {footer}

@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { listUsers } from "@/server/actions/users";
+import { roleLabel } from "@/lib/role-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ export default async function UsersPage() {
                 <Link href={`/admin/users/${u.id}`} className="text-brand hover:underline">{u.name}</Link>
               </TableCell>
               <TableCell className="font-mono text-[12px]">{u.email}</TableCell>
-              <TableCell>{u.role}</TableCell>
+              <TableCell>{roleLabel(u.role)}</TableCell>
               <TableCell>{u.phone ?? "—"}</TableCell>
               <TableCell>
                 {u.active ? <span className="text-positive">Active</span> : <span className="text-ik-ink-3">Inactive</span>}

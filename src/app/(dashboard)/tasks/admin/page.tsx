@@ -12,6 +12,7 @@ import {
   type TaskTab,
 } from "@/server/actions/tasks";
 import { formatIST } from "@/lib/time";
+import { roleLabel } from "@/lib/role-labels";
 import { AssignTaskForm } from "../_components/AssignTaskForm";
 import { TaskList } from "../_components/TaskList";
 
@@ -150,7 +151,7 @@ export default async function AdminTasksPage({
                 <option value="">All users</option>
                 {users.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.name} · {u.role}
+                    {u.name} · {roleLabel(u.role)}
                   </option>
                 ))}
               </select>

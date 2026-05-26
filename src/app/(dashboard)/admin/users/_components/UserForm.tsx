@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isNextNavigationError } from "@/lib/next-error";
+import { roleLabel } from "@/lib/role-labels";
 
 interface Props {
   defaults?: { name?: string; email?: string; role?: Role; phone?: string | null; active?: boolean };
@@ -66,7 +67,11 @@ export function UserForm({ defaults, requirePassword, onSubmit, submitLabel = "S
         <div className="grid gap-1">
           <Label htmlFor="role">Role</Label>
           <select id="role" value={role} onChange={(e) => setRole(e.target.value as Role)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
-            {Object.values(Role).map((r) => <option key={r} value={r}>{r}</option>)}
+            {Object.values(Role).map((r) => (
+              <option key={r} value={r}>
+                {roleLabel(r)}
+              </option>
+            ))}
           </select>
         </div>
         <div className="grid gap-1">

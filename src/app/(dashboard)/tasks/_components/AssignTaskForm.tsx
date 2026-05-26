@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { TaskPriority } from "@prisma/client";
 import { assignTask } from "@/server/actions/tasks";
 import { isNextNavigationError } from "@/lib/next-error";
+import { roleLabel } from "@/lib/role-labels";
 
 interface AssignableUser {
   id: string;
@@ -126,7 +127,7 @@ export function AssignTaskForm({ users, templates }: Props) {
             <option value="">— Pick a user —</option>
             {users.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.name} · {u.role}
+                {u.name} · {roleLabel(u.role)}
               </option>
             ))}
           </select>

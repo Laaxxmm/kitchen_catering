@@ -1,4 +1,4 @@
-// Brand mark + "Green Park Eco Hotel" lockup.
+// Brand mark + "Greenpath" lockup.
 // The mark is a stylised chef's toque on a brand-green rounded square —
 // reads as "kitchen" at any size from 14px favicon up to 36px hero.
 // Two tones: ink (paper-cream backgrounds) and light (dark surfaces / topbar).
@@ -34,10 +34,7 @@ export function Wordmark({ size = 18, tone = "ink", showTag = true }: WordmarkPr
             color,
           }}
         >
-          Green Park{" "}
-          <span style={{ fontWeight: 500, color: tone === "ink" ? ACCENT_INK : "#fff" }}>
-            Eco Hotel
-          </span>
+          Green<span style={{ fontWeight: 500, color: tone === "ink" ? ACCENT_INK : "#fff" }}>path</span>
         </div>
         {showTag && (
           <div

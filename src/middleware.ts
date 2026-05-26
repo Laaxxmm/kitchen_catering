@@ -19,7 +19,8 @@ type Role =
   | "DELIVERY"
   | "ACCOUNTS"
   | "HOUSEKEEPING_MANAGER"
-  | "MAINTENANCE_MANAGER";
+  | "MAINTENANCE_MANAGER"
+  | "FNB_SERVICE";
 
 // Path-pattern → allowed roles. First-match wins; rules higher in the list
 // take precedence over rules lower down (used so /admin matches before any

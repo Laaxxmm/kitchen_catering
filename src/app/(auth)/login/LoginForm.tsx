@@ -82,7 +82,7 @@ export function LoginForm({
         <input
           id="email"
           type="email"
-          placeholder="you@greenparkecohotel.in"
+          placeholder="you@greenpath.in"
           autoComplete="email"
           required
           value={email}

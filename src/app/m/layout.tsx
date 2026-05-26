@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/server/auth";
+import { roleLabel } from "@/lib/role-labels";
 
 /**
  * Mobile-route layout. Used inside the Capacitor WebView OR on any
@@ -41,9 +42,9 @@ export default async function MobileLayout({
               <rect x="10" y="25" width="20" height="6.5" rx="1.6" fill="#fff" />
             </svg>
           </span>
-          <span className="text-[14px] font-medium">Green Park Eco Hotel</span>
+          <span className="text-[14px] font-medium">Greenpath</span>
         </Link>
-        <div className="text-[11px] text-ik-ink-3">{session.user.role}</div>
+        <div className="text-[11px] text-ik-ink-3">{roleLabel(session.user.role)}</div>
       </header>
       <main className="mx-auto w-full max-w-lg flex-1 px-4 pb-24 pt-2">{children}</main>
       <nav className="fixed bottom-0 left-0 right-0 border-t border-ik-rule bg-ik-card px-2 py-2 text-[11px]">
