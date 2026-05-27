@@ -413,6 +413,9 @@ model User {
   banquetReceiptsRecorded         BanquetReceipt[]         @relation("BanquetReceiptRecordedBy")
   banquetIssuesRecorded           BanquetIssue[]           @relation("BanquetIssueRecordedBy")
 
+  // Notifications (Phase 5)
+  notifications                   Notification[]           @relation("NotificationToUser")
+
   // Mobile
   mobileSessions MobileSession[] @relation("MobileSessions")
   mobileOps      MobileOp[]      @relation("MobileOps")
@@ -1195,6 +1198,11 @@ model Vendor {
   creditLimit       Decimal            @default(0) @db.Decimal(14, 2)
   notes             String?
   active            Boolean            @default(true)
+  // Statutory / recurring service vendors (electricity, rent, GST,
+  // telecom, statutory body). Triggers a reminder Task 3 days before
+  // the next bill's due date — and an immediate one if any of their
+  // bills is currently past-due. See server/actions/reminders.ts.
+  isStatutory       Boolean            @default(false)
   defaultTdsRatePct Decimal?           @db.Decimal(5, 2)
   defaultTdsSection String?
   createdAt         DateTime           @default(now())
@@ -2317,4 +2325,42 @@ model BanquetIssueLine {
 
   @@index([issueId])
   @@index([itemId])
+}
+
+// =====================================================================
+// NOTIFICATIONS (Phase 5)
+// =====================================================================
+// Lightweight per-user bell-icon notifications. Polled on dashboard
+// load + on the bell-dropdown open. No realtime / websocket layer —
+// kept deliberately simple. dedupeKey lets event hooks avoid duplicate
+// rows when the same transition fires twice.
+
+enum NotificationKind {
+  PO_AWAITING_ADMIN
+  PO_APPROVED
+  VENDOR_BILL_PAID
+  CUSTOMER_INVOICE_PAID
+  TASK_ASSIGNED
+  TASK_SUBMITTED
+  CHEF_REQUISITION_FULFILLED
+  FEEDBACK_RECEIVED
+  VENDOR_PAYMENT_REMINDER
+  GENERIC
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation("NotificationToUser", fields: [userId], references: [id], onDelete: Cascade)
+  kind      NotificationKind
+  title     String
+  body      String?
+  link      String?
+  dedupeKey String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt])
+  @@index([createdAt])
 }

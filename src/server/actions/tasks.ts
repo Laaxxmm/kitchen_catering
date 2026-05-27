@@ -13,6 +13,7 @@ import {
   TaskTemplateInput,
   TaskUpdateInput,
 } from "@/lib/validators";
+import { createNotification } from "@/server/actions/notifications";
 
 // Admin/manager line-management tasks distinct from operational workflow.
 // Lifecycle:
@@ -139,6 +140,17 @@ export async function assignTask(raw: unknown) {
     return row;
   });
 
+  // Notify the assignee that a new task is waiting for them. dedupe by
+  // task id so a redundant re-fire doesn't create duplicates.
+  await createNotification({
+    userId: input.assignedToId,
+    kind: "TASK_ASSIGNED",
+    title: `New task: ${input.title.trim().slice(0, 80)}`,
+    body: input.description?.slice(0, 200) ?? null,
+    link: `/tasks/${task.id}`,
+    dedupeKey: `task-assigned:${task.id}`,
+  });
+
   revalidatePath("/tasks");
   revalidatePath("/tasks/admin");
   revalidatePath("/dashboard");
@@ -254,6 +266,24 @@ export async function submitTask(raw: unknown) {
       },
     });
   });
+
+  // Notify the assigner that the task is awaiting their review.
+  const taskAfter = await db.task.findUnique({
+    where: { id: input.id },
+    select: { title: true, assignedById: true, submittedAt: true },
+  });
+  if (taskAfter) {
+    await createNotification({
+      userId: taskAfter.assignedById,
+      kind: "TASK_SUBMITTED",
+      title: `Task ready for review: ${taskAfter.title.slice(0, 80)}`,
+      body: "Tap to approve or reject the submission.",
+      link: `/tasks/${input.id}`,
+      // Re-submissions after a reject get a fresh dedupe key via the
+      // submittedAt timestamp so the assigner sees each cycle.
+      dedupeKey: `task-submitted:${input.id}:${taskAfter.submittedAt?.toISOString() ?? ""}`,
+    });
+  }
 
   revalidatePath("/tasks");
   revalidatePath("/tasks/admin");

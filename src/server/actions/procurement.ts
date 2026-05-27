@@ -28,6 +28,7 @@ import { toDecimal } from "@/lib/money";
 import { indefineStateCode } from "@/lib/org";
 import { summarise } from "@/lib/gst";
 import { getSettingOr } from "@/lib/settings";
+import { notifyRoles } from "@/server/actions/notifications";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
 // Workflow doc: "Payment - Finance to be able to add vendor invoice".
@@ -321,6 +322,45 @@ export async function approveVendorPO(id: string) {
       },
     });
   });
+
+  // ---- notifications, outside the transaction ----
+  // Re-load the PO so we can find out whether the manager-approval
+  // step ended fully approved or still awaiting admin.
+  const after = await db.vendorPO.findUnique({
+    where: { id },
+    select: {
+      poNo: true,
+      status: true,
+      managerApprovedAt: true,
+      adminApprovedAt: true,
+    },
+  });
+  if (after) {
+    if (after.status === VendorPOStatus.APPROVED) {
+      // Final approval — notify the Store team so they can send the PO.
+      await notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+        kind: "PO_APPROVED",
+        title: `PO ${after.poNo} approved`,
+        body: "Send to vendor + record GRN when goods arrive.",
+        link: `/procurement/purchase-orders/${id}`,
+        dedupeKey: `po-approved:${id}`,
+      });
+    } else if (
+      after.status === VendorPOStatus.PENDING_APPROVAL &&
+      after.managerApprovedAt &&
+      !after.adminApprovedAt
+    ) {
+      // Mid-tier — notify Admins so they know an approval awaits them.
+      await notifyRoles([Role.ADMIN], {
+        kind: "PO_AWAITING_ADMIN",
+        title: `PO ${after.poNo} awaits Admin approval`,
+        body: "Manager has signed off. Final sign-off needed.",
+        link: `/procurement/purchase-orders/${id}`,
+        dedupeKey: `po-awaiting-admin:${id}`,
+      });
+    }
+  }
+
   revalidatePath(`/procurement/purchase-orders/${id}`);
   revalidatePath("/procurement/purchase-orders");
 }
@@ -758,6 +798,22 @@ export async function markVendorBillPaid(input: {
       },
     });
   });
+
+  // Notify Store + Procurement so they can stop chasing the bill.
+  const billAfter = await db.vendorBill.findUnique({
+    where: { id },
+    select: { billNo: true, vendor: { select: { name: true } } },
+  });
+  if (billAfter) {
+    await notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+      kind: "VENDOR_BILL_PAID",
+      title: `Vendor bill ${billAfter.billNo} paid`,
+      body: `Payment to ${billAfter.vendor.name} recorded.`,
+      link: `/procurement/vendor-bills/${id}`,
+      dedupeKey: `vendor-bill-paid:${id}`,
+    });
+  }
+
   revalidatePath("/procurement/vendor-bills");
   revalidatePath(`/procurement/vendor-bills/${id}`);
   revalidatePath("/payments/payables");

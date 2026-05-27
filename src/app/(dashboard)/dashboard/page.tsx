@@ -18,6 +18,7 @@ import { TasksAdminPanel } from "@/components/ik/dashboard/TasksAdminPanel";
 import { HousekeepingPanel } from "@/components/ik/dashboard/HousekeepingPanel";
 import { MaintenancePanel } from "@/components/ik/dashboard/MaintenancePanel";
 import { BanquetPanel } from "@/components/ik/dashboard/BanquetPanel";
+import { StoresOverviewPanel } from "@/components/ik/dashboard/StoresOverviewPanel";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -167,6 +168,10 @@ export default async function DashboardPage() {
         {/* 1a ─ Team task oversight for admin / manager. Counts +
             long-pending list. Hidden when no tasks exist. */}
         {isManagerScope && <TasksAdminPanel />}
+
+        {/* Cross-store consumption — admin/manager only. Hidden when
+            none of the stores have any items yet. */}
+        {isManagerScope && <StoresOverviewPanel />}
 
         {/* 1 ─ What needs you right now */}
         <ActionFeed

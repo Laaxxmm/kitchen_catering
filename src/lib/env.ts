@@ -83,6 +83,11 @@ const schema = z.object({
   // default users. Leave UNSET on subsequent deploys.
   SEED_DB: z.string().optional(),
 
+  // ─── Cron (vendor payment reminder, Phase 5) ────────────────────
+  // Set when you wire a Railway cron service hitting
+  // /api/cron/vendor-reminders. Generate via openssl rand -base64 32.
+  CRON_SECRET: z.string().optional(),
+
   // ─── AI integrations (optional) ──────────────────────────────────
   AI_ENABLED: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),

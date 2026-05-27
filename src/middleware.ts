@@ -109,6 +109,7 @@ export default auth((req) => {
     pathname === "/login" ||
     pathname === "/api/health" ||
     pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/api/cron/") ||
     pathname.startsWith("/api/mobile/") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/icons") ||

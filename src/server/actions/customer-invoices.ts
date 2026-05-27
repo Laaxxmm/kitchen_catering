@@ -25,6 +25,7 @@ import { indefineGstin, indefineCompanyName, indefineStateCode } from "@/lib/org
 import { eInvoiceEnabled, getEInvoiceProvider } from "@/server/services/e-invoice/provider";
 import { buildInvoiceEmail, sendEmail } from "@/lib/email";
 import { formatIST } from "@/lib/time";
+import { notifyRoles } from "@/server/actions/notifications";
 import type { Prisma } from "@prisma/client";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
@@ -853,6 +854,21 @@ export async function markCustomerInvoicePaid(input: MarkPaidInput) {
       },
     });
   });
+
+  const invoiceAfter = await db.customerInvoice.findUnique({
+    where: { id: invoiceId },
+    select: { invoiceNo: true, customer: { select: { name: true } } },
+  });
+  if (invoiceAfter) {
+    await notifyRoles([Role.SALES, Role.ACCOUNTS, Role.ADMIN, Role.MANAGER], {
+      kind: "CUSTOMER_INVOICE_PAID",
+      title: `Invoice ${invoiceAfter.invoiceNo} paid`,
+      body: `${invoiceAfter.customer.name} cleared the balance.`,
+      link: `/invoices/${invoiceId}`,
+      dedupeKey: `customer-invoice-paid:${invoiceId}`,
+    });
+  }
+
   revalidatePath("/invoices");
   revalidatePath(`/invoices/${invoiceId}`);
   revalidatePath("/payments/receivables");

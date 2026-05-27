@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Role } from "@prisma/client";
 import { db } from "@/server/db";
+import { notifyRoles } from "@/server/actions/notifications";
 
 // Public-facing feedback actions — NO auth required.
 // Rate-limited at the token level: a token can be used once. Subsequent
@@ -40,13 +42,23 @@ export async function submitFeedback(input: SubmitFeedbackInput) {
     throw new Error("Feedback has already been submitted for this order");
   }
   const rating = Math.max(1, Math.min(5, Math.round(input.rating)));
-  await db.order.update({
+  const updated = await db.order.update({
     where: { id: order.id },
     data: {
       feedbackRating: rating,
       feedbackComment: input.comment?.slice(0, 2000) ?? null,
       feedbackSubmittedAt: new Date(),
     },
+    select: { code: true, customer: { select: { name: true } } },
+  });
+  // Notify admin + sales (the people who own the customer relationship)
+  // when feedback comes back. dedup so a bot replay doesn't re-fire.
+  await notifyRoles([Role.ADMIN, Role.MANAGER, Role.SALES], {
+    kind: "FEEDBACK_RECEIVED",
+    title: `${"★".repeat(rating)} feedback on ${updated.code}`,
+    body: `${updated.customer.name}${input.comment ? ": " + input.comment.slice(0, 120) : ""}`,
+    link: `/orders/${order.id}`,
+    dedupeKey: `feedback:${order.id}`,
   });
   // No audit log — customer-facing, not an authenticated mutation.
   revalidatePath(`/f/${input.token}`);
