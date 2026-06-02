@@ -38,10 +38,21 @@ export function ReceiptForm({ ingredients, onSubmit, redirectOnSuccess }: Props)
   });
 
   function submit(values: IngredientReceiptInputT) {
+    // Drop empty-string optionals before sending — the validator's
+    // isoDate / nullable-string types accept undefined but reject "".
+    // Without this clean-up, leaving "Received at" blank threw
+    //   ZodError: String must contain at least 1 character(s)
+    // (visible in production as the masked "Server Components render"
+    // error, since the throw bubbled up through the inline server
+    // action call site).
     const cleaned: IngredientReceiptInputT = {
       ...values,
       supplier: values.supplier ? values.supplier : null,
       note: values.note ? values.note : null,
+      receivedAt:
+        values.receivedAt && values.receivedAt.trim()
+          ? values.receivedAt
+          : undefined,
     };
     startTransition(async () => {
       try {
