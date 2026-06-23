@@ -10,7 +10,6 @@ import { APDonut } from "@/components/ik/dashboard/APDonut";
 import { TodayTimeline } from "@/components/ik/dashboard/TodayTimeline";
 import { QuickActions } from "@/components/ik/dashboard/QuickActions";
 import { StockSnapshot } from "@/components/ik/dashboard/StockSnapshot";
-import { MyDeliveries } from "@/components/ik/dashboard/MyDeliveries";
 import { MyStockRequests } from "@/components/ik/dashboard/MyStockRequests";
 import { PendingStockRequests } from "@/components/ik/dashboard/PendingStockRequests";
 import { MyTasksPanel } from "@/components/ik/dashboard/MyTasksPanel";
@@ -21,8 +20,8 @@ import { BanquetPanel } from "@/components/ik/dashboard/BanquetPanel";
 import { StoresOverviewPanel } from "@/components/ik/dashboard/StoresOverviewPanel";
 import { ChefWorkScreen } from "@/components/ik/dashboard/ChefWorkScreen";
 import { listChefBoardOrders } from "@/server/actions/production-jobs";
-import { ReadyForPickup } from "@/components/ik/dashboard/ReadyForPickup";
-import { listReadyForDispatch } from "@/server/actions/deliveries";
+import { DriverWorkScreen } from "@/components/ik/dashboard/DriverWorkScreen";
+import { listReadyForDispatch, listMyActiveDeliveries } from "@/server/actions/deliveries";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -169,18 +168,21 @@ export default async function DashboardPage() {
   // assigned to them. None of the order-map, AR, or procurement panels
   // apply to their work.
   if (isDriver) {
-    const pickups = await listReadyForDispatch();
+    const [pickups, myDeliveries] = await Promise.all([
+      listReadyForDispatch(),
+      listMyActiveDeliveries(),
+    ]);
     return (
       <>
         <PageHeader
-          eyebrow="Overview"
+          eyebrow="Delivery"
           title={`Welcome, ${name}`}
-          description="Cooked orders waiting for pickup, plus the deliveries assigned to you. Take one, then dispatch and confirm hand-over."
+          description="Your whole run in three tabs — take a cooked order, dispatch it, then mark it delivered. Every action is on the card."
         />
         <div className="grid gap-5">
           <MyTasksPanel />
-          <ReadyForPickup
-            orders={pickups.map((o) => ({
+          <DriverWorkScreen
+            pickups={pickups.map((o) => ({
               id: o.id,
               code: o.code,
               channel: o.channel,
@@ -189,8 +191,18 @@ export default async function DashboardPage() {
               deliveryAddress: o.deliveryAddress,
               customerName: o.customer.name,
             }))}
+            deliveries={myDeliveries.map((d) => ({
+              id: d.id,
+              deliveryNo: d.deliveryNo,
+              status: d.status,
+              scheduledAt: d.scheduledAt.toISOString(),
+              orderCode: d.order.code,
+              channel: d.order.channel,
+              roomNumber: d.order.roomNumber,
+              deliveryAddress: d.order.deliveryAddress,
+              customerName: d.order.customer.name,
+            }))}
           />
-          <MyDeliveries deliveries={summary.driver?.deliveries ?? []} />
         </div>
       </>
     );

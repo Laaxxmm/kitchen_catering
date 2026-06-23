@@ -123,6 +123,41 @@ export async function listReadyForDispatch() {
 }
 
 /**
+ * The driver's active deliveries (SCHEDULED / DISPATCHED / IN_TRANSIT),
+ * with the order context the dashboard board needs. Drivers see only their
+ * own; admin/manager see all. Powers the tabbed driver work-screen.
+ */
+export async function listMyActiveDeliveries() {
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
+  return db.delivery.findMany({
+    where: {
+      ...(session.user.role === Role.DELIVERY ? { driverUserId: session.user.id } : {}),
+      status: {
+        in: [DeliveryStatus.SCHEDULED, DeliveryStatus.DISPATCHED, DeliveryStatus.IN_TRANSIT],
+      },
+    },
+    select: {
+      id: true,
+      deliveryNo: true,
+      status: true,
+      scheduledAt: true,
+      order: {
+        select: {
+          code: true,
+          channel: true,
+          roomNumber: true,
+          eventDate: true,
+          deliveryAddress: true,
+          customer: { select: { name: true } },
+        },
+      },
+    },
+    orderBy: { scheduledAt: "asc" },
+    take: 100,
+  });
+}
+
+/**
  * Driver self-pickup. Instead of waiting for a manager to schedule + assign
  * a driver, the driver taps "Take delivery" on a cooked order from their
  * dashboard — this creates a delivery assigned to them (status SCHEDULED),
