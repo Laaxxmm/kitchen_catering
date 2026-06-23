@@ -63,6 +63,64 @@ async function notifyOrderApproved(orderId: string) {
   });
 }
 
+/**
+ * Fire-and-forget: tell the right desk a freshly-submitted order has
+ * landed in their queue. Immediate channels (room service / à la carte /
+ * management) go straight to the chef; pre-booked catering waits on the
+ * admin/manager commercial gate. Uses the GENERIC kind so no schema
+ * change is needed; the chime in the notification bell does the rest.
+ */
+async function notifyOrderSubmitted(orderId: string) {
+  const order = await db.order.findUnique({
+    where: { id: orderId },
+    select: {
+      code: true,
+      status: true,
+      channel: true,
+      headcount: true,
+      eventDate: true,
+      roomNumber: true,
+      customer: { select: { name: true } },
+    },
+  });
+  if (!order) return;
+  const evt = formatIST(order.eventDate, "dd MMM yyyy");
+  const where = order.roomNumber ? ` · Room ${order.roomNumber}` : "";
+  if (order.status === OrderStatus.PENDING_CHEF_APPROVAL) {
+    await notifyRoles([Role.KITCHEN_HEAD], {
+      kind: "GENERIC",
+      title: `New order ${order.code} — ${order.customer.name}`,
+      body: `${order.channel}${where} · ${order.headcount ?? "?"} pax. Accept or reject in the kitchen queue.`,
+      link: `/orders/${orderId}`,
+      dedupeKey: `order-submitted:${orderId}`,
+    });
+  } else if (order.status === OrderStatus.PENDING_ADMIN_APPROVAL) {
+    await notifyRoles([Role.ADMIN, Role.MANAGER], {
+      kind: "GENERIC",
+      title: `New order ${order.code} awaiting approval`,
+      body: `${order.customer.name} · ${order.channel} · ${order.headcount ?? "?"} pax · event ${evt}.`,
+      link: `/orders/${orderId}`,
+      dedupeKey: `order-submitted:${orderId}`,
+    });
+  }
+}
+
+/** Fire-and-forget: order cleared the admin gate, now needs chef review. */
+async function notifyOrderToChef(orderId: string) {
+  const order = await db.order.findUnique({
+    where: { id: orderId },
+    select: { code: true, customer: { select: { name: true } } },
+  });
+  if (!order) return;
+  await notifyRoles([Role.KITCHEN_HEAD], {
+    kind: "GENERIC",
+    title: `Order ${order.code} approved — chef review`,
+    body: `${order.customer.name}: admin signed off. Accept or suggest changes in the kitchen queue.`,
+    link: `/orders/${orderId}`,
+    dedupeKey: `order-to-chef:${orderId}`,
+  });
+}
+
 interface ComputedLine {
   subtotal: Decimal;
   tax: Decimal;
@@ -301,6 +359,9 @@ export async function submitOrder(id: string) {
   revalidatePath("/orders");
   revalidatePath("/queue/admin-approvals");
   revalidatePath("/queue/chef-approvals");
+
+  // Chime the right desk that a new order just landed.
+  await notifyOrderSubmitted(id);
 }
 
 /**
@@ -360,6 +421,11 @@ export async function adminApproveOrder(
   revalidatePath("/orders");
   revalidatePath("/queue/admin-approvals");
   revalidatePath("/queue/chef-approvals");
+
+  // On approval the order moves to the chef — chime them.
+  if (input.decision === "APPROVED") {
+    await notifyOrderToChef(id);
+  }
 }
 
 // =====================================================================

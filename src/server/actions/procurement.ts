@@ -923,7 +923,7 @@ export async function listVendorBills(opts: { status?: VendorBillStatus[]; vendo
       ...(opts.vendorId ? { vendorId: opts.vendorId } : {}),
     },
     include: {
-      vendor: { select: { name: true, code: true } },
+      vendor: { select: { id: true, name: true, code: true } },
       po: { select: { poNo: true } },
     },
     orderBy: { issueDate: "desc" },

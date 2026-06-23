@@ -13,6 +13,7 @@ import {
 } from "@/server/actions/notifications";
 import { isNextNavigationError } from "@/lib/next-error";
 import { formatIST } from "@/lib/time";
+import { playChime } from "@/lib/chime";
 
 interface NotificationRow {
   id: string;
@@ -38,20 +39,28 @@ export function NotificationBell() {
   const [loading, setLoading] = useState(false);
   const [pending, startTransition] = useTransition();
   const rootRef = useRef<HTMLDivElement>(null);
+  // Last count we saw from the server. Starts null so the very first load
+  // (which may surface pre-existing unread items) doesn't chime.
+  const lastCountRef = useRef<number | null>(null);
 
-  // Initial + polled unread count.
+  // Initial + polled unread count. Chimes whenever the count rises — i.e.
+  // a new notification arrived (order placed, approval, etc.).
   useEffect(() => {
     let cancelled = false;
     async function refresh() {
       try {
         const c = await myUnreadCount();
-        if (!cancelled) setCount(c);
+        if (cancelled) return;
+        setCount(c);
+        const prev = lastCountRef.current;
+        if (prev !== null && c > prev) playChime();
+        lastCountRef.current = c;
       } catch {
         // benign — bell is optional UI
       }
     }
     refresh();
-    const t = window.setInterval(refresh, 60_000);
+    const t = window.setInterval(refresh, 30_000);
     return () => {
       cancelled = true;
       window.clearInterval(t);
@@ -104,6 +113,7 @@ export function NotificationBell() {
             xs.map((x) => (x.id === n.id ? { ...x, readAt: new Date() } : x)),
           );
           setCount((c) => Math.max(0, c - 1));
+          lastCountRef.current = Math.max(0, (lastCountRef.current ?? 1) - 1);
         } catch (err) {
           if (isNextNavigationError(err)) throw err;
         }
@@ -121,6 +131,7 @@ export function NotificationBell() {
         await markAllNotificationsRead();
         setItems((xs) => xs.map((x) => ({ ...x, readAt: x.readAt ?? new Date() })));
         setCount(0);
+        lastCountRef.current = 0;
         toast.success("All marked read");
       } catch (err) {
         if (isNextNavigationError(err)) throw err;

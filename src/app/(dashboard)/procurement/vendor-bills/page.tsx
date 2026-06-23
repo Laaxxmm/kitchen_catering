@@ -57,7 +57,11 @@ export default async function VendorBillsPage() {
                 <TableRow key={b.id}>
                   <TableCell><Link href={`/procurement/vendor-bills/${b.id}`} className="font-mono text-brand hover:underline">{b.billNo}</Link></TableCell>
                   <TableCell className="font-mono text-[12px]">{b.vendorBillNo ?? "—"}</TableCell>
-                  <TableCell>{b.vendor.name}</TableCell>
+                  <TableCell>
+                    <Link href={`/procurement/vendors/${b.vendor.id}`} className="text-brand hover:underline">
+                      {b.vendor.name}
+                    </Link>
+                  </TableCell>
                   <TableCell className="font-mono text-[12px]">{b.po?.poNo ?? "—"}</TableCell>
                   <TableCell className="text-right font-mono">{formatINR(b.grandTotal)}</TableCell>
                   <TableCell className="text-right font-mono">{formatINR(b.amountPaid)}</TableCell>
