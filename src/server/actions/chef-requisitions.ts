@@ -105,6 +105,53 @@ export async function createChefRequisition(raw: unknown) {
   return { id: result.id, requisitionNo: result.requisitionNo };
 }
 
+/**
+ * "Ingredients already available" — chef confirms the kitchen already
+ * holds everything this order needs, so NO requisition / store-issue is
+ * required. Advances the order straight from CHEF_REQUISITION_PENDING to
+ * READY_FOR_PRODUCTION (skipping ISSUING).
+ *
+ * Note: because no IngredientIssue rows are created, this order's P&L
+ * won't show ingredient cost. That's correct — the stock was already on
+ * hand from a prior receipt; double-counting it here would understate
+ * margin on whichever order it WAS issued against. The chef can still
+ * raise a partial requisition later if they realise something's short.
+ */
+export async function markIngredientsAvailable(orderId: string, note?: string) {
+  const session = await requireRole(REQUISITION_CREATE_ROLES);
+
+  await db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { status: true },
+    });
+    if (!order) throw new Error("Order not found");
+    if (order.status !== OrderStatus.CHEF_REQUISITION_PENDING) {
+      throw new AuthorizationError(
+        `Order status ${order.status} doesn't allow skipping the requisition`,
+      );
+    }
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: OrderStatus.READY_FOR_PRODUCTION },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "ORDER_INGREDIENTS_ALREADY_AVAILABLE",
+        entity: "Order",
+        entityId: orderId,
+        payloadHash: sha256Json({ note: note ?? null }),
+      },
+    });
+  });
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/orders");
+  revalidatePath("/kitchen");
+  revalidatePath("/queue/issuing");
+}
+
 export async function addChefRequisitionLine(requisitionId: string, raw: unknown) {
   const session = await requireRole(REQUISITION_CREATE_ROLES);
   const input = ChefRequisitionLineInput.parse(raw);

@@ -24,10 +24,44 @@ import {
 import { nextOrderCode } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
+import { notifyRoles } from "@/server/actions/notifications";
+import { formatIST } from "@/lib/time";
 
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.SALES, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.ACCOUNTS, Role.DELIVERY,
 ];
+
+/**
+ * Order confirmed — chef approved feasibility (or manager OK'd the
+ * chef's proposed changes). Notify BOTH:
+ *   - KITCHEN_HEAD: raise the ingredient requisition
+ *   - DELIVERY:     prepare cutlery + event arrangements ahead of time
+ * (admin / manager already see it in their queues, so we don't spam them).
+ *
+ * Runs outside the approving transaction; failures are swallowed by
+ * notifyRoles → createNotification so they never break the approval.
+ */
+async function notifyOrderApproved(orderId: string) {
+  const order = await db.order.findUnique({
+    where: { id: orderId },
+    select: {
+      code: true,
+      eventDate: true,
+      headcount: true,
+      channel: true,
+      customer: { select: { name: true } },
+    },
+  });
+  if (!order) return;
+  const evt = formatIST(order.eventDate, "dd MMM yyyy");
+  await notifyRoles([Role.KITCHEN_HEAD, Role.DELIVERY], {
+    kind: "ORDER_APPROVED",
+    title: `Order ${order.code} confirmed — ${order.customer.name}`,
+    body: `${order.channel} · ${order.headcount} pax · event ${evt}. Kitchen: raise requisition. Delivery: prep cutlery + arrangements.`,
+    link: `/orders/${orderId}`,
+    dedupeKey: `order-approved:${orderId}`,
+  });
+}
 
 interface ComputedLine {
   subtotal: Decimal;
@@ -364,6 +398,8 @@ export async function chefApproveOrder(
     } catch (err) {
       console.error(`[proforma] order ${id} failed:`, err);
     }
+    // Confirm to kitchen + delivery now that the order is going ahead.
+    await notifyOrderApproved(id);
   }
 }
 
@@ -431,6 +467,8 @@ export async function managerApproveChefSuggestion(
     } catch (err) {
       console.error(`[proforma] order ${id} failed:`, err);
     }
+    // Manager OK'd the chef's changes — order is now going ahead.
+    await notifyOrderApproved(id);
   }
 }
 

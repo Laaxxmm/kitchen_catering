@@ -88,6 +88,13 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     const result = await createCustomerInvoiceFromOrder(id);
     redirect(`/invoices/${result.id}`);
   }
+  async function doIngredientsAvailable() {
+    "use server";
+    const { markIngredientsAvailable } = await import(
+      "@/server/actions/chef-requisitions"
+    );
+    await markIngredientsAvailable(id);
+  }
 
   // ─── Approval block selection ────────────────────────────────────────
   // Chef sees the chef-approval block when order is PENDING_CHEF_APPROVAL.
@@ -147,6 +154,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         orderCode={order.code}
         role={role}
         hasRequisitions={order.chefRequisitions.length > 0}
+        onIngredientsAvailable={doIngredientsAvailable}
       />
 
 
@@ -414,6 +422,8 @@ interface OrderNextStepProps {
   orderCode: string;
   role: Role | undefined;
   hasRequisitions: boolean;
+  /** Server action: chef skips the requisition because stock is on hand. */
+  onIngredientsAvailable: () => Promise<void>;
 }
 
 /**
@@ -423,7 +433,7 @@ interface OrderNextStepProps {
  * via the header button, PAID/COMPLETED/CANCELLED are read-only) and the
  * approval states (those use dedicated blocks above).
  */
-function OrderNextStep({ status, orderId, orderCode, role, hasRequisitions }: OrderNextStepProps) {
+function OrderNextStep({ status, orderId, orderCode, role, hasRequisitions, onIngredientsAvailable }: OrderNextStepProps) {
   const isAdmin = role === Role.ADMIN;
   const isManager = role === Role.MANAGER || isAdmin;
   const isChef = role === Role.KITCHEN_HEAD || isAdmin;
@@ -482,13 +492,26 @@ function OrderNextStep({ status, orderId, orderCode, role, hasRequisitions }: Or
         <>
           The chef should now list the ingredients the store needs to issue for this order.
           {isChef ? (
-            <div className="mt-2">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               <Link href={`/orders/${orderId}/requisition`}>
                 <Button size="sm">Raise ingredient requisition</Button>
               </Link>
+              <form action={onIngredientsAvailable}>
+                <Button type="submit" size="sm" variant="outline">
+                  Ingredients already available — skip to cooking
+                </Button>
+              </form>
             </div>
           ) : (
             <span className="text-ik-ink-3"> Waiting on the kitchen head.</span>
+          )}
+          {isChef && (
+            <div className="mt-2 text-[11.5px] text-ik-ink-3">
+              Use &ldquo;skip to cooking&rdquo; only when the kitchen
+              already holds everything for this order — it moves the order
+              straight to production with no store issue (so no ingredient
+              cost is booked against this order&apos;s P&amp;L).
+            </div>
           )}
         </>
       );

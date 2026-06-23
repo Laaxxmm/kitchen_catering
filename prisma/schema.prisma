@@ -2345,6 +2345,10 @@ enum NotificationKind {
   CHEF_REQUISITION_FULFILLED
   FEEDBACK_RECEIVED
   VENDOR_PAYMENT_REMINDER
+  // Order confirmed (chef approved feasibility / manager OK'd changes).
+  // Fans out to the kitchen (raise requisition) AND the delivery team
+  // (prepare cutlery + event arrangements).
+  ORDER_APPROVED
   GENERIC
 }
 
