@@ -10,7 +10,6 @@ import { APDonut } from "@/components/ik/dashboard/APDonut";
 import { TodayTimeline } from "@/components/ik/dashboard/TodayTimeline";
 import { QuickActions } from "@/components/ik/dashboard/QuickActions";
 import { StockSnapshot } from "@/components/ik/dashboard/StockSnapshot";
-import { MyStockRequests } from "@/components/ik/dashboard/MyStockRequests";
 import { PendingStockRequests } from "@/components/ik/dashboard/PendingStockRequests";
 import { MyTasksPanel } from "@/components/ik/dashboard/MyTasksPanel";
 import { TasksAdminPanel } from "@/components/ik/dashboard/TasksAdminPanel";
@@ -22,6 +21,14 @@ import { ChefWorkScreen } from "@/components/ik/dashboard/ChefWorkScreen";
 import { listChefBoardOrders } from "@/server/actions/production-jobs";
 import { DriverWorkScreen } from "@/components/ik/dashboard/DriverWorkScreen";
 import { listReadyForDispatch, listMyActiveDeliveries } from "@/server/actions/deliveries";
+import { SalesBoard } from "@/components/ik/dashboard/SalesBoard";
+import { StoreBoard } from "@/components/ik/dashboard/StoreBoard";
+import { ManagerApprovalsBoard } from "@/components/ik/dashboard/ManagerApprovalsBoard";
+import { listOrders } from "@/server/actions/orders";
+import { listChefRequisitions } from "@/server/actions/chef-requisitions";
+import { listPurchaseRequisitions } from "@/server/actions/purchase-requisitions";
+import { listVendorPOs } from "@/server/actions/procurement";
+import { ChefRequisitionStatus, PurchaseRequisitionStatus, VendorPOStatus, OrderStatus } from "@prisma/client";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -49,6 +56,8 @@ export default async function DashboardPage() {
   const isMaintenance = role === "MAINTENANCE_MANAGER";
   const isFnb = role === "FNB_SERVICE";
   const isChef = role === "KITCHEN_HEAD";
+  const isSales = role === "SALES";
+  const isStore = role === "STORE_KEEPER";
 
   // Kitchen head gets the action-first work-screen: every active order is a
   // card with its single next action inline (accept / raise request /
@@ -76,6 +85,88 @@ export default async function DashboardPage() {
               tableNumber: o.tableNumber,
               customerName: o.customer.name,
               items: o.items.map((it) => ({ label: it.dish.name, portions: it.portions.toString() })),
+            }))}
+          />
+        </div>
+      </>
+    );
+  }
+
+  // Sales: their order pipeline in four tabs — Drafts (submit), In review,
+  // In kitchen, Out/done. Submit is inline; everything else opens the order.
+  if (isSales) {
+    const orders = await listOrders();
+    return (
+      <>
+        <PageHeader
+          eyebrow="Sales"
+          title={`Welcome, ${name}`}
+          description="Your orders by stage. Submit drafts here; tap any order to see the detail."
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Link href="/orders/new"><Button>Take new order</Button></Link>
+              <Link href="/quotes/new"><Button variant="outline">Draft quote</Button></Link>
+            </div>
+          }
+        />
+        <div className="grid gap-5">
+          <MyTasksPanel />
+          <SalesBoard
+            orders={orders.map((o) => ({
+              id: o.id,
+              code: o.code,
+              status: o.status,
+              channel: o.channel,
+              customerName: o.customer.name,
+              eventDate: o.eventDate.toISOString(),
+            }))}
+          />
+        </div>
+      </>
+    );
+  }
+
+  // Store keeper: chef ingredient requests to fulfil + their own stock
+  // requests, grouped in tabs. Issuing is line-level so cards open the
+  // fulfilment page.
+  if (isStore) {
+    const [chefReqs, prs] = await Promise.all([
+      listChefRequisitions({
+        status: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED],
+      }),
+      listPurchaseRequisitions({
+        status: [
+          PurchaseRequisitionStatus.DRAFT,
+          PurchaseRequisitionStatus.PENDING_APPROVAL,
+          PurchaseRequisitionStatus.APPROVED,
+        ],
+      }),
+    ]);
+    return (
+      <>
+        <PageHeader
+          eyebrow="Store"
+          title={`Welcome, ${name}`}
+          description="Ingredient requests from the kitchen, and the stock requests you've raised. Open a request to issue line by line."
+        />
+        <div className="grid gap-5">
+          <MyTasksPanel />
+          <StoreBoard
+            chefReqs={chefReqs.map((r) => ({
+              id: r.id,
+              requisitionNo: r.requisitionNo,
+              status: r.status,
+              orderCode: r.order.code,
+              customerName: r.order.customer.name,
+              eventDate: r.order.eventDate.toISOString(),
+              lines: r._count.lines,
+            }))}
+            prs={prs.map((p) => ({
+              id: p.id,
+              prNo: p.prNo,
+              status: p.status,
+              requestedBy: p.requestedBy?.name ?? "—",
+              lines: p._count.lines,
             }))}
           />
         </div>
@@ -164,6 +255,16 @@ export default async function DashboardPage() {
   // the housekeeping branch above doesn't pay the cost of the heavy query.
   const summary = await getDashboardSummary();
 
+  // Admin / manager: pull the three approval queues for the inline
+  // approvals board at the top of the operational dashboard.
+  const approvals = isManagerScope
+    ? await Promise.all([
+        listOrders({ status: [OrderStatus.CHANGES_PROPOSED_BY_CHEF] }),
+        listPurchaseRequisitions({ status: [PurchaseRequisitionStatus.PENDING_APPROVAL] }),
+        listVendorPOs({ status: [VendorPOStatus.PENDING_APPROVAL] }),
+      ])
+    : null;
+
   // Drivers get a focused, single-purpose dashboard: just the deliveries
   // assigned to them. None of the order-map, AR, or procurement panels
   // apply to their work.
@@ -222,6 +323,34 @@ export default async function DashboardPage() {
             are one click away. */}
         <QuickActions role={role} />
 
+        {/* 0a ─ Manager/admin approvals board: chef-proposed order changes,
+            stock requests, and POs — approve/reject inline. Hides itself
+            when there's nothing waiting. */}
+        {approvals && (
+          <ManagerApprovalsBoard
+            orderChanges={approvals[0].map((o) => ({
+              id: o.id,
+              code: o.code,
+              customerName: o.customer.name,
+              eventDate: o.eventDate.toISOString(),
+              note: o.chefSuggestionNotes ?? null,
+            }))}
+            stockRequests={approvals[1].map((p) => ({
+              id: p.id,
+              prNo: p.prNo,
+              requestedBy: p.requestedBy?.name ?? "—",
+              orderCode: p.order?.code ?? null,
+              lines: p._count.lines,
+            }))}
+            purchaseOrders={approvals[2].map((po) => ({
+              id: po.id,
+              poNo: po.poNo,
+              vendor: po.vendor.name,
+              grandTotal: po.grandTotal.toString(),
+            }))}
+          />
+        )}
+
         {/* 1 ─ Personal task tray. Surfaces what's been assigned to *me*
             outside the operational workflow (one-off line-management
             asks). Hidden when the user has no tasks. */}
@@ -250,13 +379,6 @@ export default async function DashboardPage() {
             them as soon as the storekeeper raises one. */}
         {summary.adminPendingPRs && summary.adminPendingPRs.length > 0 && (
           <PendingStockRequests requests={summary.adminPendingPRs} />
-        )}
-
-        {/* 1c ─ Storekeeper's own raised requests, with live status —
-            no need to dig into the procurement section. Always render
-            (the panel handles the empty-state gracefully). */}
-        {role === "STORE_KEEPER" && summary.storekeeperPRs && (
-          <MyStockRequests requests={summary.storekeeperPRs} />
         )}
 
         {/* 2 ─ Live order map. Falls back to the kitchen pipeline when
