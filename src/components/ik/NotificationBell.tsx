@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell } from "lucide-react";
+import { Bell, Volume2, VolumeX } from "lucide-react";
 import { toast } from "sonner";
 import {
   listMyNotifications,
@@ -42,6 +42,29 @@ export function NotificationBell() {
   // Last count we saw from the server. Starts null so the very first load
   // (which may surface pre-existing unread items) doesn't chime.
   const lastCountRef = useRef<number | null>(null);
+  // Chime on/off, persisted in localStorage. The ref mirrors state so the
+  // polling closure always reads the current preference.
+  const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
+
+  // Load the saved chime preference once on mount.
+  useEffect(() => {
+    const saved = typeof window !== "undefined" && window.localStorage.getItem("ik.chime.muted") === "1";
+    setMuted(saved);
+    mutedRef.current = saved;
+  }, []);
+
+  function toggleMuted() {
+    const next = !mutedRef.current;
+    mutedRef.current = next;
+    setMuted(next);
+    try {
+      window.localStorage.setItem("ik.chime.muted", next ? "1" : "0");
+    } catch {
+      // private mode / storage disabled — preference just won't persist
+    }
+    if (!next) playChime(); // quick confirmation that sound is back on
+  }
 
   // Initial + polled unread count. Chimes whenever the count rises — i.e.
   // a new notification arrived (order placed, approval, etc.).
@@ -53,7 +76,7 @@ export function NotificationBell() {
         if (cancelled) return;
         setCount(c);
         const prev = lastCountRef.current;
-        if (prev !== null && c > prev) playChime();
+        if (prev !== null && c > prev && !mutedRef.current) playChime();
         lastCountRef.current = c;
       } catch {
         // benign — bell is optional UI
@@ -163,16 +186,27 @@ export function NotificationBell() {
         >
           <header className="flex items-center justify-between border-b border-ik-rule px-3 py-2">
             <span className="text-[12px] font-medium text-ik-ink-2">Notifications</span>
-            {count > 0 && (
+            <div className="flex items-center gap-3">
+              {count > 0 && (
+                <button
+                  type="button"
+                  onClick={markAll}
+                  disabled={pending}
+                  className="text-[10.5px] text-ik-ink-3 hover:text-brand"
+                >
+                  Mark all read
+                </button>
+              )}
               <button
                 type="button"
-                onClick={markAll}
-                disabled={pending}
-                className="text-[10.5px] text-ik-ink-3 hover:text-brand"
+                onClick={toggleMuted}
+                aria-label={muted ? "Turn notification sound on" : "Turn notification sound off"}
+                title={muted ? "Sound off — click to turn on" : "Sound on — click to mute"}
+                className="grid h-6 w-6 place-items-center rounded text-ik-ink-3 hover:bg-ik-paper-alt hover:text-ik-ink"
               >
-                Mark all read
+                {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
               </button>
-            )}
+            </div>
           </header>
           <div className="max-h-[50vh] overflow-y-auto">
             {loading && (
