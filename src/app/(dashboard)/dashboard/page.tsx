@@ -30,7 +30,11 @@ import { listChefRequisitions } from "@/server/actions/chef-requisitions";
 import { listPurchaseRequisitions } from "@/server/actions/purchase-requisitions";
 import { listVendorPOs, listVendorBills } from "@/server/actions/procurement";
 import { listCustomerInvoices } from "@/server/actions/customer-invoices";
+import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
+import { listHousekeepingIssues } from "@/server/actions/housekeeping";
+import { listMaintenanceActivities } from "@/server/actions/maintenance";
 import { toDecimal } from "@/lib/money";
+import { formatIST } from "@/lib/time";
 import {
   ChefRequisitionStatus, PurchaseRequisitionStatus, VendorPOStatus, OrderStatus,
   CustomerInvoiceStatus, VendorBillStatus,
@@ -39,6 +43,14 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
+
+/** Group a record by IST calendar: today / within 7 days / earlier. */
+function logBucket(date: Date): LogBucket {
+  const today = formatIST(new Date(), "yyyy-MM-dd");
+  if (formatIST(date, "yyyy-MM-dd") === today) return "today";
+  if (Date.now() - date.getTime() <= 7 * 24 * 60 * 60 * 1000) return "week";
+  return "earlier";
+}
 
 /**
  * Visual dashboard — three layered blocks:
@@ -233,12 +245,22 @@ export default async function DashboardPage() {
   // Housekeeping manager gets a focused dashboard scoped to their module.
   // Skips the heavy operational getDashboardSummary call entirely.
   if (isHousekeeping) {
+    const issues = await listHousekeepingIssues({ limit: 100 });
+    const rows = issues.map((iss) => ({
+      id: iss.id,
+      bucket: logBucket(iss.issuedAt),
+      primary: iss.room ? `Room ${iss.room.number}${iss.room.name ? ` · ${iss.room.name}` : ""}` : "Issue to room",
+      secondary: iss.staff?.name ? `Handed to ${iss.staff.name}` : null,
+      time: iss.issuedAt.toISOString(),
+      person: iss.recordedBy?.name ?? null,
+      items: iss.lines.map((l) => `${l.item.name} · ${l.quantity.toString()} ${l.item.unit}`),
+    }));
     return (
       <>
         <PageHeader
-          eyebrow="Overview"
+          eyebrow="Housekeeping"
           title={`Welcome, ${name}`}
-          description="Hotel-side stockroom. Record what maintenance hands over, then log every issue-to-room."
+          description="Every issue-to-room, grouped by Today / This week / Earlier. Record new issues and receipts up top."
           actions={
             <div className="flex flex-wrap gap-2">
               <Link href="/housekeeping/issues/new">
@@ -252,6 +274,7 @@ export default async function DashboardPage() {
         />
         <div className="grid gap-5">
           <MyTasksPanel />
+          <LogBoard rows={rows} unit="issues" />
           <HousekeepingPanel />
         </div>
       </>
@@ -261,12 +284,22 @@ export default async function DashboardPage() {
   // Maintenance manager — same shape as housekeeping. Spares store + room
   // work-log live here; nothing else from the operational dashboard applies.
   if (isMaintenance) {
+    const activities = await listMaintenanceActivities({ limit: 100 });
+    const rows = activities.map((a) => ({
+      id: a.id,
+      bucket: logBucket(a.performedAt),
+      primary: a.room ? `Room ${a.room.number}${a.room.name ? ` · ${a.room.name}` : ""}` : a.category,
+      secondary: [a.category, a.notes].filter(Boolean).join(" · ") || null,
+      time: a.performedAt.toISOString(),
+      person: a.staff?.name ?? a.recordedBy?.name ?? null,
+      items: a.lines.map((l) => `${l.item.name} · ${l.quantity.toString()} ${l.item.unit}`),
+    }));
     return (
       <>
         <PageHeader
-          eyebrow="Overview"
+          eyebrow="Maintenance"
           title={`Welcome, ${name}`}
-          description="Maintenance store + room work-log. Track every electrical / mechanical activity and which spares were used."
+          description="Every electrical / mechanical activity, grouped by Today / This week / Earlier. Log new activities and receipts up top."
           actions={
             <div className="flex flex-wrap gap-2">
               <Link href="/maintenance/activities/new"><Button>Log activity</Button></Link>
@@ -276,6 +309,7 @@ export default async function DashboardPage() {
         />
         <div className="grid gap-5">
           <MyTasksPanel />
+          <LogBoard rows={rows} unit="activities" />
           <MaintenancePanel />
         </div>
       </>
