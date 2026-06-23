@@ -109,9 +109,18 @@ export async function createOrder(raw: unknown) {
         notes: it.notes ?? null,
       };
     });
-    const contractValue = itemsData
+    // For ODC / PACKET bulk orders the operator sets one lump-sum
+    // package price; otherwise the contract value is the sum of the
+    // per-dish line totals.
+    const isPackageChannel =
+      input.channel === "ODC" || input.channel === "PACKET";
+    const lineSum = itemsData
       .reduce((s, it) => s.plus(new Decimal(it.lineTotal)), new Decimal(0))
       .toDecimalPlaces(2);
+    const contractValue =
+      isPackageChannel && input.packageTotal != null && input.packageTotal !== ""
+        ? new Decimal(input.packageTotal).toDecimalPlaces(2)
+        : lineSum;
 
     const created = await tx.order.create({
       data: {
@@ -155,7 +164,10 @@ export async function updateOrderDraft(id: string, raw: unknown) {
   const input = OrderUpdateInput.parse(raw);
 
   await db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
+    const order = await tx.order.findUnique({
+      where: { id },
+      select: { status: true, channel: true },
+    });
     if (!order) throw new Error("Order not found");
     if (order.status !== OrderStatus.DRAFT) {
       throw new AuthorizationError("Only DRAFT orders can be edited");
@@ -164,6 +176,7 @@ export async function updateOrderDraft(id: string, raw: unknown) {
     // Header fields
     const data: Record<string, unknown> = {};
     if (input.customerId) data.customerId = input.customerId;
+    if (input.channel) data.channel = input.channel;
     if (input.eventDate) data.eventDate = new Date(input.eventDate);
     if (input.headcount) data.headcount = input.headcount;
     if (input.mealType) data.mealType = input.mealType;
@@ -171,7 +184,13 @@ export async function updateOrderDraft(id: string, raw: unknown) {
     if (input.deliveryWindowStart) data.deliveryWindowStart = new Date(input.deliveryWindowStart);
     if (input.deliveryWindowEnd) data.deliveryWindowEnd = new Date(input.deliveryWindowEnd);
     if (input.placeOfSupplyStateCode) data.placeOfSupplyStateCode = input.placeOfSupplyStateCode;
+    if (input.roomNumber !== undefined) data.roomNumber = input.roomNumber?.trim() || null;
+    if (input.tableNumber !== undefined) data.tableNumber = input.tableNumber?.trim() || null;
     if (input.notes !== undefined) data.notes = input.notes;
+
+    // Effective channel = the one being set, else the order's current.
+    const effChannel = input.channel ?? order.channel;
+    const isPackageChannel = effChannel === "ODC" || effChannel === "PACKET";
 
     if (input.items) {
       // Full replace
@@ -193,8 +212,20 @@ export async function updateOrderDraft(id: string, raw: unknown) {
         };
       });
       await tx.orderItem.createMany({ data: itemsData });
-      data.contractValue = itemsData
+      const lineSum = itemsData
         .reduce((s, it) => s.plus(new Decimal(it.lineTotal)), new Decimal(0))
+        .toDecimalPlaces(2);
+      data.contractValue =
+        isPackageChannel && input.packageTotal != null && input.packageTotal !== ""
+          ? new Decimal(input.packageTotal).toDecimalPlaces(2).toString()
+          : lineSum.toString();
+    } else if (
+      isPackageChannel &&
+      input.packageTotal != null &&
+      input.packageTotal !== ""
+    ) {
+      // Package total edited without touching the dish lines.
+      data.contractValue = new Decimal(input.packageTotal)
         .toDecimalPlaces(2)
         .toString();
     }

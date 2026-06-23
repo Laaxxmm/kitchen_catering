@@ -55,6 +55,10 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
   );
   const [roomNumber, setRoomNumber] = useState(defaults?.roomNumber ?? "");
   const [tableNumber, setTableNumber] = useState(defaults?.tableNumber ?? "");
+  // Lump-sum package price for ODC / PACKET bulk orders.
+  const [packageTotal, setPackageTotal] = useState(
+    defaults?.packageTotal != null ? String(defaults.packageTotal) : "",
+  );
   const [eventDate, setEventDate] = useState(defaults?.eventDate ?? "");
   const [headcount, setHeadcount] = useState(String(defaults?.headcount ?? "10"));
   const [mealType, setMealType] = useState<MealType>((defaults?.mealType as MealType) ?? MealType.LUNCH);
@@ -137,6 +141,11 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
     if (channel === OrderChannel.ALACARTE && !tableNumber.trim()) {
       return toast.error("À la carte orders need a table number");
     }
+    const isPackage =
+      channel === OrderChannel.ODC || channel === OrderChannel.PACKET;
+    if (isPackage && (!packageTotal.trim() || Number(packageTotal) <= 0)) {
+      return toast.error("Enter the package total for this bulk order");
+    }
 
     const payload: OrderCreateInputT = {
       customerId,
@@ -150,6 +159,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
       placeOfSupplyStateCode,
       roomNumber: roomNumber.trim() || null,
       tableNumber: tableNumber.trim() || null,
+      packageTotal: isPackage ? packageTotal.trim() : null,
       notes: notes || null,
       items,
     };
@@ -274,10 +284,22 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
             </div>
           )}
           {(channel === OrderChannel.ODC || channel === OrderChannel.PACKET) && (
-            <div className="col-span-2 self-end text-[11.5px] text-ik-ink-3">
-              On the invoice + quote, lines for this channel appear as
-              sub-heads only — no per-item rate or quantity. The total
-              package price still applies.
+            <div className="grid gap-1">
+              <Label htmlFor="packageTotal">Package total (₹)</Label>
+              <Input
+                id="packageTotal"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="e.g. 25000"
+                value={packageTotal}
+                onChange={(e) => setPackageTotal(e.target.value)}
+              />
+              <p className="text-[11px] text-ik-ink-3">
+                Bulk order — type the agreed lump-sum price. Dishes below
+                are listed for the kitchen but their rates aren&apos;t used;
+                this amount is the contract value.
+              </p>
             </div>
           )}
         </div>
@@ -378,21 +400,37 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
               })}
             </tbody>
             <tfoot className="font-mono text-ik-ink">
-              <tr>
-                <td colSpan={5} className="py-1 pr-2 text-right text-ik-ink-3">Subtotal</td>
-                <td className="py-1 pr-2 text-right">{totals.subtotal.toString()}</td>
-                <td></td>
-              </tr>
-              <tr>
-                <td colSpan={5} className="py-1 pr-2 text-right text-ik-ink-3">GST</td>
-                <td className="py-1 pr-2 text-right">{totals.tax.toString()}</td>
-                <td></td>
-              </tr>
-              <tr className="font-medium">
-                <td colSpan={5} className="py-1 pr-2 text-right">Total</td>
-                <td className="py-1 pr-2 text-right">₹{totals.total.toString()}</td>
-                <td></td>
-              </tr>
+              {channel === OrderChannel.ODC || channel === OrderChannel.PACKET ? (
+                // Bulk package — the lump-sum entered above is the contract
+                // value; per-dish rates aren't summed.
+                <tr className="font-medium">
+                  <td colSpan={5} className="py-1 pr-2 text-right">
+                    Package total
+                  </td>
+                  <td className="py-1 pr-2 text-right">
+                    ₹{packageTotal ? Number(packageTotal).toFixed(2) : "0.00"}
+                  </td>
+                  <td></td>
+                </tr>
+              ) : (
+                <>
+                  <tr>
+                    <td colSpan={5} className="py-1 pr-2 text-right text-ik-ink-3">Subtotal</td>
+                    <td className="py-1 pr-2 text-right">{totals.subtotal.toString()}</td>
+                    <td></td>
+                  </tr>
+                  <tr>
+                    <td colSpan={5} className="py-1 pr-2 text-right text-ik-ink-3">GST</td>
+                    <td className="py-1 pr-2 text-right">{totals.tax.toString()}</td>
+                    <td></td>
+                  </tr>
+                  <tr className="font-medium">
+                    <td colSpan={5} className="py-1 pr-2 text-right">Total</td>
+                    <td className="py-1 pr-2 text-right">₹{totals.total.toString()}</td>
+                    <td></td>
+                  </tr>
+                </>
+              )}
             </tfoot>
           </table>
         </div>

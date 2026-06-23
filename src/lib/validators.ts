@@ -278,6 +278,11 @@ const orderCreateBase = z.object({
   // Required-IF-channel — enforced by the refinement on OrderCreateInput.
   roomNumber: z.string().max(40).nullable().optional(),
   tableNumber: z.string().max(40).nullable().optional(),
+  // Lump-sum package price. Only honoured for ODC / PACKET channels —
+  // those are bulk orders quoted as one package, so the operator types
+  // the agreed total instead of the system summing per-dish rates.
+  // Ignored (recomputed from line items) for all other channels.
+  packageTotal: decimalString.nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
   items: z.array(OrderItemInput).min(1, "At least one item is required"),
 });
