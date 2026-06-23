@@ -94,6 +94,95 @@ export async function handToDelivery(orderId: string) {
   revalidatePath("/deliveries");
 }
 
+/**
+ * Orders the kitchen has cooked and handed off (status READY) that don't
+ * yet have an active delivery — i.e. waiting for a driver to pick them up.
+ * Powers the "Ready for pickup" panel on the driver dashboard.
+ */
+export async function listReadyForDispatch() {
+  await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
+  return db.order.findMany({
+    where: {
+      status: OrderStatus.READY,
+      deliveries: {
+        none: { status: { notIn: [DeliveryStatus.FAILED, DeliveryStatus.CANCELLED] } },
+      },
+    },
+    select: {
+      id: true,
+      code: true,
+      channel: true,
+      eventDate: true,
+      roomNumber: true,
+      deliveryAddress: true,
+      customer: { select: { name: true } },
+    },
+    orderBy: { eventDate: "asc" },
+    take: 50,
+  });
+}
+
+/**
+ * Driver self-pickup. Instead of waiting for a manager to schedule + assign
+ * a driver, the driver taps "Take delivery" on a cooked order from their
+ * dashboard — this creates a delivery assigned to them (status SCHEDULED),
+ * which then drives the normal dispatch → confirm flow. Keeps small-team
+ * delivery friction-free; managers can still schedule + assign explicitly
+ * via /deliveries/new when they want to direct a specific driver.
+ */
+export async function claimDelivery(orderId: string) {
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
+  const created = await db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        customer: { select: { contactName: true, phone: true } },
+      },
+    });
+    if (!order) throw new Error("Order not found");
+    if (order.status !== OrderStatus.READY) {
+      throw new AuthorizationError(
+        `Order ${order.code} isn't ready for pickup yet (it's ${order.status}).`,
+      );
+    }
+    const existing = await tx.delivery.findFirst({
+      where: { orderId, status: { notIn: [DeliveryStatus.FAILED, DeliveryStatus.CANCELLED] } },
+      select: { id: true },
+    });
+    if (existing) throw new Error("This order has already been picked up.");
+
+    const deliveryNo = await nextDeliveryNumber(tx);
+    const delivery = await tx.delivery.create({
+      data: {
+        deliveryNo,
+        orderId,
+        driverUserId: session.user.id,
+        scheduledAt: new Date(),
+        recipientName: order.customer.contactName ?? null,
+        recipientPhone: order.customer.phone ?? null,
+        status: DeliveryStatus.SCHEDULED,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "DELIVERY_SELF_ASSIGNED",
+        entity: "Delivery",
+        entityId: delivery.id,
+        payloadHash: sha256Json({ orderId }),
+      },
+    });
+    return delivery;
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/deliveries");
+  return { id: created.id, deliveryNo: created.deliveryNo };
+}
+
 export async function scheduleDelivery(raw: unknown) {
   const session = await requireRole(SCHEDULE_ROLES);
   const input = DeliveryAssignInput.parse(raw);

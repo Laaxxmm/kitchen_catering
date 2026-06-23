@@ -21,6 +21,8 @@ import { BanquetPanel } from "@/components/ik/dashboard/BanquetPanel";
 import { StoresOverviewPanel } from "@/components/ik/dashboard/StoresOverviewPanel";
 import { ChefWorkScreen } from "@/components/ik/dashboard/ChefWorkScreen";
 import { listChefBoardOrders } from "@/server/actions/production-jobs";
+import { ReadyForPickup } from "@/components/ik/dashboard/ReadyForPickup";
+import { listReadyForDispatch } from "@/server/actions/deliveries";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -167,15 +169,27 @@ export default async function DashboardPage() {
   // assigned to them. None of the order-map, AR, or procurement panels
   // apply to their work.
   if (isDriver) {
+    const pickups = await listReadyForDispatch();
     return (
       <>
         <PageHeader
           eyebrow="Overview"
           title={`Welcome, ${name}`}
-          description="Your assigned deliveries for today. Tap a row to dispatch or confirm hand-over."
+          description="Cooked orders waiting for pickup, plus the deliveries assigned to you. Take one, then dispatch and confirm hand-over."
         />
         <div className="grid gap-5">
           <MyTasksPanel />
+          <ReadyForPickup
+            orders={pickups.map((o) => ({
+              id: o.id,
+              code: o.code,
+              channel: o.channel,
+              eventDate: o.eventDate.toISOString(),
+              roomNumber: o.roomNumber,
+              deliveryAddress: o.deliveryAddress,
+              customerName: o.customer.name,
+            }))}
+          />
           <MyDeliveries deliveries={summary.driver?.deliveries ?? []} />
         </div>
       </>
