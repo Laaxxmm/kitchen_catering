@@ -498,7 +498,17 @@ export async function failDelivery(id: string, raw: unknown) {
 
 // ─── Queries ─────────────────────────────────────────────────────────────
 
-export async function listDeliveries(opts: { status?: DeliveryStatus[]; mine?: boolean } = {}) {
+export async function listDeliveries(
+  opts: {
+    status?: DeliveryStatus[];
+    mine?: boolean;
+    customerId?: string;
+    /** Scheduled-at lower bound (UTC, inclusive). */
+    from?: Date;
+    /** Scheduled-at upper bound (UTC, inclusive). */
+    to?: Date;
+  } = {},
+) {
   const session = await requireRole(READ_ROLES);
   // DELIVERY role: scope to their own assignments only (privacy req per SECURITY.md §6).
   const scopedMine = opts.mine || session.user.role === Role.DELIVERY;
@@ -507,6 +517,15 @@ export async function listDeliveries(opts: { status?: DeliveryStatus[]; mine?: b
     where: {
       ...(opts.status ? { status: { in: opts.status } } : {}),
       ...(scopedMine ? { driverUserId: session.user.id } : {}),
+      ...(opts.customerId ? { order: { customerId: opts.customerId } } : {}),
+      ...(opts.from || opts.to
+        ? {
+            scheduledAt: {
+              ...(opts.from ? { gte: opts.from } : {}),
+              ...(opts.to ? { lte: opts.to } : {}),
+            },
+          }
+        : {}),
     },
     include: {
       order: {
@@ -517,8 +536,29 @@ export async function listDeliveries(opts: { status?: DeliveryStatus[]; mine?: b
       },
       driver: { select: { name: true } },
     },
-    orderBy: { scheduledAt: "asc" },
-    take: 200,
+    orderBy: { scheduledAt: "desc" },
+    take: 300,
+  });
+}
+
+/**
+ * Distinct customers that appear in the delivery list (scoped to the
+ * driver's own when the caller is a DELIVERY). Populates the company
+ * filter dropdown on the deliveries page.
+ */
+export async function listDeliveryCustomers() {
+  const session = await requireRole(READ_ROLES);
+  const scopedMine = session.user.role === Role.DELIVERY;
+  return db.customer.findMany({
+    where: {
+      orders: {
+        some: {
+          deliveries: { some: scopedMine ? { driverUserId: session.user.id } : {} },
+        },
+      },
+    },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
   });
 }
 
