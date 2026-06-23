@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Combobox, type ComboOption } from "@/components/ui/combobox";
 import type { OrderCreateInputT, OrderItemInputT } from "@/lib/validators";
 import { isNextNavigationError } from "@/lib/next-error";
 import { QuickAddCustomer, type QuickCustomerInput } from "@/components/ik/QuickAddCustomer";
@@ -115,21 +116,22 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
     });
   }
 
-  // Dishes for the selected channel's menu (BANQUET vs SERVICE), grouped
-  // by category so the dropdown reads like the printed menu. Dishes
-  // marked "BOTH" appear in either menu.
-  const dishGroups = useMemo(() => {
+  // Dishes for the selected channel's menu (BANQUET vs SERVICE),
+  // flattened into type-ahead options. Label includes the category so a
+  // search like "biry" or "veg main" both match. Dishes marked "BOTH"
+  // appear in either menu.
+  const dishOptions: ComboOption[] = useMemo(() => {
     const wantMenu = menuForChannel(channel);
-    const visible = dishes.filter(
-      (d) => d.menu === wantMenu || d.menu === "BOTH",
-    );
-    const groups = new Map<string, DishOption[]>();
-    for (const d of visible) {
-      const cat = d.category || "Other";
-      if (!groups.has(cat)) groups.set(cat, []);
-      groups.get(cat)!.push(d);
-    }
-    return Array.from(groups.entries());
+    return dishes
+      .filter((d) => d.menu === wantMenu || d.menu === "BOTH")
+      .sort((a, b) =>
+        (a.category || "").localeCompare(b.category || "") ||
+        a.name.localeCompare(b.name),
+      )
+      .map((d) => ({
+        value: d.id,
+        label: d.category ? `${d.name}  ·  ${d.category}` : d.name,
+      }));
   }, [dishes, channel]);
 
   const totals = useMemo(() => {
@@ -386,30 +388,26 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
                 const total = s.plus(t).toDecimalPlaces(2);
                 return (
                   <tr key={idx} className="border-b border-ik-rule align-top">
-                    <td className="py-1 pr-2">
-                      <select
+                    <td className="py-1 pr-2 min-w-[220px]">
+                      <Combobox
                         value={l.dishId}
-                        onChange={(e) => onDishChange(idx, e.target.value)}
-                        className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1"
-                      >
-                        <option value="">— choose —</option>
-                        {dishGroups.map(([cat, group]) => (
-                          <optgroup key={cat} label={cat}>
-                            {group.map((d) => (
-                              <option key={d.id} value={d.id}>
-                                {d.name}
-                              </option>
-                            ))}
-                          </optgroup>
-                        ))}
-                      </select>
+                        onChange={(v) => onDishChange(idx, v)}
+                        options={dishOptions}
+                        placeholder="Type to search a dish…"
+                        emptyText="No dish matches"
+                      />
                     </td>
                     <td className="py-1 pr-2">
                       <input
                         className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono"
-                        type="number" step="0.001" min="0"
+                        type="number" step="1" min="1"
                         value={l.portions}
-                        onChange={(e) => setLine(idx, { portions: e.target.value })}
+                        onChange={(e) => {
+                          // Portions are whole units only — strip any
+                          // decimals the user pastes / types.
+                          const whole = e.target.value.replace(/[^\d]/g, "");
+                          setLine(idx, { portions: whole });
+                        }}
                       />
                     </td>
                     <td className="py-1 pr-2">

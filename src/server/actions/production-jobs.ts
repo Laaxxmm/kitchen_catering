@@ -197,6 +197,150 @@ export async function markProductionItemReady(itemId: string) {
   revalidatePath("/orders");
 }
 
+// ─── Order-level convenience actions (chef work-screen) ────────────────────
+// One-tap wrappers so the chef can drive the whole order from their
+// dashboard without touching the per-item kitchen board.
+
+/**
+ * "Start cooking" — order READY_FOR_PRODUCTION → IN_PREP. Ensures a
+ * production job exists, marks every item IN_PROGRESS, and advances the
+ * order. Idempotent-ish: safe to re-run while already IN_PREP.
+ */
+export async function startCookingOrder(orderId: string) {
+  const session = await requireRole([...ORDER_KITCHEN_ROLES, Role.MANAGER]);
+  await db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { status: true },
+    });
+    if (!order) throw new Error("Order not found");
+    if (
+      order.status !== OrderStatus.READY_FOR_PRODUCTION &&
+      order.status !== OrderStatus.IN_PREP
+    ) {
+      throw new AuthorizationError(
+        `Cannot start cooking from status ${order.status}`,
+      );
+    }
+    const jobId = await createProductionJobForOrder(tx, orderId);
+    if (jobId) {
+      await tx.productionJobItem.updateMany({
+        where: { jobId, status: ProductionJobItemStatus.QUEUED },
+        data: { status: ProductionJobItemStatus.IN_PROGRESS, startedAt: new Date() },
+      });
+      await tx.productionJob.update({
+        where: { id: jobId },
+        data: { status: ProductionJobStatus.PREP, actualStart: new Date() },
+      });
+    }
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: OrderStatus.IN_PREP },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "ORDER_COOKING_STARTED",
+        entity: "Order",
+        entityId: orderId,
+      },
+    });
+  });
+  revalidatePath("/dashboard");
+  revalidatePath("/kitchen");
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+}
+
+/**
+ * "Mark cooked / ready" — order IN_PREP (or READY_FOR_PRODUCTION) → READY.
+ * Marks every production item READY, the job READY, and advances the order
+ * so the delivery team can dispatch.
+ */
+export async function markOrderCooked(orderId: string) {
+  const session = await requireRole([...ORDER_KITCHEN_ROLES, Role.MANAGER]);
+  await db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { status: true },
+    });
+    if (!order) throw new Error("Order not found");
+    if (
+      order.status !== OrderStatus.IN_PREP &&
+      order.status !== OrderStatus.READY_FOR_PRODUCTION
+    ) {
+      throw new AuthorizationError(
+        `Cannot mark ready from status ${order.status}`,
+      );
+    }
+    const job = await tx.productionJob.findFirst({ where: { orderId } });
+    if (job) {
+      await tx.productionJobItem.updateMany({
+        where: { jobId: job.id, status: { not: ProductionJobItemStatus.CANCELLED } },
+        data: { status: ProductionJobItemStatus.READY, readyAt: new Date() },
+      });
+      await tx.productionJob.update({
+        where: { id: job.id },
+        data: { status: ProductionJobStatus.READY, actualReady: new Date() },
+      });
+    }
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: OrderStatus.READY },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "ORDER_MARKED_READY",
+        entity: "Order",
+        entityId: orderId,
+      },
+    });
+  });
+  revalidatePath("/dashboard");
+  revalidatePath("/kitchen");
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+}
+
+/**
+ * Orders the chef needs to act on, in pipeline order. Powers the chef
+ * work-screen on the dashboard. Returns a flat list with the single
+ * "next action" each order is waiting for.
+ */
+export async function listChefBoardOrders() {
+  await requireRole([...ORDER_KITCHEN_ROLES, Role.MANAGER]);
+  const orders = await db.order.findMany({
+    where: {
+      status: {
+        in: [
+          OrderStatus.PENDING_CHEF_APPROVAL,
+          OrderStatus.CHEF_REQUISITION_PENDING,
+          OrderStatus.ISSUING,
+          OrderStatus.READY_FOR_PRODUCTION,
+          OrderStatus.IN_PREP,
+          OrderStatus.READY,
+        ],
+      },
+    },
+    select: {
+      id: true,
+      code: true,
+      status: true,
+      channel: true,
+      headcount: true,
+      eventDate: true,
+      roomNumber: true,
+      tableNumber: true,
+      customer: { select: { name: true } },
+      items: { select: { id: true, portions: true, dish: { select: { name: true } } }, orderBy: { sortOrder: "asc" } },
+    },
+    orderBy: [{ eventDate: "asc" }],
+    take: 100,
+  });
+  return orders;
+}
+
 // ─── Queries ─────────────────────────────────────────────────────────────
 
 export async function listProductionJobs(opts: { window?: "today" | "tomorrow" | "thisweek" } = {}) {

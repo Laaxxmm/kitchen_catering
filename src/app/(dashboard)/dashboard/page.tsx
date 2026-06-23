@@ -19,6 +19,8 @@ import { HousekeepingPanel } from "@/components/ik/dashboard/HousekeepingPanel";
 import { MaintenancePanel } from "@/components/ik/dashboard/MaintenancePanel";
 import { BanquetPanel } from "@/components/ik/dashboard/BanquetPanel";
 import { StoresOverviewPanel } from "@/components/ik/dashboard/StoresOverviewPanel";
+import { ChefWorkScreen } from "@/components/ik/dashboard/ChefWorkScreen";
+import { listChefBoardOrders } from "@/server/actions/production-jobs";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -45,6 +47,40 @@ export default async function DashboardPage() {
   const isHousekeeping = role === "HOUSEKEEPING_MANAGER";
   const isMaintenance = role === "MAINTENANCE_MANAGER";
   const isFnb = role === "FNB_SERVICE";
+  const isChef = role === "KITCHEN_HEAD";
+
+  // Kitchen head gets the action-first work-screen: every active order is a
+  // card with its single next action inline (accept / raise request /
+  // start cooking / mark done / dispatch). No drilling into detail pages.
+  if (isChef) {
+    const board = await listChefBoardOrders();
+    return (
+      <>
+        <PageHeader
+          eyebrow="Kitchen"
+          title={`Welcome, ${name}`}
+          description="Every order that needs you, with the next action on the card. Accept it, get ingredients, cook, mark done — then hand to delivery."
+        />
+        <div className="grid gap-5">
+          <MyTasksPanel />
+          <ChefWorkScreen
+            orders={board.map((o) => ({
+              id: o.id,
+              code: o.code,
+              status: o.status,
+              channel: o.channel,
+              headcount: o.headcount,
+              eventDate: o.eventDate.toISOString(),
+              roomNumber: o.roomNumber,
+              tableNumber: o.tableNumber,
+              customerName: o.customer.name,
+              items: o.items.map((it) => ({ label: it.dish.name, portions: it.portions.toString() })),
+            }))}
+          />
+        </div>
+      </>
+    );
+  }
 
   // Housekeeping manager gets a focused dashboard scoped to their module.
   // Skips the heavy operational getDashboardSummary call entirely.
