@@ -19,6 +19,7 @@ import {
 } from "@/lib/validators";
 import { nextDeliveryNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
+import { notifyRoles } from "@/server/actions/notifications";
 
 /**
  * 24-byte random token, base64url-encoded — used for the public
@@ -45,6 +46,54 @@ const READ_ROLES = [
  * (cheap, harmless) so confirm-side code that branches on their absence
  * doesn't break for in-flight deliveries.
  */
+/**
+ * Chef hand-off. When the food is cooked (order READY) the kitchen taps
+ * "Hand to delivery" from their dashboard. This does NOT schedule a driver
+ * — picking a driver / vehicle / time is the dispatch desk's job (admin /
+ * manager) and the chef has no business with the driver roster. It simply
+ * pings the delivery + manager team that the order is ready for pickup,
+ * with a link straight to the scheduling screen. Keeps the chef's UI
+ * simple and avoids the permission error from sending them to /deliveries/new.
+ */
+export async function handToDelivery(orderId: string) {
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD]);
+  const order = await db.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      code: true,
+      status: true,
+      channel: true,
+      roomNumber: true,
+      customer: { select: { name: true } },
+    },
+  });
+  if (!order) throw new Error("Order not found");
+  if (order.status !== OrderStatus.READY) {
+    throw new AuthorizationError(
+      `Order ${order.code} isn't ready to dispatch yet (it's ${order.status}).`,
+    );
+  }
+  await db.auditLog.create({
+    data: {
+      userId: session.user.id,
+      action: "ORDER_HANDED_TO_DELIVERY",
+      entity: "Order",
+      entityId: orderId,
+    },
+  });
+  const where = order.roomNumber ? ` · Room ${order.roomNumber}` : "";
+  await notifyRoles([Role.DELIVERY, Role.ADMIN, Role.MANAGER], {
+    kind: "GENERIC",
+    title: `Order ${order.code} ready to dispatch`,
+    body: `${order.customer.name} · ${order.channel}${where}. Cooked and ready — schedule the delivery.`,
+    link: `/deliveries/new?orderId=${orderId}`,
+    dedupeKey: `order-ready-dispatch:${orderId}`,
+  });
+  revalidatePath("/dashboard");
+  revalidatePath("/deliveries");
+}
+
 export async function scheduleDelivery(raw: unknown) {
   const session = await requireRole(SCHEDULE_ROLES);
   const input = DeliveryAssignInput.parse(raw);

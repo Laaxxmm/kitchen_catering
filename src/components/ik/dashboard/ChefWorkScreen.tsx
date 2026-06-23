@@ -13,6 +13,7 @@ import { isNextNavigationError } from "@/lib/next-error";
 import { chefApproveOrder } from "@/server/actions/orders";
 import { markIngredientsAvailable } from "@/server/actions/chef-requisitions";
 import { startCookingOrder, markOrderCooked } from "@/server/actions/production-jobs";
+import { handToDelivery } from "@/server/actions/deliveries";
 
 interface BoardItem {
   label: string;
@@ -361,9 +362,13 @@ function ChefOrderCard({ order, highlight = false }: { order: ChefBoardOrder; hi
         )}
 
         {order.status === OrderStatus.READY && (
-          <Link href={`/deliveries/new?orderId=${order.id}`}>
-            <Button size="sm">Dispatch</Button>
-          </Link>
+          <Button
+            size="sm"
+            disabled={pending}
+            onClick={() => run(() => handToDelivery(order.id), "Delivery team notified — ready to dispatch")}
+          >
+            Hand to delivery
+          </Button>
         )}
 
         {order.status === OrderStatus.ISSUING && (

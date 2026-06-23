@@ -1,5 +1,6 @@
-import { OrderStatus } from "@prisma/client";
+import { OrderStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
+import { gateRolePage } from "@/server/rbac";
 import { listOrders } from "@/server/actions/orders";
 import { listDrivers, scheduleDelivery } from "@/server/actions/deliveries";
 import { ScheduleDeliveryForm } from "../_components/ScheduleDeliveryForm";
@@ -11,6 +12,9 @@ export default async function NewDeliveryPage({
 }: {
   searchParams: Promise<{ orderId?: string }>;
 }) {
+  // Scheduling a delivery (driver/vehicle/time) is the dispatch desk's job.
+  // Gate here so anyone else lands on /forbidden instead of a 500.
+  await gateRolePage([Role.ADMIN, Role.MANAGER]);
   const { orderId } = await searchParams;
   const [orders, drivers] = await Promise.all([
     listOrders({ status: [OrderStatus.READY] }),
