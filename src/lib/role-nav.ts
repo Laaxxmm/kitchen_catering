@@ -30,10 +30,12 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   STORE_KEEPER: new Set([
     "dashboard", "tasks", "requisitions", "inventory", "procurement",
   ]),
-  // Kitchen head: cooking-side work. They don't need to see customers
-  // or inventory minutiae; chef requisitions surface stock context.
+  // Kitchen head: cooking-side work only. No Sales section — they drive
+  // everything from the tabbed kitchen dashboard + Kitchen + Requisitions.
+  // (Order detail pages are still reachable via the dashboard "Open" links;
+  // route access is enforced in middleware, not this nav allowlist.)
   KITCHEN_HEAD: new Set([
-    "dashboard", "tasks", "orders", "kitchen", "requisitions", "dishes",
+    "dashboard", "tasks", "kitchen", "requisitions",
   ]),
   DELIVERY: new Set([
     "dashboard", "tasks", "deliveries",
