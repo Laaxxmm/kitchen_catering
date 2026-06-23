@@ -24,11 +24,17 @@ import { listReadyForDispatch, listMyActiveDeliveries } from "@/server/actions/d
 import { SalesBoard } from "@/components/ik/dashboard/SalesBoard";
 import { StoreBoard } from "@/components/ik/dashboard/StoreBoard";
 import { ManagerApprovalsBoard } from "@/components/ik/dashboard/ManagerApprovalsBoard";
+import { AccountsBoard } from "@/components/ik/dashboard/AccountsBoard";
 import { listOrders } from "@/server/actions/orders";
 import { listChefRequisitions } from "@/server/actions/chef-requisitions";
 import { listPurchaseRequisitions } from "@/server/actions/purchase-requisitions";
-import { listVendorPOs } from "@/server/actions/procurement";
-import { ChefRequisitionStatus, PurchaseRequisitionStatus, VendorPOStatus, OrderStatus } from "@prisma/client";
+import { listVendorPOs, listVendorBills } from "@/server/actions/procurement";
+import { listCustomerInvoices } from "@/server/actions/customer-invoices";
+import { toDecimal } from "@/lib/money";
+import {
+  ChefRequisitionStatus, PurchaseRequisitionStatus, VendorPOStatus, OrderStatus,
+  CustomerInvoiceStatus, VendorBillStatus,
+} from "@prisma/client";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -58,6 +64,7 @@ export default async function DashboardPage() {
   const isChef = role === "KITCHEN_HEAD";
   const isSales = role === "SALES";
   const isStore = role === "STORE_KEEPER";
+  const isAccounts = role === "ACCOUNTS";
 
   // Kitchen head gets the action-first work-screen: every active order is a
   // card with its single next action inline (accept / raise request /
@@ -168,6 +175,55 @@ export default async function DashboardPage() {
               requestedBy: p.requestedBy?.name ?? "—",
               lines: p._count.lines,
             }))}
+          />
+        </div>
+      </>
+    );
+  }
+
+  // Accounts: money to collect (customer invoices) + money to pay (vendor
+  // bills) in two tabs, with "Mark paid" inline.
+  if (isAccounts) {
+    const [invoices, bills] = await Promise.all([
+      listCustomerInvoices({ status: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] }),
+      listVendorBills({
+        status: [
+          VendorBillStatus.MATCHED,
+          VendorBillStatus.APPROVED,
+          VendorBillStatus.DISCREPANCY,
+          VendorBillStatus.OVERDUE,
+        ],
+      }),
+    ]);
+    const receivables = invoices
+      .map((inv) => ({
+        id: inv.id,
+        invoiceNo: inv.invoiceNo,
+        customerName: inv.customer.name,
+        orderCode: inv.order?.code ?? null,
+        outstanding: toDecimal(inv.grandTotal).minus(toDecimal(inv.amountPaid)),
+      }))
+      .filter((r) => r.outstanding.gt(0));
+    const payables = bills
+      .map((b) => ({
+        id: b.id,
+        billNo: b.billNo,
+        vendorName: b.vendor.name,
+        outstanding: toDecimal(b.grandTotal).minus(toDecimal(b.amountPaid)),
+      }))
+      .filter((p) => p.outstanding.gt(0));
+    return (
+      <>
+        <PageHeader
+          eyebrow="Finance"
+          title={`Welcome, ${name}`}
+          description="Money to collect and money to pay, in two tabs. Mark anything paid right here."
+        />
+        <div className="grid gap-5">
+          <MyTasksPanel />
+          <AccountsBoard
+            receivables={receivables.map((r) => ({ ...r, outstanding: r.outstanding.toFixed(2) }))}
+            payables={payables.map((p) => ({ ...p, outstanding: p.outstanding.toFixed(2) }))}
           />
         </div>
       </>
