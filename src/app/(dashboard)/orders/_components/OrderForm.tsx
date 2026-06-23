@@ -15,7 +15,27 @@ import { isNextNavigationError } from "@/lib/next-error";
 import { QuickAddCustomer, type QuickCustomerInput } from "@/components/ik/QuickAddCustomer";
 
 interface CustomerOption { id: string; name: string; stateCode: string }
-interface DishOption { id: string; name: string; code: string | null; unitPrice: string; gstRatePct: string }
+interface DishOption {
+  id: string;
+  name: string;
+  code: string | null;
+  unitPrice: string;
+  gstRatePct: string;
+  menu: "BANQUET" | "SERVICE" | "BOTH";
+  category: string | null;
+}
+
+/** Which dish menu a channel draws from. */
+function menuForChannel(channel: OrderChannel): "BANQUET" | "SERVICE" {
+  switch (channel) {
+    case OrderChannel.ROOM_SERVICE:
+    case OrderChannel.ALACARTE:
+    case OrderChannel.MANAGEMENT:
+      return "SERVICE";
+    default: // BANQUET, ODC, PACKET
+      return "BANQUET";
+  }
+}
 
 interface Props {
   customers: CustomerOption[];
@@ -94,6 +114,23 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
       ...(dish ? { unitPrice: String(dish.unitPrice), gstRatePct: String(dish.gstRatePct) } : {}),
     });
   }
+
+  // Dishes for the selected channel's menu (BANQUET vs SERVICE), grouped
+  // by category so the dropdown reads like the printed menu. Dishes
+  // marked "BOTH" appear in either menu.
+  const dishGroups = useMemo(() => {
+    const wantMenu = menuForChannel(channel);
+    const visible = dishes.filter(
+      (d) => d.menu === wantMenu || d.menu === "BOTH",
+    );
+    const groups = new Map<string, DishOption[]>();
+    for (const d of visible) {
+      const cat = d.category || "Other";
+      if (!groups.has(cat)) groups.set(cat, []);
+      groups.get(cat)!.push(d);
+    }
+    return Array.from(groups.entries());
+  }, [dishes, channel]);
 
   const totals = useMemo(() => {
     let subtotal = new Decimal(0);
@@ -356,7 +393,15 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
                         className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1"
                       >
                         <option value="">— choose —</option>
-                        {dishes.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                        {dishGroups.map(([cat, group]) => (
+                          <optgroup key={cat} label={cat}>
+                            {group.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
                       </select>
                     </td>
                     <td className="py-1 pr-2">

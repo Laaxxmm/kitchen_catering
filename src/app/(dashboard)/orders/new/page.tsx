@@ -10,9 +10,10 @@ import type { OrderCreateInputT } from "@/lib/validators";
 export const dynamic = "force-dynamic";
 
 export default async function NewOrderPage() {
-  // Only SALES (+ MANAGER + ADMIN) can create orders. Other roles trying
-  // to reach this URL directly get redirected to /forbidden.
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.SALES]);
+  // SALES (+ MANAGER + ADMIN) take catering orders; FNB_SERVICE takes
+  // room-service / à la carte / management orders. Other roles hitting
+  // this URL directly get redirected to /forbidden.
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.SALES, Role.FNB_SERVICE]);
   const [customers, dishes] = await Promise.all([
     listCustomers({ active: true }),
     listDishes({ active: true }),
@@ -65,6 +66,8 @@ export default async function NewOrderPage() {
           code: d.code,
           unitPrice: d.unitPrice.toString(),
           gstRatePct: d.gstRatePct.toString(),
+          menu: d.menu,
+          category: d.category,
         }))}
         onSubmit={submit}
         submitLabel="Create draft"

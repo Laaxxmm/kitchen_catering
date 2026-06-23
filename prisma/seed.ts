@@ -1,5 +1,6 @@
 import { PrismaClient, Role, EmploymentType } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { dishSeed } from "./seed-data/dishes";
 
 const db = new PrismaClient();
 
@@ -78,18 +79,40 @@ async function main() {
   }
 
   // ─── Dishes ─────────────────────────────────────────────────────
-  const dishes = [
+  // A few original demo dishes (kept for existing orders that reference
+  // them) + the full client menu imported from prisma/seed-data/dishes.ts
+  // (room-service Excel → SERVICE menu, banquet DOCX → BANQUET menu).
+  const demoDishes = [
     { code: "DSH-001", name: "Paneer Butter Masala", unitPrice: 180, gstRatePct: 5 },
     { code: "DSH-002", name: "Chicken Biryani",      unitPrice: 250, gstRatePct: 5 },
     { code: "DSH-003", name: "Veg Pulao",            unitPrice: 150, gstRatePct: 5 },
     { code: "DSH-004", name: "Dal Tadka",            unitPrice:  90, gstRatePct: 5 },
     { code: "DSH-005", name: "Roti (per piece)",     unitPrice:  15, gstRatePct: 5 },
   ];
-  for (const d of dishes) {
+  for (const d of demoDishes) {
+    await db.dish.upsert({ where: { code: d.code }, create: d, update: {} });
+  }
+  // Client menu — idempotent on the generated code (SVC-/BNQ-/BOTH-####).
+  for (const d of dishSeed) {
     await db.dish.upsert({
       where: { code: d.code },
-      create: d,
-      update: {},
+      create: {
+        code: d.code,
+        name: d.name,
+        category: d.category,
+        menu: d.menu,
+        unitPrice: d.unitPrice,
+        description: d.description,
+        gstRatePct: 5,
+      },
+      // Refresh menu/category/price on re-seed so a corrected source
+      // file propagates; leave everything else (e.g. manual edits) alone.
+      update: {
+        category: d.category,
+        menu: d.menu,
+        unitPrice: d.unitPrice,
+        description: d.description,
+      },
     });
   }
 

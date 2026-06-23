@@ -512,11 +512,22 @@ model Customer {
 // DISH + RECIPE (BOM)
 // =====================================================================
 
+// Which order channels a dish belongs to. The two client menus map to:
+//   BANQUET — banquet / ODC / packet  (the bulk "DOC" menu, package-priced)
+//   SERVICE — room service / à la carte / management  (the priced Excel menu)
+//   BOTH    — available everywhere (default for legacy dishes)
+enum DishMenu {
+  BANQUET
+  SERVICE
+  BOTH
+}
+
 model Dish {
   id          String   @id @default(cuid())
   code        String?  @unique // optional human-friendly code, e.g. "PBM-01"
   name        String
-  category    String? // free-text for now; categorise in Settings later
+  category    String? // free-text section, e.g. "Soups", "Veg Main Course"
+  menu        DishMenu @default(BOTH) // which channels offer this dish
   description String?
   unitPrice   Decimal  @db.Decimal(12, 2) // default selling price per portion
   unit        String   @default("portion") // 'portion' | 'plate' | 'kg' etc.
@@ -533,6 +544,7 @@ model Dish {
 
   @@index([active])
   @@index([category])
+  @@index([menu])
 }
 
 // A Recipe is the BOM for either:
