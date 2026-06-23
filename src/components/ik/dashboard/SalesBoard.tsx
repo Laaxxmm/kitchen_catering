@@ -30,6 +30,20 @@ const CHANNEL_LABEL: Record<OrderChannel, string> = {
   MANAGEMENT: "Management",
 };
 
+// Once an order is delivered / invoiced / paid / done / cancelled, the
+// event date is in the past and there's nothing left to chase — so we hide
+// the countdown timer (an "Overdue 35d" badge on a Paid order is just
+// noise). The timer only matters for orders still in flight.
+const DONE_STATUSES: ReadonlySet<OrderStatus> = new Set([
+  OrderStatus.DELIVERED,
+  OrderStatus.INVOICED,
+  OrderStatus.PAID,
+  OrderStatus.COMPLETED,
+  OrderStatus.CANCELLED,
+  OrderStatus.REJECTED_BY_ADMIN,
+  OrderStatus.REJECTED_BY_MANAGER,
+]);
+
 const STATUS_LABEL: Partial<Record<OrderStatus, string>> = {
   DRAFT: "Draft — not submitted",
   PENDING_ADMIN_APPROVAL: "Waiting on admin approval",
@@ -140,7 +154,7 @@ function SalesCard({ order, highlight }: { order: SalesOrder; highlight: boolean
         </div>
         <div className="flex flex-col items-end gap-1">
           <span className="text-[11.5px] text-ik-ink-3">{formatIST(new Date(order.eventDate), "EEE d MMM HH:mm")}</span>
-          <Countdown target={order.eventDate} />
+          {!DONE_STATUSES.has(order.status) && <Countdown target={order.eventDate} />}
         </div>
       </div>
       <div className="mt-1 text-[13px] text-ik-ink"><strong>{order.customerName}</strong></div>
