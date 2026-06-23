@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -64,50 +64,108 @@ const TONE_CLASS: Record<"new" | "active" | "ready" | "wait", string> = {
   wait: "border-ik-rule bg-ik-card",
 };
 
+// The four stages of the chef's day, each its own tab. An order lands in
+// exactly one tab based on its status; the tab it's in tells the chef what
+// kind of action it needs.
+const TABS: { key: string; label: string; hint: string; statuses: OrderStatus[] }[] = [
+  { key: "new", label: "New orders", hint: "Accept or reject", statuses: [OrderStatus.PENDING_CHEF_APPROVAL] },
+  {
+    key: "ingredients",
+    label: "Ingredients",
+    hint: "Confirm or request stock",
+    statuses: [OrderStatus.CHEF_REQUISITION_PENDING, OrderStatus.ISSUING],
+  },
+  {
+    key: "cooking",
+    label: "Cooking",
+    hint: "Start & finish",
+    statuses: [OrderStatus.READY_FOR_PRODUCTION, OrderStatus.IN_PREP],
+  },
+  { key: "dispatch", label: "Dispatch", hint: "Hand to delivery", statuses: [OrderStatus.READY] },
+];
+
 /**
- * The chef's whole job on one screen. Each active order is a card with the
- * single next action inline — no drilling into detail pages:
- *
- *   New order        → Accept / Reject
- *   Accepted         → Ingredients ready (skip request) / Raise request
- *   Ingredients in   → Start cooking
- *   Cooking          → Mark done
- *   Cooked           → Dispatch
- *
- * Cards are sorted urgent-first (new orders on top), then by event time.
+ * The chef's whole job, split into four big tabs — New orders → Ingredients
+ * → Cooking → Dispatch. Pick a tab and you see only the orders waiting on
+ * that kind of work, soonest event first, with the next one to act on
+ * highlighted. Every card carries its one action inline (Accept, Start
+ * cooking, Mark done, …) so nothing needs a detail page. Kept deliberately
+ * simple — it's for non-technical kitchen staff.
  */
 export function ChefWorkScreen({ orders }: Props) {
-  const sorted = [...orders].sort((a, b) => {
-    const ra = STAGE[a.status]?.rank ?? 99;
-    const rb = STAGE[b.status]?.rank ?? 99;
-    if (ra !== rb) return ra - rb;
-    return new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime();
-  });
+  // Bucket each order into its tab, soonest event first (most urgent on top).
+  const byTab = useMemo(() => {
+    const map: Record<string, ChefBoardOrder[]> = {};
+    for (const t of TABS) map[t.key] = [];
+    for (const o of orders) {
+      const tab = TABS.find((t) => t.statuses.includes(o.status));
+      if (tab) map[tab.key].push(o);
+    }
+    for (const key of Object.keys(map)) {
+      map[key].sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime());
+    }
+    return map;
+  }, [orders]);
 
-  if (sorted.length === 0) {
-    return (
-      <section className="rounded-md border border-ik-rule bg-ik-card p-5">
-        <div className="text-[14px] font-medium text-ik-ink">Nothing in the kitchen queue right now.</div>
-        <p className="mt-1 text-[12.5px] text-ik-ink-2">
-          When a new order is approved and sent to the kitchen, it shows up here automatically.
-        </p>
-      </section>
-    );
-  }
+  // Open on the first tab that actually has work waiting.
+  const firstWithWork = TABS.find((t) => byTab[t.key].length > 0)?.key ?? TABS[0].key;
+  const [active, setActive] = useState<string>(firstWithWork);
+  const activeTab = TABS.find((t) => t.key === active) ?? TABS[0];
+  const activeOrders = byTab[active] ?? [];
 
   return (
     <section>
-      <h2 className="mb-2 text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Kitchen queue</h2>
-      <ul className="grid gap-2.5">
-        {sorted.map((o) => (
-          <ChefOrderCard key={o.id} order={o} />
-        ))}
-      </ul>
+      {/* Tab bar — big, labelled, with a live count per stage. */}
+      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {TABS.map((t) => {
+          const count = byTab[t.key].length;
+          const on = active === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setActive(t.key)}
+              className={
+                "rounded-md border p-3 text-left transition " +
+                (on
+                  ? "border-brand-500 bg-brand-50 ring-1 ring-brand-500"
+                  : "border-ik-rule bg-ik-card hover:border-brand-200")
+              }
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[13px] font-semibold text-ik-ink">{t.label}</span>
+                <span
+                  className={
+                    "grid min-h-[20px] min-w-[20px] place-items-center rounded-full px-1.5 font-mono text-[11px] font-bold leading-none " +
+                    (count > 0 ? "bg-brand-500 text-white" : "bg-ik-paper-alt text-ik-ink-3")
+                  }
+                >
+                  {count}
+                </span>
+              </div>
+              <div className="mt-0.5 text-[11px] text-ik-ink-3">{t.hint}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Orders in the selected stage. */}
+      {activeOrders.length === 0 ? (
+        <div className="rounded-md border border-ik-rule bg-ik-card p-5 text-[13px] text-ik-ink-2">
+          Nothing in <strong>{activeTab.label}</strong> right now.
+        </div>
+      ) : (
+        <ul className="grid gap-2.5">
+          {activeOrders.map((o, i) => (
+            <ChefOrderCard key={o.id} order={o} highlight={i === 0} />
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
 
-function ChefOrderCard({ order }: { order: ChefBoardOrder }) {
+function ChefOrderCard({ order, highlight = false }: { order: ChefBoardOrder; highlight?: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [showReject, setShowReject] = useState(false);
@@ -133,9 +191,20 @@ function ChefOrderCard({ order }: { order: ChefBoardOrder }) {
   }
 
   return (
-    <li className={"rounded-md border p-3 " + TONE_CLASS[stage.tone]}>
+    <li
+      className={
+        "rounded-md border p-3 " +
+        TONE_CLASS[stage.tone] +
+        (highlight ? " ring-2 ring-brand-500" : "")
+      }
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="flex flex-wrap items-baseline gap-2">
+          {highlight && (
+            <span className="rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+              Next up
+            </span>
+          )}
           <span className="font-mono text-[12.5px] text-brand-700">{order.code}</span>
           <span className="rounded-full bg-ik-card px-2 py-0.5 text-[10.5px] text-ik-ink-2 ring-1 ring-ik-rule">
             {CHANNEL_LABEL[order.channel]}
