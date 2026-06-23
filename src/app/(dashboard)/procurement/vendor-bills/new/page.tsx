@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Role, VendorPOStatus } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
+import { gateRolePage } from "@/server/rbac";
 import { listVendors } from "@/server/actions/vendors";
 import { createVendorBill, getVendorPO, listVendorPOs } from "@/server/actions/procurement";
-import { VendorPOStatus } from "@prisma/client";
 import { toDecimal } from "@/lib/money";
 import { VendorBillForm } from "./_components/VendorBillForm";
 
@@ -14,6 +15,8 @@ export default async function NewVendorBillPage({
 }: {
   searchParams: Promise<{ poId?: string }>;
 }) {
+  // Finance desk only — store keepers / chefs never record supplier bills.
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
   const { poId } = await searchParams;
 
   const [vendors, pos, po] = await Promise.all([

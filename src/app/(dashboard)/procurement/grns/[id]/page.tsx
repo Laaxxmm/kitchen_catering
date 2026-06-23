@@ -1,18 +1,25 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { auth } from "@/server/auth";
 import { getGRN } from "@/server/actions/procurement";
 import { formatIST } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
+// Recording the supplier bill is a finance-desk job. Store keepers (and
+// everyone else) just see the stock-updated confirmation.
+const BILL_ROLES: Role[] = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
+
 export default async function GRNDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const grn = await getGRN(id);
+  const [grn, session] = await Promise.all([getGRN(id), auth()]);
   if (!grn) notFound();
+  const canRecordBill = BILL_ROLES.includes(session?.user?.role as Role);
   return (
     <>
       <PageHeader
@@ -32,14 +39,23 @@ export default async function GRNDetailPage({ params }: { params: Promise<{ id: 
       </div>
 
       <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">
-        <strong>Next:</strong> Stock and average cost have been updated automatically. When the vendor
-        sends their bill, record it on the Supplier bills page — the system will match it against this GRN
-        and the PO before allowing payment.
-        <div className="mt-2">
-          <Link href={`/procurement/vendor-bills/new?poId=${grn.poId}`}>
-            <Button size="sm" variant="outline">Record supplier bill</Button>
-          </Link>
-        </div>
+        {canRecordBill ? (
+          <>
+            <strong>Next:</strong> Stock and average cost have been updated automatically. When the vendor
+            sends their bill, record it on the Supplier bills page — the system will match it against this GRN
+            and the PO before allowing payment.
+            <div className="mt-2">
+              <Link href={`/procurement/vendor-bills/new?poId=${grn.poId}`}>
+                <Button size="sm" variant="outline">Record supplier bill</Button>
+              </Link>
+            </div>
+          </>
+        ) : (
+          <>
+            <strong>Done:</strong> Stock and average cost have been updated automatically. Nothing more is
+            needed from the store — the finance desk handles the supplier bill and payment.
+          </>
+        )}
       </div>
       <Table>
         <TableHeader>

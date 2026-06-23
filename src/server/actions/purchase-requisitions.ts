@@ -9,12 +9,34 @@ import { PRLineInput, PurchaseRequisitionInput } from "@/lib/validators";
 import { nextPRNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
+import { getSettingOr } from "@/lib/settings";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
 const APPROVE_ROLES = [Role.ADMIN, Role.MANAGER];
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.ACCOUNTS];
 
-const OVER_BUDGET_THRESHOLD = new Decimal(100000); // ₹1 lakh — needs approval
+/**
+ * A store-keeper's ingredient request is routed by value, mirroring the
+ * vendor-PO approval tiers (client rule: "below ₹5,000 → Manager approves,
+ * ₹5,000 and above → Admin approves"). Nothing auto-approves any more —
+ * every request gets a sign-off, just from the right authority. The
+ * threshold is the same `po.approvalTiers.adminMin` Setting the PO engine
+ * uses, so the two stay in lock-step.
+ */
+async function adminThreshold(): Promise<Decimal> {
+  const value = await getSettingOr<{ adminMin: number }>("po.approvalTiers", { adminMin: 5000 });
+  const adminMin =
+    typeof value?.adminMin === "number" && value.adminMin >= 0 ? value.adminMin : 5000;
+  return new Decimal(adminMin);
+}
+
+/** Sum of requestedQty × snapshot unit cost across a PR's lines. */
+function prTotal(lines: { requestedQty: Decimal | string; unitCostSnapshot: Decimal | string }[]): Decimal {
+  return lines.reduce(
+    (s, l) => s.plus(toDecimal(l.requestedQty).times(toDecimal(l.unitCostSnapshot))),
+    new Decimal(0),
+  );
+}
 
 export async function createPurchaseRequisition(raw: unknown) {
   const session = await requireRole(WRITE_ROLES);
@@ -127,11 +149,15 @@ export async function removePRLine(lineId: string) {
 }
 
 /**
- * Submit a draft PR. If the total cost (sum of requestedQty * unitCostSnapshot)
- * is under the threshold, auto-approve. Otherwise needs manager approval.
+ * Submit a draft PR for approval. Every request now needs a sign-off —
+ * nothing auto-approves. The request is routed by value: below the admin
+ * threshold (default ₹5,000) the Manager approves; at-or-above it, the
+ * Admin must. The actual gate is enforced in approvePurchaseRequisition;
+ * here we just move it to PENDING_APPROVAL and record which tier it is.
  */
 export async function submitPurchaseRequisition(id: string) {
   const session = await requireRole(WRITE_ROLES);
+  const adminMin = await adminThreshold();
   await db.$transaction(async (tx) => {
     const pr = await tx.purchaseRequisition.findUnique({
       where: { id },
@@ -143,31 +169,24 @@ export async function submitPurchaseRequisition(id: string) {
     }
     if (pr.lines.length === 0) throw new Error("Add at least one line before submitting");
 
-    const total = pr.lines.reduce(
-      (s, l) => s.plus(toDecimal(l.requestedQty).times(toDecimal(l.unitCostSnapshot))),
-      new Decimal(0),
-    );
-    const needsApproval = total.gte(OVER_BUDGET_THRESHOLD);
-    const nextStatus = needsApproval
-      ? PurchaseRequisitionStatus.PENDING_APPROVAL
-      : PurchaseRequisitionStatus.APPROVED;
+    const total = prTotal(pr.lines);
+    const needsAdmin = total.gte(adminMin);
 
     await tx.purchaseRequisition.update({
       where: { id },
       data: {
-        status: nextStatus,
+        status: PurchaseRequisitionStatus.PENDING_APPROVAL,
         submittedAt: new Date(),
-        needsApproval,
-        ...(needsApproval ? {} : { approvedById: session.user.id, approvedAt: new Date() }),
+        needsApproval: true,
       },
     });
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
-        action: needsApproval ? "PR_SUBMITTED_FOR_APPROVAL" : "PR_AUTO_APPROVED",
+        action: "PR_SUBMITTED_FOR_APPROVAL",
         entity: "PurchaseRequisition",
         entityId: id,
-        payloadHash: sha256Json({ total: total.toString(), needsApproval }),
+        payloadHash: sha256Json({ total: total.toString(), tier: needsAdmin ? "admin" : "manager" }),
       },
     });
   });
@@ -177,12 +196,27 @@ export async function submitPurchaseRequisition(id: string) {
 
 export async function approvePurchaseRequisition(id: string) {
   const session = await requireRole(APPROVE_ROLES);
+  const adminMin = await adminThreshold();
   await db.$transaction(async (tx) => {
-    const pr = await tx.purchaseRequisition.findUnique({ where: { id }, select: { status: true } });
+    const pr = await tx.purchaseRequisition.findUnique({
+      where: { id },
+      include: { lines: true },
+    });
     if (!pr) throw new Error("PR not found");
     if (pr.status !== PurchaseRequisitionStatus.PENDING_APPROVAL) {
       throw new AuthorizationError("PR is not awaiting approval");
     }
+
+    // Value-routed sign-off: ≥ ₹5,000 requests are Admin's call; smaller
+    // ones the Manager (or Admin) can clear.
+    const total = prTotal(pr.lines);
+    const needsAdmin = total.gte(adminMin);
+    if (needsAdmin && session.user.role !== Role.ADMIN) {
+      throw new AuthorizationError(
+        `This request is ${total.toFixed(2)} (≥ ${adminMin.toFixed(0)}) — only an Admin can approve it.`,
+      );
+    }
+
     await tx.purchaseRequisition.update({
       where: { id },
       data: {
@@ -197,6 +231,7 @@ export async function approvePurchaseRequisition(id: string) {
         action: "PR_APPROVED",
         entity: "PurchaseRequisition",
         entityId: id,
+        payloadHash: sha256Json({ total: total.toString(), tier: needsAdmin ? "admin" : "manager" }),
       },
     });
   });

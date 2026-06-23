@@ -25,7 +25,7 @@ export default async function VendorBillsPage() {
         eyebrow="Procurement"
         title="Vendor bills"
         description="Bills from suppliers. 3-way match (bill ↔ PO ↔ GRN), then approve and mark paid when the payment goes out."
-        actions={<Link href="/procurement/vendor-bills/new"><Button>New bill</Button></Link>}
+        actions={canMark ? <Link href="/procurement/vendor-bills/new"><Button>New bill</Button></Link> : undefined}
       />
       {bills.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">No vendor bills yet.</p>

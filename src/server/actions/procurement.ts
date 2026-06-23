@@ -31,11 +31,11 @@ import { getSettingOr } from "@/lib/settings";
 import { notifyRoles } from "@/server/actions/notifications";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
-// Workflow doc: "Payment - Finance to be able to add vendor invoice".
-// Accounts gets bill creation access in addition to the store-side write
-// roles. They can raise a bill directly (no-PO path) for service vendors
-// + statutory payments.
-const BILL_WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.ACCOUNTS];
+// Supplier-bill handling (create + 3-way match) is a finance-desk job, not
+// a store job. Per the client: "record supplier bill is not required for
+// store or chef — only admin, manager and finance." Store keepers receive
+// goods (GRN) and stock updates automatically; the bill never touches them.
+const BILL_WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
 const APPROVE_ROLES = [Role.ADMIN, Role.MANAGER];
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.ACCOUNTS, Role.KITCHEN_HEAD];
 
@@ -92,17 +92,25 @@ export async function createVendorPO(raw: unknown) {
     supplierStateCode: supplierState,
     placeOfSupplyStateCode: input.placeOfSupplyStateCode,
   });
-  // All POs default to the tiered approval engine. Admins can still
-  // explicitly mark a PO "auto" (out-of-band) for edge cases.
-  const tier = "tiered";
+  // A PO spun out of an approved purchase requisition is already signed
+  // off — the spend was approved at the request stage by the right
+  // authority (Manager < ₹5k, Admin ≥ ₹5k). So it becomes a *direct* PO:
+  // born APPROVED, no second approval gate. A PO created from scratch
+  // (no PR) still runs the tiered approval engine.
+  const fromPR = !!input.prId;
+  const tier = fromPR ? "auto" : "tiered";
+  const now = new Date();
 
   const po = await db.$transaction(async (tx) => {
     // If we're spinning the PO out of an approved PR, validate first so
-    // the same request can't be turned into two parallel POs.
+    // the same request can't be turned into two parallel POs. We also
+    // grab the PR's approver so the direct PO is attributed to whoever
+    // actually signed off the spend — not the store keeper converting it.
+    let prApprover: { id: string; at: Date } | null = null;
     if (input.prId) {
       const pr = await tx.purchaseRequisition.findUnique({
         where: { id: input.prId },
-        select: { id: true, status: true, prNo: true },
+        select: { id: true, status: true, prNo: true, approvedById: true, approvedAt: true },
       });
       if (!pr) throw new Error("Linked purchase requisition not found");
       if (pr.status !== PurchaseRequisitionStatus.APPROVED) {
@@ -110,6 +118,7 @@ export async function createVendorPO(raw: unknown) {
           `Only APPROVED requests can be turned into a PO (request ${pr.prNo} is ${pr.status})`,
         );
       }
+      prApprover = { id: pr.approvedById ?? session.user.id, at: pr.approvedAt ?? now };
     }
 
     const poNo = await nextVendorPONumber(tx);
@@ -121,7 +130,9 @@ export async function createVendorPO(raw: unknown) {
         poNo,
         vendorId: input.vendorId,
         orderId: input.orderId ?? null,
-        status: VendorPOStatus.DRAFT,
+        // From an approved request → born APPROVED (direct PO). From
+        // scratch → DRAFT, to run the tiered approval engine.
+        status: fromPR ? VendorPOStatus.APPROVED : VendorPOStatus.DRAFT,
         issueDate: new Date(),
         expectedDate: input.expectedDate ? new Date(input.expectedDate) : null,
         placeOfSupplyStateCode: input.placeOfSupplyStateCode,
@@ -129,6 +140,14 @@ export async function createVendorPO(raw: unknown) {
         taxTotal: summary.taxTotal.toString(),
         grandTotal: summary.grandTotal.toString(),
         approvalTier: tier,
+        ...(fromPR && prApprover
+          ? {
+              approvedByUserId: prApprover.id,
+              approvedAt: prApprover.at,
+              managerApprovedById: prApprover.id,
+              managerApprovedAt: prApprover.at,
+            }
+          : {}),
         notes: linkedPRNote,
         lines: {
           create: input.lines.map((l, idx) => {
@@ -182,6 +201,18 @@ export async function createVendorPO(raw: unknown) {
 
     return created;
   });
+
+  // Direct PO (from an approved request) is already APPROVED — tell the
+  // store team it's ready to send to the vendor, same as the approval path.
+  if (fromPR) {
+    await notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+      kind: "PO_APPROVED",
+      title: `PO ${po.poNo} ready to send`,
+      body: "Approved request converted to a purchase order — send to vendor + record GRN when goods arrive.",
+      link: `/procurement/purchase-orders/${po.id}`,
+      dedupeKey: `po-approved:${po.id}`,
+    });
+  }
 
   revalidatePath("/procurement/purchase-orders");
   return { id: po.id, poNo: po.poNo };
@@ -627,7 +658,7 @@ interface Discrepancy {
  * Sets status MATCHED on success, DISCREPANCY with discrepancyNote otherwise.
  */
 export async function matchVendorBill(id: string) {
-  const session = await requireRole(WRITE_ROLES);
+  const session = await requireRole(BILL_WRITE_ROLES);
   return db.$transaction(async (tx) => {
     const bill = await tx.vendorBill.findUnique({
       where: { id },

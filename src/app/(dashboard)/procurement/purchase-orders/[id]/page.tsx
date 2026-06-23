@@ -34,6 +34,8 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
     (role === Role.ADMIN || (role === Role.MANAGER && !managerStepDone));
   const canSend = po.status === VendorPOStatus.APPROVED && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
   const canReceive = (po.status === VendorPOStatus.APPROVED || po.status === VendorPOStatus.SENT || po.status === VendorPOStatus.PARTIALLY_RECEIVED) && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
+  // Supplier bills are finance-only — store keepers never record them.
+  const canRecordBill = role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS;
 
   async function doSubmit() { "use server"; await submitVendorPO(id); }
   async function doApprove() { "use server"; await approveVendorPO(id); }
@@ -99,6 +101,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
         <NextStep
           status={po.status}
           canReceive={canReceive}
+          canRecordBill={canRecordBill}
           receiveHref={`/procurement/grns/new?poId=${po.id}`}
         />
       )}
@@ -187,6 +190,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
 interface NextStepProps {
   status: VendorPOStatus;
   canReceive: boolean;
+  canRecordBill: boolean;
   receiveHref: string;
 }
 
@@ -195,7 +199,7 @@ interface NextStepProps {
  * gets the richer NotifyVendorBlock with WhatsApp/email/mark-sent actions;
  * everything else just needs a one-liner pointing at the next button.
  */
-function NextStep({ status, canReceive, receiveHref }: NextStepProps) {
+function NextStep({ status, canReceive, canRecordBill, receiveHref }: NextStepProps) {
   if (status === VendorPOStatus.CANCELLED || status === VendorPOStatus.CLOSED) return null;
 
   let body: React.ReactNode = null;
@@ -203,15 +207,16 @@ function NextStep({ status, canReceive, receiveHref }: NextStepProps) {
   if (status === VendorPOStatus.DRAFT) {
     body = (
       <>
-        <strong>Next:</strong> Submit this PO when you&apos;re ready. Under ₹1L it auto-approves; bigger
-        ones go to the manager (up to ₹10L) or admin (above).
+        <strong>Next:</strong> Submit this PO for approval. The Manager signs off; the Admin also signs off
+        when the total is ₹5,000 or more. (POs created from an approved request skip this — they&apos;re
+        already approved.)
       </>
     );
   } else if (status === VendorPOStatus.PENDING_APPROVAL) {
     body = (
       <>
-        <strong>Next:</strong> Waiting on approval — manager up to ₹10L, admin above. The Approve button
-        appears in the header for the right approver.
+        <strong>Next:</strong> Waiting on approval — Manager signs off, with Admin also required at ₹5,000
+        and above. The Approve button appears in the header for the right approver.
       </>
     );
   } else if (status === VendorPOStatus.SENT) {
@@ -244,7 +249,7 @@ function NextStep({ status, canReceive, receiveHref }: NextStepProps) {
       </>
     );
   } else if (status === VendorPOStatus.RECEIVED) {
-    body = (
+    body = canRecordBill ? (
       <>
         <strong>Next:</strong> All goods received. When the supplier sends the bill, record it — the
         system checks it against this PO + the delivery notes before letting accounts pay.
@@ -253,6 +258,11 @@ function NextStep({ status, canReceive, receiveHref }: NextStepProps) {
             <Button size="sm" variant="outline">Record supplier bill</Button>
           </Link>
         </div>
+      </>
+    ) : (
+      <>
+        <strong>Done:</strong> All goods received and stock updated. The finance desk takes it from here —
+        they record the supplier bill and handle payment.
       </>
     );
   }
