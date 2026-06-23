@@ -289,17 +289,18 @@ const orderCreateBase = z.object({
 
 export const OrderCreateInput = orderCreateBase.refine(
   (v) => {
-    if (v.channel === OrderChannel.ROOM_SERVICE) {
+    // Room service AND à la carte both require a room number — the guest
+    // is in a room either way (dine-in is charged to the room folio).
+    if (
+      v.channel === OrderChannel.ROOM_SERVICE ||
+      v.channel === OrderChannel.ALACARTE
+    ) {
       return !!(v.roomNumber && v.roomNumber.trim().length > 0);
-    }
-    if (v.channel === OrderChannel.ALACARTE) {
-      return !!(v.tableNumber && v.tableNumber.trim().length > 0);
     }
     return true;
   },
   {
-    message:
-      "Room service orders require a room number; à la carte orders require a table number",
+    message: "Room service and à la carte orders require a room number",
     path: ["roomNumber"],
   },
 );

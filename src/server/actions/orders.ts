@@ -253,6 +253,10 @@ export async function updateOrderDraft(id: string, raw: unknown) {
 export async function submitOrder(id: string) {
   const session = await requireRole(ORDER_SALES_ROLES);
 
+  // Immediate hotel-service channels (room service / à la carte /
+  // management) skip the admin commercial gate and go straight to the
+  // chef — these are walk-up / in-stay orders, not pre-booked catering.
+  // They're also "now" orders, so we don't enforce a future event date.
   await db.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id },
@@ -263,20 +267,24 @@ export async function submitOrder(id: string) {
       throw new AuthorizationError("Only DRAFT orders can be submitted");
     }
     if (order.items.length === 0) throw new Error("Add at least one item before submitting");
-    if (order.eventDate.getTime() <= Date.now()) {
+
+    const immediateChannel =
+      order.channel === "ROOM_SERVICE" ||
+      order.channel === "ALACARTE" ||
+      order.channel === "MANAGEMENT";
+
+    if (!immediateChannel && order.eventDate.getTime() <= Date.now()) {
       throw new Error("Event date must be in the future");
     }
     if (!order.deliveryAddress.trim()) throw new Error("Delivery address is required");
 
-    // Workflow v3: every submission goes through admin first, even when
-    // the submitter is themselves an admin. The admin still has to click
-    // "Approve" — self-approval is explicit, never implicit.
+    const nextStatus = immediateChannel
+      ? OrderStatus.PENDING_CHEF_APPROVAL // skip admin — straight to chef
+      : OrderStatus.PENDING_ADMIN_APPROVAL; // catering: admin signs off first
+
     await tx.order.update({
       where: { id },
-      data: {
-        status: OrderStatus.PENDING_ADMIN_APPROVAL,
-        submittedAt: new Date(),
-      },
+      data: { status: nextStatus, submittedAt: new Date() },
     });
     await tx.auditLog.create({
       data: {
@@ -284,7 +292,7 @@ export async function submitOrder(id: string) {
         action: "ORDER_SUBMITTED",
         entity: "Order",
         entityId: id,
-        payloadHash: sha256Json({ from: order.status, to: OrderStatus.PENDING_ADMIN_APPROVAL }),
+        payloadHash: sha256Json({ from: order.status, to: nextStatus }),
       },
     });
   });
@@ -292,6 +300,7 @@ export async function submitOrder(id: string) {
   revalidatePath(`/orders/${id}`);
   revalidatePath("/orders");
   revalidatePath("/queue/admin-approvals");
+  revalidatePath("/queue/chef-approvals");
 }
 
 /**

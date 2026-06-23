@@ -172,11 +172,12 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
 
     // Client-side validation that mirrors the server refinement —
     // friendlier inline message than the Zod default.
-    if (channel === OrderChannel.ROOM_SERVICE && !roomNumber.trim()) {
-      return toast.error("Room service orders need a room number");
-    }
-    if (channel === OrderChannel.ALACARTE && !tableNumber.trim()) {
-      return toast.error("À la carte orders need a table number");
+    if (
+      (channel === OrderChannel.ROOM_SERVICE ||
+        channel === OrderChannel.ALACARTE) &&
+      !roomNumber.trim()
+    ) {
+      return toast.error("Room service and à la carte orders need a room number");
     }
     const isPackage =
       channel === OrderChannel.ODC || channel === OrderChannel.PACKET;
@@ -294,7 +295,8 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
               <option value={OrderChannel.MANAGEMENT}>Management (internal)</option>
             </select>
           </div>
-          {channel === OrderChannel.ROOM_SERVICE && (
+          {(channel === OrderChannel.ROOM_SERVICE ||
+            channel === OrderChannel.ALACARTE) && (
             <div className="grid gap-1">
               <Label htmlFor="roomNumber">
                 Room number <span className="text-alert">*</span>
@@ -309,9 +311,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
           )}
           {channel === OrderChannel.ALACARTE && (
             <div className="grid gap-1">
-              <Label htmlFor="tableNumber">
-                Table number <span className="text-alert">*</span>
-              </Label>
+              <Label htmlFor="tableNumber">Table number (optional)</Label>
               <Input
                 id="tableNumber"
                 placeholder="e.g. T-7"

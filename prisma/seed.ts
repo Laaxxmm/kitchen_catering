@@ -1,6 +1,11 @@
-import { PrismaClient, Role, EmploymentType } from "@prisma/client";
+import { PrismaClient, Role, EmploymentType, MaintenanceCategory } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { dishSeed } from "./seed-data/dishes";
+import {
+  maintenanceItemSeed,
+  ingredientSeed as storeIngredientSeed,
+  housekeepingItemSeed,
+} from "./seed-data/stores";
 
 const db = new PrismaClient();
 
@@ -114,6 +119,56 @@ async function main() {
         description: d.description,
       },
     });
+  }
+
+  // ─── Store inventory (kitchen Ingredient master) ─────────────────
+  // 136 products from "Store Inventory On Daily Basis.xlsx" with opening
+  // qty + rate. Idempotent on sku (STR-####). onHandQty / avgUnitCost
+  // seed from the opening values so stock shows up immediately.
+  for (const i of storeIngredientSeed) {
+    await db.ingredient.upsert({
+      where: { sku: i.sku },
+      create: {
+        sku: i.sku,
+        name: i.name,
+        unit: i.unit,
+        openingQty: i.openingQty,
+        openingAvgCost: i.openingAvgCost,
+        onHandQty: i.openingQty,
+        avgUnitCost: i.openingAvgCost,
+        gstRatePct: 5,
+      },
+      // Don't clobber live on-hand on re-seed — only refresh display
+      // metadata (unit). Stock movements own onHandQty after first seed.
+      update: { unit: i.unit },
+    });
+  }
+
+  // ─── Maintenance store items ─────────────────────────────────────
+  // 35 electrical / plumbing spares from "Maintainance Materials.xlsx".
+  // Idempotent on name (MaintenanceItem @@unique([name])).
+  for (const m of maintenanceItemSeed) {
+    const existing = await db.maintenanceItem.findUnique({ where: { name: m.name } });
+    if (!existing) {
+      await db.maintenanceItem.create({
+        data: {
+          name: m.name,
+          unit: m.unit,
+          category: m.category as MaintenanceCategory,
+        },
+      });
+    }
+  }
+
+  // ─── Housekeeping items ──────────────────────────────────────────
+  // 34 items from the client's HK Requirement sheet. Idempotent on name.
+  for (const h of housekeepingItemSeed) {
+    const existing = await db.housekeepingItem.findUnique({ where: { name: h.name } });
+    if (!existing) {
+      await db.housekeepingItem.create({
+        data: { name: h.name, unit: h.unit },
+      });
+    }
   }
 
   // ─── Vendor ─────────────────────────────────────────────────────
