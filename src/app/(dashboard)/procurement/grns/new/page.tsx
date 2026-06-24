@@ -1,7 +1,9 @@
 import { notFound, redirect } from "next/navigation";
 import { Decimal } from "decimal.js";
+import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { getVendorPO, createGRN } from "@/server/actions/procurement";
+import { gateRolePage } from "@/server/rbac";
 import { GRNForm } from "./_components/GRNForm";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +13,8 @@ export default async function NewGRNPage({
 }: {
   searchParams: Promise<{ poId?: string }>;
 }) {
+  // Goods receipt references the PO + vendor — manager / admin / accounts only.
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
   const { poId } = await searchParams;
   if (!poId) return <p className="p-4 text-[13px] text-ik-ink-3">Pass <code>?poId=&lt;id&gt;</code>.</p>;
   const po = await getVendorPO(poId);

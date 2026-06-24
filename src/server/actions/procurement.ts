@@ -452,7 +452,10 @@ export async function cancelVendorPO(id: string, reason: string) {
  *   7. Write AuditLog
  */
 export async function createGRN(raw: unknown) {
-  const session = await requireRole(WRITE_ROLES);
+  // Goods receipt is recorded by manager / admin / accounts — it references
+  // the PO + vendor, which the store keeper deliberately doesn't see. The
+  // store records non-PO stock-in through /inventory/receipts instead.
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
   const input = GRNCreateInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {

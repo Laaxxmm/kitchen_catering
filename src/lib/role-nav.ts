@@ -26,12 +26,12 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   SALES: new Set([
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
   ]),
-  // Storekeeper: just stock + requisitions + receiving supplies.
-  // Orders/dishes/quotes aren't part of their daily work — kept out so
-  // the sidebar doesn't overwhelm.
+  // Storekeeper: stock + requisitions + raising shortage requests. They do
+  // NOT see vendors, purchase orders or supplier bills — picking suppliers,
+  // pricing and paying are the manager's / admin's / accounts' job. The
+  // store just says "we're short on X" (a request) and issues/receives stock.
   STORE_KEEPER: new Set([
-    "dashboard", "tasks", "requisitions", "inventory",
-    "requests", "purchaseorders", "vendors",
+    "dashboard", "tasks", "requisitions", "inventory", "requests",
   ]),
   // Kitchen head: cooking-side work only. No Sales section — they drive
   // everything from the tabbed kitchen dashboard + Kitchen + Requisitions.

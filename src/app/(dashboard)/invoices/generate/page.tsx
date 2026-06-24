@@ -95,12 +95,13 @@ export default async function GenerateInvoicePage() {
                       className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ik-rule bg-ik-paper-alt px-3 py-2"
                     >
                       <div className="min-w-0">
-                        <Link
-                          href={`/orders/${o.id}`}
-                          className="font-mono text-[12.5px] text-brand-700 hover:underline"
-                        >
+                        {/* Plain identifier, not a link — accounts (who live
+                            on this screen) intentionally don't have order
+                            access; generating the invoice is the only action
+                            needed here. */}
+                        <span className="font-mono text-[12.5px] text-ik-ink">
                           {o.code}
-                        </Link>
+                        </span>
                         <span className="ml-2 text-[12px] text-ik-ink-3">
                           {o.channel.toLowerCase().replace(/_/g, " ")} ·{" "}
                           {formatIST(o.eventDate, "d MMM yyyy")}

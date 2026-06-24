@@ -22,10 +22,13 @@ type Role =
   | "MAINTENANCE_MANAGER"
   | "FNB_SERVICE";
 
-// Path-pattern → allowed roles. First-match wins; rules higher in the list
-// take precedence over rules lower down (used so /admin matches before any
-// permissive default). ADMIN is implicitly allowed everywhere — we don't
-// need to list it, the runtime adds it.
+// Path-pattern → allowed roles. A request must be allowed by EVERY rule it
+// matches (the loop below redirects on the first matching rule that denies).
+// This lets a specific sub-path rule *further restrict* a broader one — e.g.
+// /procurement allows the store keeper, but the /procurement/purchase-orders
+// rule above it does not, so the store keeper is blocked there while still
+// reaching /procurement/purchase-requisitions. Order specific-before-general.
+// ADMIN is implicitly allowed everywhere — the runtime adds it.
 //
 // Anything that isn't matched by any pattern is allowed for any
 // authenticated user (since /forbidden, /dashboard etc. are role-neutral).
@@ -51,30 +54,47 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   { pattern: /^\/quotes(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES"] },
   { pattern: /^\/dishes(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "KITCHEN_HEAD"] },
 
-  // Orders — broad read access; per-action role checks are server-side
+  // Orders — kitchen sees the cooking brief, sales/F&B raise them. Accounts
+  // works billing from /invoices (the Generate-invoice screen), not here.
   { pattern: /^\/orders\/[^/]+\/requisition(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD"] },
-  { pattern: /^\/orders(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "STORE_KEEPER", "KITCHEN_HEAD", "ACCOUNTS", "FNB_SERVICE"] },
+  { pattern: /^\/orders(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "STORE_KEEPER", "KITCHEN_HEAD", "FNB_SERVICE"] },
 
   // Operations
-  { pattern: /^\/kitchen(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "SALES", "STORE_KEEPER"] },
-  { pattern: /^\/requisitions(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "STORE_KEEPER", "SALES"] },
-  // Manual stock adjustments are admin/manager only (write-offs, opening
-  // fixes) — storekeeper adds new stock through /inventory/receipts.
+  // Kitchen production board is the chef's (+ management oversight) only.
+  { pattern: /^\/kitchen(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD"] },
+  // Requisitions: chef raises, store fulfils.
+  { pattern: /^\/requisitions(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "STORE_KEEPER"] },
+  // Manual stock adjustments are admin/manager only (write-offs, opening fixes).
   { pattern: /^\/inventory\/adjustments(\/|$)/, allow: ["ADMIN", "MANAGER"] },
-  // Accounts gets inventory access so they can record stock receipts
-  // against incoming goods — that's their books-side responsibility.
+  // Issuing stock out is the store's job (not the chef, not accounts).
+  { pattern: /^\/inventory\/issues(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
+  // Recording incoming stock — store + accounts (books-side receipt). The
+  // chef can view stock levels but doesn't record receipts.
+  { pattern: /^\/inventory\/receipts(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "ACCOUNTS"] },
+  // Inventory landing / ingredient list / stock levels — read for chef too.
   { pattern: /^\/inventory(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "KITCHEN_HEAD", "ACCOUNTS"] },
 
   // Deliveries — DELIVERY role gets their own scope (enforced server-side
   // in listDeliveries / getDelivery); the route itself is allowed.
-  { pattern: /^\/deliveries(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "KITCHEN_HEAD", "DELIVERY"] },
+  { pattern: /^\/deliveries(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "DELIVERY"] },
 
   // Mobile-shell routes (driver-focused; Phase 5). Reuses the same
   // data-scoping rules — listDeliveries/getDelivery already enforce
   // own-scope for DELIVERY role.
   { pattern: /^\/m(\/|$)/, allow: ["ADMIN", "MANAGER", "DELIVERY", "KITCHEN_HEAD", "STORE_KEEPER", "SALES", "ACCOUNTS"] },
 
-  // Procurement — Phase 2 (placeholder accessible to relevant roles)
+  // Procurement — the store keeper ONLY raises requests (purchase
+  // requisitions). Vendor choice, purchase orders, supplier bills and goods
+  // receipts (GRNs) are manager / admin / accounts, so the store never sees
+  // vendor or payment data. These specific rules sit ABOVE the general one;
+  // a path must satisfy EVERY rule it matches (see the header note), so a
+  // store keeper is blocked from these sub-paths while still allowed on
+  // /procurement/purchase-requisitions via the general rule below.
+  { pattern: /^\/procurement\/?$/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  { pattern: /^\/procurement\/purchase-orders(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  { pattern: /^\/procurement\/vendors(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  { pattern: /^\/procurement\/vendor-bills(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  { pattern: /^\/procurement\/grns(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   { pattern: /^\/procurement(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "ACCOUNTS"] },
 
   // Housekeeping — hotel-side stockroom. Open to admin / manager (oversight)
@@ -90,8 +110,8 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Banquet — F&B service-side packaging store.
   { pattern: /^\/banquet(\/|$)/, allow: ["ADMIN", "MANAGER", "FNB_SERVICE"] },
 
-  // Finance
-  { pattern: /^\/invoices(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "SALES"] },
+  // Finance — invoices are accounts/management. Sales work from orders.
+  { pattern: /^\/invoices(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   { pattern: /^\/payments(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   // Petty cash / salary / reports are admin/manager territory. Accounts
   // is scoped to invoices + vendor bills + stock receipts.
