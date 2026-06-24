@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/ui/page-header";
 import { listSettings, upsertSetting } from "@/server/actions/settings";
 import { SettingsEditor } from "./_components/SettingsEditor";
+import { CleanSlate } from "./_components/CleanSlate";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,7 @@ export default async function SettingsPage() {
         }))}
         onSave={upsert}
       />
+      <CleanSlate />
     </>
   );
 }
