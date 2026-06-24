@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronsUpDown, Check } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -28,7 +29,13 @@ export function Combobox({
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Fixed-position coordinates for the portalled panel, measured from the
+  // trigger button. Portalling to <body> means no ancestor's overflow
+  // (e.g. the line-items table's overflow-x-auto) can clip the list.
+  const [coords, setCoords] = useState<{ left: number; top: number; width: number } | null>(null);
 
   const selected = options.find((o) => o.value === value);
 
@@ -42,13 +49,32 @@ export function Combobox({
     setActiveIdx(0);
   }, [query, open]);
 
+  // Measure the trigger and keep the panel pinned to it while open, so it
+  // tracks scroll and resize.
+  useEffect(() => {
+    if (!open) return;
+    function reposition() {
+      const el = buttonRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setCoords({ left: r.left, top: r.bottom + 4, width: r.width });
+    }
+    reposition();
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
+    return () => {
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) {
-        setOpen(false);
-        setQuery("");
-      }
+      const t = e.target as Node;
+      if (rootRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
+      setQuery("");
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
@@ -77,10 +103,70 @@ export function Combobox({
     }
   }
 
+  const panel =
+    open && coords && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            ref={panelRef}
+            style={{ position: "fixed", left: coords.left, top: coords.top, width: coords.width }}
+            className="z-50 rounded border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg"
+          >
+            <div className="border-b border-[hsl(var(--border))] p-1.5">
+              <Input
+                ref={inputRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder="Search…"
+                className="h-8"
+              />
+            </div>
+            <ul className="max-h-60 overflow-auto py-1">
+              {filtered.length === 0 && (
+                <li className="px-3 py-2 text-[12px] text-[hsl(var(--muted-foreground))]">
+                  {emptyText}
+                </li>
+              )}
+              {filtered.map((o, idx) => {
+                const isActive = idx === activeIdx;
+                const isSelected = o.value === value;
+                return (
+                  <li
+                    key={o.value}
+                    onMouseEnter={() => setActiveIdx(idx)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pick(o.value);
+                    }}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[13px]",
+                      isActive ? "bg-[hsl(var(--secondary))]" : "bg-[hsl(var(--card))]",
+                      isSelected
+                        ? "font-medium text-[hsl(var(--foreground))]"
+                        : "text-[hsl(var(--foreground))]/80",
+                    )}
+                  >
+                    <Check
+                      className={cn(
+                        "h-3.5 w-3.5 shrink-0",
+                        isSelected ? "text-[hsl(var(--primary))]" : "text-transparent",
+                      )}
+                    />
+                    <span className="truncate">{o.label}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>,
+          document.body,
+        )
+      : null;
+
   return (
     <div ref={rootRef} className="relative">
       <button
         id={id}
+        ref={buttonRef}
         type="button"
         disabled={disabled}
         onClick={() => {
@@ -94,56 +180,7 @@ export function Combobox({
         </span>
         <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 text-[hsl(var(--muted-foreground))]" />
       </button>
-      {open && (
-        <div className="absolute z-20 mt-1 w-full rounded border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg">
-          <div className="border-b border-[hsl(var(--border))] p-1.5">
-            <Input
-              ref={inputRef}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Search…"
-              className="h-8"
-            />
-          </div>
-          <ul className="max-h-60 overflow-auto py-1">
-            {filtered.length === 0 && (
-              <li className="px-3 py-2 text-[12px] text-[hsl(var(--muted-foreground))]">
-                {emptyText}
-              </li>
-            )}
-            {filtered.map((o, idx) => {
-              const isActive = idx === activeIdx;
-              const isSelected = o.value === value;
-              return (
-                <li
-                  key={o.value}
-                  onMouseEnter={() => setActiveIdx(idx)}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    pick(o.value);
-                  }}
-                  className={cn(
-                    "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[13px]",
-                    isActive ? "bg-[hsl(var(--secondary))]" : "bg-[hsl(var(--card))]",
-                    isSelected
-                      ? "font-medium text-[hsl(var(--foreground))]"
-                      : "text-[hsl(var(--foreground))]/80",
-                  )}
-                >
-                  <Check
-                    className={cn(
-                      "h-3.5 w-3.5 shrink-0",
-                      isSelected ? "text-[hsl(var(--primary))]" : "text-transparent",
-                    )}
-                  />
-                  <span className="truncate">{o.label}</span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
+      {panel}
     </div>
   );
 }
