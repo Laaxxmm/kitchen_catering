@@ -31,11 +31,11 @@ export function PageHeader({ eyebrow, title, description, actions, tabs }: PageH
           <h1
             className="ik-page-title"
             style={{
-              fontFamily: "var(--font-ik-sans), Inter Tight, system-ui, sans-serif",
+              fontFamily: "var(--font-serif), 'Playfair Display', Georgia, serif",
               fontSize: 26,
-              fontWeight: 600,
-              color: IK.ink,
-              letterSpacing: "-0.025em",
+              fontWeight: 500,
+              color: IK.accentInk,
+              letterSpacing: "-0.01em",
               margin: 0,
               lineHeight: 1.15,
             }}

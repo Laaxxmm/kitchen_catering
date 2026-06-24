@@ -232,11 +232,11 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
 
   return (
     <form onSubmit={submit} className="grid gap-6">
-      <section className="grid gap-4 rounded-md border border-ik-rule bg-ik-card p-4 max-w-3xl">
-        <h3 className="font-medium text-[14px] text-ik-ink">Customer & event</h3>
+      <section className="grid gap-4 rounded-[14px] border border-ik-rule bg-ik-card p-4 max-w-3xl sm:p-5">
+        <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Customer &amp; event</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="grid gap-1">
-            <Label htmlFor="customerId">Customer</Label>
+            <Label htmlFor="customerId">Customer<span className="text-gold" aria-hidden> *</span></Label>
             <select
               id="customerId"
               value={customerId}
@@ -385,9 +385,9 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
         )}
       </section>
 
-      <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
         <div className="flex items-center justify-between">
-          <h3 className="font-medium text-[14px] text-ik-ink">Dishes</h3>
+          <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Dishes</h3>
           <Button type="button" variant="outline" size="sm" onClick={addLine}>+ Add line</Button>
         </div>
         <div className="overflow-x-auto">
@@ -516,9 +516,10 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
         <Textarea id="notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </section>
 
-      <div className="flex gap-2">
+      {/* Sticky save bar — always reachable on long forms. */}
+      <div className="sticky bottom-0 z-10 -mx-4 mt-1 flex flex-wrap items-center justify-end gap-2 border-t border-ik-rule bg-ik-paper/90 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-ik-paper/75 md:-mx-6 md:px-6">
+        <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>
         <Button type="submit" disabled={pending}>{pending ? "Saving…" : submitLabel}</Button>
-        <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
       </div>
     </form>
   );
