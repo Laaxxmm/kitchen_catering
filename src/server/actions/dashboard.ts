@@ -47,7 +47,7 @@ export async function getDashboardSummary() {
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
-  const [todayOrders, todayDeliveries, openInvoices, lowStockIngredients] = await Promise.all([
+  const [todayOrders, todayDeliveries, deliveredToday, openInvoices, lowStockIngredients] = await Promise.all([
     db.order.count({
       where: {
         eventDate: { gte: todayStart, lt: tomorrowStart },
@@ -58,6 +58,14 @@ export async function getDashboardSummary() {
       where: {
         scheduledAt: { gte: todayStart, lt: tomorrowStart },
         status: { notIn: [DeliveryStatus.DELIVERED, DeliveryStatus.FAILED, DeliveryStatus.CANCELLED] },
+      },
+    }),
+    // Deliveries actually completed today — drives the "delivered today"
+    // launcher tile. Same day window as the other "today" KPIs.
+    db.delivery.count({
+      where: {
+        deliveredAt: { gte: todayStart, lt: tomorrowStart },
+        status: DeliveryStatus.DELIVERED,
       },
     }),
     db.customerInvoice.findMany({
@@ -560,6 +568,7 @@ export async function getDashboardSummary() {
   return {
     todayOrders,
     todayDeliveries,
+    deliveredToday,
     outstandingAR: outstandingAR.toString(),
     lowStockCount,
     myQueue,

@@ -19,6 +19,22 @@ export function formatINR(value: Decimal | number | string | null | undefined): 
   return INR.format(d.toNumber());
 }
 
+const INR_WHOLE = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
+/**
+ * Whole-rupee Indian format, no paise — e.g. ₹1,44,100 (not ₹1,44,100.00).
+ * Use on dashboards / summaries where paise are noise. Rounds half-up.
+ */
+export function formatINRWhole(value: Decimal | number | string | null | undefined): string {
+  if (value == null) return "—";
+  return INR_WHOLE.format(round2(value).toNumber());
+}
+
 /** Coerce any input into a Decimal. */
 export function toDecimal(value: Decimal | number | string | { toString(): string }): Decimal {
   if (value instanceof Decimal) return value;

@@ -1,22 +1,17 @@
 import type { Role } from "@prisma/client";
+import Link from "next/link";
+import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { auth } from "@/server/auth";
 import { getDashboardSummary } from "@/server/actions/dashboard";
-import { ActionFeed } from "@/components/ik/dashboard/ActionFeed";
-import { OrderJourneyStrip } from "@/components/ik/dashboard/OrderJourneyStrip";
-import { ProcurementStrip } from "@/components/ik/dashboard/ProcurementStrip";
-import { ARDonut } from "@/components/ik/dashboard/ARDonut";
-import { APDonut } from "@/components/ik/dashboard/APDonut";
-import { TodayTimeline } from "@/components/ik/dashboard/TodayTimeline";
-import { QuickActions } from "@/components/ik/dashboard/QuickActions";
-import { StockSnapshot } from "@/components/ik/dashboard/StockSnapshot";
-import { PendingStockRequests } from "@/components/ik/dashboard/PendingStockRequests";
+import { AttentionBanner } from "@/components/ik/dashboard/launcher/AttentionBanner";
+import { TaskTiles, type TaskTile } from "@/components/ik/dashboard/launcher/TaskTiles";
+import { StoresStrip } from "@/components/ik/dashboard/launcher/StoresStrip";
+import { MoreActionsMenu } from "@/components/ik/dashboard/launcher/MoreActionsMenu";
 import { MyTasksPanel } from "@/components/ik/dashboard/MyTasksPanel";
-import { TasksAdminPanel } from "@/components/ik/dashboard/TasksAdminPanel";
 import { HousekeepingPanel } from "@/components/ik/dashboard/HousekeepingPanel";
 import { MaintenancePanel } from "@/components/ik/dashboard/MaintenancePanel";
 import { BanquetPanel } from "@/components/ik/dashboard/BanquetPanel";
-import { StoresOverviewPanel } from "@/components/ik/dashboard/StoresOverviewPanel";
 import { ChefWorkScreen } from "@/components/ik/dashboard/ChefWorkScreen";
 import { listChefBoardOrders } from "@/server/actions/production-jobs";
 import { DriverWorkScreen } from "@/components/ik/dashboard/DriverWorkScreen";
@@ -33,13 +28,12 @@ import { listCustomerInvoices } from "@/server/actions/customer-invoices";
 import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
 import { listHousekeepingIssues } from "@/server/actions/housekeeping";
 import { listMaintenanceActivities } from "@/server/actions/maintenance";
-import { toDecimal } from "@/lib/money";
+import { toDecimal, formatINRWhole } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import {
   ChefRequisitionStatus, PurchaseRequisitionStatus, VendorPOStatus, OrderStatus,
   CustomerInvoiceStatus, VendorBillStatus,
 } from "@prisma/client";
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
@@ -399,24 +393,70 @@ export default async function DashboardPage() {
     );
   }
 
+  // ─── Admin / Manager launcher ─────────────────────────────────────────
+  const firstName = name.split(" ")[0];
+  const greeting = formatIST(new Date(), "EEEE, d MMMM · h:mm a");
+
+  const proc = summary.procurement;
+  const needPO = proc?.prApprovedNoPO ?? 0;
+  const needMatch = proc?.billsPendingMatch ?? 0;
+  const needPay = proc?.billsPendingPayment ?? 0;
+  const needReorder = summary.lowStockCount;
+  const attnCount = needPO + needMatch + needPay + needReorder;
+  const attnBreakdown = [
+    needPO ? `${needPO} PO` : null,
+    needMatch ? `${needMatch} ${needMatch === 1 ? "bill" : "bills"} to match` : null,
+    needPay ? `${needPay} to pay` : null,
+    needReorder ? `${needReorder} to reorder` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const kWait = summary.kitchen?.waitingOnStore ?? 0;
+  const billsToAction = needMatch + needPay;
+  const tiles: TaskTile[] = [
+    { key: "orders", icon: "orders", label: "Orders", status: `${summary.todayOrders} active today`, href: "/orders" },
+    { key: "kitchen", icon: "kitchen", label: "Kitchen", status: `${kWait} waiting on stock`, href: "/kitchen", tone: kWait > 0 ? "amber" : "default" },
+    { key: "stock", icon: "stock", label: "Stock", status: `${needReorder} to reorder`, href: "/inventory/ingredients", tone: needReorder > 0 ? "red" : "default" },
+    { key: "bills", icon: "bills", label: "Bills & pay", status: `${billsToAction} to action`, href: "/payments", tone: billsToAction > 0 ? "amber" : "default" },
+    { key: "customers", icon: "customers", label: "Customers", status: "Quotes & contacts", href: "/customers" },
+    { key: "deliveries", icon: "deliveries", label: "Deliveries", status: `${summary.deliveredToday} delivered today`, href: "/deliveries" },
+  ];
+  const moreActions = [
+    { label: "Draft quote", href: "/quotes/new" },
+    { label: "Add customer", href: "/customers/new" },
+    { label: "Schedule delivery", href: "/deliveries/new" },
+    { label: "Raise stock request", href: "/procurement/purchase-requisitions/new" },
+    { label: "Record supplier bill", href: "/procurement/vendor-bills/new" },
+    { label: "Add stock receipt", href: "/inventory/receipts/new" },
+    { label: "Assign task", href: "/tasks/admin" },
+  ];
+
   return (
-    <>
-      <PageHeader
-        eyebrow="Overview"
-        title={`Welcome, ${name}`}
-        description="Live map of today's operations. Click any stop to drill in."
-      />
+    <div className="grid gap-5">
+      {/* 1 ─ Greeting (compact) */}
+      <div>
+        <div className="text-[12px] text-ik-ink-3">{greeting}</div>
+        <h1 className="mt-0.5 text-[22px] font-medium text-ik-ink">Hi {firstName}</h1>
+      </div>
 
-      <div className="grid gap-5">
-        {/* 0 ─ Quick-create shortcuts. Top of the page so common
-            create-flows (Take order, Add customer, Schedule delivery)
-            are one click away. */}
-        <QuickActions role={role} />
+      {/* 2 ─ Attention banner — the only strong-colour element on the page */}
+      <AttentionBanner count={attnCount} breakdown={attnBreakdown} reviewHref="/procurement" />
 
-        {/* 0a ─ Manager/admin approvals board: chef-proposed order changes,
-            stock requests, and POs — approve/reject inline. Hides itself
-            when there's nothing waiting. */}
-        {approvals && (
+      {/* 3 ─ Primary action + everything else behind "More" */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Link
+          href="/orders/new"
+          className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-md bg-brand-500 px-5 text-[14px] font-semibold text-white transition hover:bg-brand-600 sm:flex-none sm:min-w-[240px]"
+        >
+          <Plus size={17} /> Take a new order
+        </Link>
+        <MoreActionsMenu items={moreActions} />
+      </div>
+
+      {/* 3a ─ Approvals: chef-proposed order changes, stock requests, POs —
+          approve/reject inline. Self-hides when nothing is waiting. */}
+      {approvals && (
           <ManagerApprovalsBoard
             orderChanges={approvals[0].map((o) => ({
               id: o.id,
@@ -446,99 +486,21 @@ export default async function DashboardPage() {
             asks). Hidden when the user has no tasks. */}
         <MyTasksPanel />
 
-        {/* 1a ─ Team task oversight for admin / manager. Counts +
-            long-pending list. Hidden when no tasks exist. */}
-        {isManagerScope && <TasksAdminPanel />}
+        {/* 4 ─ Task tiles — the launcher's main grid */}
+        <TaskTiles tiles={tiles} />
 
-        {/* Cross-store consumption — admin/manager only. Hidden when
-            none of the stores have any items yet. */}
-        {isManagerScope && <StoresOverviewPanel />}
+        {/* 5 ─ Stores strip — lighter reference row */}
+        <StoresStrip />
 
-        {/* 1 ─ What needs you right now */}
-        <ActionFeed
-          role={role}
-          kitchen={summary.kitchen}
-          procurement={summary.procurement}
-          storeKeeper={summary.storeKeeper}
-          ar={summary.ar}
-          todayDeliveries={summary.todayDeliveries}
-          lowStockCount={summary.lowStockCount}
-        />
-
-        {/* 1b ─ Stock requests waiting on the admin / manager. Surfaces
-            them as soon as the storekeeper raises one. */}
-        {summary.adminPendingPRs && summary.adminPendingPRs.length > 0 && (
-          <PendingStockRequests requests={summary.adminPendingPRs} />
-        )}
-
-        {/* 2 ─ Live order map. Falls back to the kitchen pipeline when
-            the user is not admin/manager (chefs see kitchen counts as
-            stage counts via `kitchen` instead of `stageCounts`). */}
-        {(summary.stageCounts || summary.kitchen) && (
-          <OrderJourneyStrip
-            stageCounts={
-              summary.stageCounts ??
-              // Convert kitchen counts into the stageCounts shape so the
-              // chef sees the same visual.
-              {
-                PENDING_CHEF_APPROVAL: summary.kitchen?.awaitingChefApproval ?? 0,
-                CHEF_REQUISITION_PENDING: summary.kitchen?.requisitionPending ?? 0,
-                ISSUING: summary.kitchen?.waitingOnStore ?? 0,
-                READY_FOR_PRODUCTION: summary.kitchen?.readyToCook ?? 0,
-                IN_PREP: summary.kitchen?.inProduction ?? 0,
-                READY: summary.kitchen?.readyToDispatch ?? 0,
-              }
-            }
-            stageStuck={summary.stageStuck}
-          />
-        )}
-
-        {/* 3 ─ Today's orders + money. */}
-        <div className="grid gap-5 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <TodayTimeline orders={summary.todayOrdersList} />
+        {/* 6 ─ Money this month — one quiet strip at the bottom */}
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-ik-rule bg-ik-paper-alt p-4">
+          <span className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Money this month</span>
+          <div className="flex flex-wrap gap-x-6 gap-y-1 font-mono text-[13px]">
+            <span><span className="text-ik-ink-3">In </span><span className="text-positive">{formatINRWhole(summary.ar?.collectedThisMonth ?? 0)}</span></span>
+            <span><span className="text-ik-ink-3">Out </span><span className="text-ik-ink">{formatINRWhole(summary.ap?.paidThisMonth ?? 0)}</span></span>
+            <span><span className="text-ik-ink-3">Due </span><span className="text-alert">{formatINRWhole(summary.ar?.pending ?? summary.outstandingAR)}</span></span>
           </div>
-          {summary.ar ? (
-            <ARDonut ar={summary.ar} />
-          ) : summary.storeKeeper ? (
-            <StockSnapshot storeKeeper={summary.storeKeeper} />
-          ) : (
-            <section className="rounded-md border border-ik-rule bg-ik-card p-4 text-[12.5px] text-ik-ink-3">
-              Receivables panel is visible to admin / manager / accounts.
-            </section>
-          )}
-        </div>
-
-        {/* 3b ─ Money out (vendor payables) — same row as AR for the
-            financial-facing roles. */}
-        {summary.ap && (
-          <div className="grid gap-5 lg:grid-cols-3">
-            {/* Cashflow KPI strip: this-month money-in vs money-out. */}
-            <div className="lg:col-span-2 rounded-md border border-ik-rule bg-ik-card p-4">
-              <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Cashflow this month</div>
-              <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                <div>
-                  <div className="text-[11.5px] text-ik-ink-3">Money in (from customers)</div>
-                  <div className="font-mono text-[20px] text-positive">₹{summary.ar?.collectedThisMonth ?? "0.00"}</div>
-                </div>
-                <div>
-                  <div className="text-[11.5px] text-ik-ink-3">Money out (to vendors)</div>
-                  <div className="font-mono text-[20px] text-ik-ink">₹{summary.ap.paidThisMonth}</div>
-                </div>
-              </div>
-              <p className="mt-3 text-[11.5px] text-ik-ink-3">
-                Click the donuts to drill into the relevant invoice / bill list.
-              </p>
-            </div>
-            <APDonut ap={summary.ap} />
-          </div>
-        )}
-
-        {/* 4 ─ Procurement chain (admin/manager only). */}
-        {isManagerScope && summary.procurement && (
-          <ProcurementStrip procurement={summary.procurement} />
-        )}
+        </section>
       </div>
-    </>
   );
 }
