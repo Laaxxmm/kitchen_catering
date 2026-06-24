@@ -695,6 +695,9 @@ export const HousekeepingItemInput = z.object({
   name: z.string().min(2).max(160),
   sku: z.string().max(60).nullable().optional(),
   unit: z.string().min(1).max(20).default("piece"),
+  // Reusable (towels / linens) vs consumable (soap / tissue). Reusable items
+  // are issued, washed, and returned to stock rather than used up.
+  reusable: z.boolean().optional(),
   minStock: decimalString.nullable().optional(),
   // Opening balance — applied only on CREATE. Server records an internal
   // "Opening balance" receipt for the audit trail and bumps currentStock.

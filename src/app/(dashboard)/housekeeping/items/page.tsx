@@ -19,6 +19,8 @@ export default async function HousekeepingItemsPage() {
     currentStock: i.currentStock.toString(),
     minStock: i.minStock?.toString() ?? null,
     active: i.active,
+    reusable: i.reusable,
+    inCirculation: i.inCirculation.toString(),
   }));
 
   return (

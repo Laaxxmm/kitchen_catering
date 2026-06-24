@@ -246,6 +246,7 @@ export async function upsertHousekeepingItem(raw: unknown, id?: string) {
           name: input.name,
           sku: input.sku ?? null,
           unit: input.unit,
+          reusable: input.reusable ?? false,
           minStock: input.minStock ? new Prisma.Decimal(input.minStock) : null,
           notes: input.notes ?? null,
           active: input.active ?? true,
@@ -267,6 +268,7 @@ export async function upsertHousekeepingItem(raw: unknown, id?: string) {
         name: input.name,
         sku: input.sku ?? null,
         unit: input.unit,
+        reusable: input.reusable ?? false,
         minStock: input.minStock ? new Prisma.Decimal(input.minStock) : null,
         notes: input.notes ?? null,
         active: input.active ?? true,
@@ -460,7 +462,7 @@ export async function recordHousekeepingIssue(raw: unknown) {
   const itemIds = [...new Set(lines.map((l) => l.itemId))];
   const items = await db.housekeepingItem.findMany({
     where: { id: { in: itemIds } },
-    select: { id: true, name: true, currentStock: true, unit: true, active: true },
+    select: { id: true, name: true, currentStock: true, unit: true, active: true, reusable: true },
   });
   const byId = new Map(items.map((i) => [i.id, i]));
   for (const l of lines) {
@@ -489,9 +491,15 @@ export async function recordHousekeepingIssue(raw: unknown) {
       },
     });
     for (const l of lines) {
+      // Reusable items move from clean stock into circulation (they'll come
+      // back via a Return). Consumables just leave stock.
+      const reusable = byId.get(l.itemId)?.reusable ?? false;
       await tx.housekeepingItem.update({
         where: { id: l.itemId },
-        data: { currentStock: { decrement: l.qty } },
+        data: {
+          currentStock: { decrement: l.qty },
+          ...(reusable ? { inCirculation: { increment: l.qty } } : {}),
+        },
       });
     }
     await tx.auditLog.create({
@@ -509,6 +517,72 @@ export async function recordHousekeepingIssue(raw: unknown) {
   revalidatePath("/housekeeping/items");
   revalidatePath("/housekeeping");
   return { id: issue.id };
+}
+
+/** Reusable items that have units out in circulation — powers the Return picker. */
+export async function listReusableInCirculation() {
+  await requireRole(WRITE_ROLES);
+  const rows = await db.housekeepingItem.findMany({
+    where: { active: true, reusable: true },
+    select: { id: true, name: true, unit: true, currentStock: true, inCirculation: true },
+    orderBy: { name: "asc" },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    unit: r.unit,
+    currentStock: r.currentStock.toString(),
+    inCirculation: r.inCirculation.toString(),
+  }));
+}
+
+/**
+ * Close the reusable loop. "returned" (washed & back) moves units from
+ * circulation back into clean stock; "lost" (damaged / not coming back)
+ * removes them from circulation without restocking. You can't return more
+ * than is currently out.
+ */
+export async function returnHousekeepingStock(input: {
+  itemId: string;
+  qty: string;
+  outcome: "returned" | "lost";
+  note?: string;
+}) {
+  const session = await requireRole(WRITE_ROLES);
+  const qty = new Prisma.Decimal(input.qty || "0");
+  if (qty.lessThanOrEqualTo(0)) throw new Error("Quantity must be greater than 0");
+
+  await db.$transaction(async (tx) => {
+    const item = await tx.housekeepingItem.findUnique({
+      where: { id: input.itemId },
+      select: { id: true, name: true, unit: true, reusable: true, inCirculation: true },
+    });
+    if (!item) throw new Error("Item not found");
+    if (!item.reusable) throw new Error(`${item.name} isn't a reusable item`);
+    const circ = new Decimal(item.inCirculation.toString());
+    if (new Decimal(qty.toString()).gt(circ)) {
+      throw new Error(`Only ${circ.toString()} ${item.unit} of ${item.name} are out in use — can't return ${qty.toString()}.`);
+    }
+
+    await tx.housekeepingItem.update({
+      where: { id: item.id },
+      data: {
+        inCirculation: { decrement: qty },
+        ...(input.outcome === "returned" ? { currentStock: { increment: qty } } : {}),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: input.outcome === "returned" ? "HK_REUSABLE_RETURNED" : "HK_REUSABLE_WRITTEN_OFF",
+        entity: "HousekeepingItem",
+        entityId: item.id,
+      },
+    });
+  });
+
+  revalidatePath("/housekeeping/items");
+  revalidatePath("/housekeeping");
 }
 
 export interface ListIssuesOpts {

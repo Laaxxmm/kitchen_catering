@@ -18,6 +18,7 @@ export default async function HousekeepingLandingPage() {
       primary={
         <div className="flex flex-wrap gap-2">
           <Link href="/housekeeping/issues/new"><Button>New issue to room</Button></Link>
+          <Link href="/housekeeping/returns/new"><Button variant="outline">Return linen</Button></Link>
           <Link href="/housekeeping/receipts/new"><Button variant="outline">Record receipt</Button></Link>
           <Link href="/housekeeping/adjust"><Button variant="outline">Adjust stock</Button></Link>
         </div>
@@ -28,6 +29,7 @@ export default async function HousekeepingLandingPage() {
         { label: "Staff", href: "/housekeeping/staff" },
         { label: "Receipts", href: "/housekeeping/receipts" },
         { label: "Issues", href: "/housekeeping/issues" },
+        { label: "Returns", href: "/housekeeping/returns/new" },
         { label: "Adjust stock", href: "/housekeeping/adjust" },
         { label: "Reports", href: "/housekeeping/reports" },
       ]}

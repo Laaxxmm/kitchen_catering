@@ -29,6 +29,8 @@ interface Item {
   currentStock: string;
   minStock: string | null;
   active: boolean;
+  reusable: boolean;
+  inCirculation: string;
 }
 
 export function ItemsTable({ items }: { items: Item[] }) {
@@ -40,6 +42,7 @@ export function ItemsTable({ items }: { items: Item[] }) {
   const [unit, setUnit] = useState("piece");
   const [minStock, setMinStock] = useState("");
   const [openingStock, setOpeningStock] = useState("");
+  const [reusable, setReusable] = useState(false);
 
   function startCreate() {
     setEditing({ id: undefined });
@@ -48,6 +51,7 @@ export function ItemsTable({ items }: { items: Item[] }) {
     setUnit("piece");
     setMinStock("");
     setOpeningStock("");
+    setReusable(false);
   }
   function startEdit(it: Item) {
     setEditing(it);
@@ -56,6 +60,7 @@ export function ItemsTable({ items }: { items: Item[] }) {
     setUnit(it.unit);
     setMinStock(it.minStock ?? "");
     setOpeningStock(""); // not used on edit
+    setReusable(it.reusable);
   }
   function cancel() {
     setEditing(null);
@@ -74,6 +79,7 @@ export function ItemsTable({ items }: { items: Item[] }) {
             name: name.trim(),
             sku: sku.trim() || null,
             unit: unit.trim() || "piece",
+            reusable,
             minStock: minStock.trim() || null,
             // Only sent on create; ignored server-side on update.
             openingStock: isCreate && openingStock.trim() ? openingStock.trim() : null,
@@ -138,6 +144,7 @@ export function ItemsTable({ items }: { items: Item[] }) {
             name: it.name,
             sku: it.sku,
             unit: it.unit,
+            reusable: it.reusable,
             minStock: it.minStock,
             active: true,
           },
@@ -199,6 +206,13 @@ export function ItemsTable({ items }: { items: Item[] }) {
               />
             </div>
           </div>
+          <label className="flex items-start gap-2 text-[12.5px] text-ik-ink-2">
+            <input type="checkbox" checked={reusable} onChange={(e) => setReusable(e.target.checked)} className="mt-0.5" />
+            <span>
+              <span className="font-medium text-ik-ink">Reusable item</span> — washed and reused (towels, linens, robes).
+              Issuing moves units to &ldquo;out in use&rdquo;; bring them back via <span className="font-medium">Return linen</span>.
+            </span>
+          </label>
           {!editing.id && (
             <div className="grid gap-1.5 sm:max-w-xs">
               <Label htmlFor="openingStock">
@@ -262,7 +276,12 @@ export function ItemsTable({ items }: { items: Item[] }) {
                 it.minStock !== null && Number(it.currentStock) <= Number(it.minStock);
               return (
                 <TableRow key={it.id}>
-                  <TableCell className="font-medium">{it.name}</TableCell>
+                  <TableCell className="font-medium">
+                    {it.name}
+                    {it.reusable && (
+                      <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-700">reusable</span>
+                    )}
+                  </TableCell>
                   <TableCell className="font-mono text-[11.5px] text-ik-ink-2">
                     {it.sku ?? "—"}
                   </TableCell>
@@ -275,6 +294,9 @@ export function ItemsTable({ items }: { items: Item[] }) {
                     >
                       {it.currentStock}
                     </span>
+                    {it.reusable && Number(it.inCirculation) > 0 && (
+                      <span className="ml-1 font-mono text-[11px] text-amber-700">· {it.inCirculation} out</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-right font-mono text-[12px] text-ik-ink-3">
                     {it.minStock ?? "—"}

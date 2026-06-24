@@ -2033,8 +2033,13 @@ model HousekeepingItem {
   name         String
   sku          String? // optional internal SKU
   unit         String   @default("piece") // "piece", "set", "ml", "kg", "pair"
-  currentStock Decimal  @default(0) @db.Decimal(14, 3)
+  currentStock Decimal  @default(0) @db.Decimal(14, 3) // clean / available stock
   minStock     Decimal? @db.Decimal(14, 3) // optional low-stock threshold
+  // Reusable items (towels, linens, robes) loop: issuing moves units from
+  // currentStock into inCirculation; returning after a wash moves them back.
+  // Consumables (soap, tissue) stay reusable=false / inCirculation=0.
+  reusable      Boolean @default(false)
+  inCirculation Decimal @default(0) @db.Decimal(14, 3) // issued, not yet returned
   notes        String?
   active       Boolean  @default(true)
   createdAt    DateTime @default(now())
