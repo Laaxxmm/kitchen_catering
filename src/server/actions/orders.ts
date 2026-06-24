@@ -25,6 +25,7 @@ import { nextOrderCode } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
 import { indefineStateCode } from "@/lib/org";
+import { isImmediateChannel } from "@/lib/order-channels";
 import { notifyRoles } from "@/server/actions/notifications";
 import { formatIST } from "@/lib/time";
 
@@ -343,10 +344,7 @@ export async function submitOrder(id: string) {
     }
     if (order.items.length === 0) throw new Error("Add at least one item before submitting");
 
-    const immediateChannel =
-      order.channel === "ROOM_SERVICE" ||
-      order.channel === "ALACARTE" ||
-      order.channel === "MANAGEMENT";
+    const immediateChannel = isImmediateChannel(order.channel);
 
     if (!immediateChannel && order.eventDate.getTime() <= Date.now()) {
       throw new Error("Event date must be in the future");

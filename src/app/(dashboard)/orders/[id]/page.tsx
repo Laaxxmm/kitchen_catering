@@ -17,6 +17,7 @@ import {
 } from "@/server/actions/orders";
 import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoices";
 import { listDishes } from "@/server/actions/dishes";
+import { isImmediateChannel } from "@/lib/order-channels";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { AdminApprovalBlock } from "./_components/AdminApprovalBlock";
@@ -39,10 +40,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const role = session?.user?.role;
   // In-house immediate channels skip admin sign-off and go straight to the
   // chef — the UI (button label, stepper, next-step hint) reflects that.
-  const immediate =
-    order.channel === "ROOM_SERVICE" ||
-    order.channel === "ALACARTE" ||
-    order.channel === "MANAGEMENT";
+  const immediate = isImmediateChannel(order.channel);
   const isAdmin = role === Role.ADMIN;
   const isManager = role === Role.MANAGER || isAdmin;
   const isChef = role === Role.KITCHEN_HEAD || isAdmin;

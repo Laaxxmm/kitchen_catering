@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Combobox, type ComboOption } from "@/components/ui/combobox";
 import type { OrderCreateInputT, OrderItemInputT } from "@/lib/validators";
+import { isImmediateChannel } from "@/lib/order-channels";
 import { isNextNavigationError } from "@/lib/next-error";
 import { QuickAddCustomer, type QuickCustomerInput } from "@/components/ik/QuickAddCustomer";
 
@@ -91,10 +92,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
   // Immediate in-house channels: served now to a room/table, so we hide and
   // skip event date, delivery address/window and place of supply — the
   // server defaults them (now / the room / hotel's own state).
-  const immediate =
-    channel === OrderChannel.ROOM_SERVICE ||
-    channel === OrderChannel.ALACARTE ||
-    channel === OrderChannel.MANAGEMENT;
+  const immediate = isImmediateChannel(channel);
   const [lines, setLines] = useState<DraftLine[]>(() => {
     if (defaults?.items && defaults.items.length > 0) {
       return defaults.items.map((it) => ({

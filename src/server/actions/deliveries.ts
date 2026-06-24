@@ -19,6 +19,7 @@ import {
 } from "@/lib/validators";
 import { nextDeliveryNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
+import { channelWantsFeedback } from "@/lib/order-channels";
 import { notifyRoles } from "@/server/actions/notifications";
 
 /**
@@ -435,10 +436,7 @@ export async function confirmDeliveryOTP(id: string, raw: unknown) {
     const wantsFeedback =
       fullOrder &&
       !fullOrder.feedbackToken &&
-      (fullOrder.channel === "ROOM_SERVICE" ||
-        fullOrder.channel === "PACKET" ||
-        fullOrder.channel === "ODC" ||
-        fullOrder.channel === "ALACARTE");
+      channelWantsFeedback(fullOrder.channel);
     await tx.order.update({
       where: { id: delivery.orderId },
       data: {

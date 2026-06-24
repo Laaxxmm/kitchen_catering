@@ -6,7 +6,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { listCustomerInvoices } from "@/server/actions/customer-invoices";
 import { auth } from "@/server/auth";
 import { toDecimal, formatINRWhole } from "@/lib/money";
-import { formatIST } from "@/lib/time";
 import { SummaryStrip } from "@/components/ik/StatChips";
 import { StatusPill } from "@/components/ik/StatusPill";
 
