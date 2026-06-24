@@ -37,6 +37,12 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
       ? await listDishes({ active: true })
       : [];
   const role = session?.user?.role;
+  // In-house immediate channels skip admin sign-off and go straight to the
+  // chef — the UI (button label, stepper, next-step hint) reflects that.
+  const immediate =
+    order.channel === "ROOM_SERVICE" ||
+    order.channel === "ALACARTE" ||
+    order.channel === "MANAGEMENT";
   const isAdmin = role === Role.ADMIN;
   const isManager = role === Role.MANAGER || isAdmin;
   const isChef = role === Role.KITCHEN_HEAD || isAdmin;
@@ -124,7 +130,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             )}
             {order.status === OrderStatus.DRAFT && isSales && (
               <form action={doSubmit}>
-                <Button type="submit">Submit for admin approval</Button>
+                <Button type="submit">
+                  {immediate ? "Submit to kitchen" : "Submit for admin approval"}
+                </Button>
               </form>
             )}
             {/* Tax invoice is generated manually by accounts/admin/manager
@@ -143,7 +151,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
 
       {/* Horizontal flow stepper — visible to everyone */}
       <div className="mb-6">
-        <OrderStepper current={order.status} />
+        <OrderStepper current={order.status} immediate={immediate} />
       </div>
 
       {/* Status-aware "what happens next" panel. Always visible so anyone
@@ -153,6 +161,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         orderId={order.id}
         orderCode={order.code}
         role={role}
+        immediate={immediate}
         hasRequisitions={order.chefRequisitions.length > 0}
         onIngredientsAvailable={doIngredientsAvailable}
       />
@@ -421,6 +430,8 @@ interface OrderNextStepProps {
   orderId: string;
   orderCode: string;
   role: Role | undefined;
+  /** In-house immediate channel — submit goes straight to the chef. */
+  immediate: boolean;
   hasRequisitions: boolean;
   /** Server action: chef skips the requisition because stock is on hand. */
   onIngredientsAvailable: () => Promise<void>;
@@ -433,7 +444,7 @@ interface OrderNextStepProps {
  * via the header button, PAID/COMPLETED/CANCELLED are read-only) and the
  * approval states (those use dedicated blocks above).
  */
-function OrderNextStep({ status, orderId, orderCode, role, hasRequisitions, onIngredientsAvailable }: OrderNextStepProps) {
+function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisitions, onIngredientsAvailable }: OrderNextStepProps) {
   const isAdmin = role === Role.ADMIN;
   const isManager = role === Role.MANAGER || isAdmin;
   const isChef = role === Role.KITCHEN_HEAD || isAdmin;
@@ -445,8 +456,14 @@ function OrderNextStep({ status, orderId, orderCode, role, hasRequisitions, onIn
 
   switch (status) {
     case OrderStatus.DRAFT:
-      title = "Next: submit for admin approval";
-      body = (
+      title = immediate ? "Next: submit to the kitchen" : "Next: submit for admin approval";
+      body = immediate ? (
+        <>
+          This is an in-house order (room service / à la carte / management), so it skips admin
+          sign-off and goes straight to the chef when submitted from the header.{" "}
+          {!isSales && <span className="text-ik-ink-3">(Submit action is for sales / manager / admin.)</span>}
+        </>
+      ) : (
         <>
           Front desk / sales submits this order from the header. It goes to the admin for sign-off
           first, and only then to the chef.{" "}

@@ -1,8 +1,10 @@
 import { OrderStatus } from "@prisma/client";
-import { STAGE_FLOW, STATUS_LABEL, effectiveStageIndex } from "@/lib/order-status";
+import { STAGE_FLOW, STATUS_LABEL, effectiveStageStatus } from "@/lib/order-status";
 
 interface Props {
   current: OrderStatus;
+  /** In-house immediate channels skip the admin gate — drop that step. */
+  immediate?: boolean;
 }
 
 /**
@@ -14,8 +16,14 @@ interface Props {
  *   ● Draft ── ● Chef review ── ◉ Requisition ── ○ Issuing ── …
  *                                  ↑ current
  */
-export function OrderStepper({ current }: Props) {
-  const activeIdx = effectiveStageIndex(current);
+export function OrderStepper({ current, immediate }: Props) {
+  // Immediate in-house orders never pass through admin review, so leave
+  // that stage off the line entirely.
+  const flow = immediate
+    ? STAGE_FLOW.filter((s) => s.status !== OrderStatus.PENDING_ADMIN_APPROVAL)
+    : STAGE_FLOW;
+  const activeStatus = effectiveStageStatus(current);
+  const activeIdx = activeStatus ? flow.findIndex((s) => s.status === activeStatus) : -1;
   const isCancelled = current === OrderStatus.CANCELLED;
   const isRejected = current === OrderStatus.REJECTED_BY_MANAGER;
   const isChanges = current === OrderStatus.CHANGES_PROPOSED_BY_CHEF;

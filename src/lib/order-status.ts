@@ -91,20 +91,30 @@ export function stageIndex(status: OrderStatus): number {
   return STAGE_FLOW.findIndex((s) => s.status === status);
 }
 
-/** Where the stepper should highlight when current is an off-path branch. */
-export function effectiveStageIndex(status: OrderStatus): number {
+/**
+ * The on-path stage status the stepper should highlight — maps off-path
+ * branch states back onto their parent stage. Returns null for CANCELLED
+ * (nothing highlighted).
+ */
+export function effectiveStageStatus(status: OrderStatus): OrderStatus | null {
   switch (status) {
     case OrderStatus.REJECTED_BY_ADMIN:
-      return stageIndex(OrderStatus.PENDING_ADMIN_APPROVAL);
+      return OrderStatus.PENDING_ADMIN_APPROVAL;
     case OrderStatus.CHANGES_PROPOSED_BY_CHEF:
-      return stageIndex(OrderStatus.PENDING_CHEF_APPROVAL);
+      return OrderStatus.PENDING_CHEF_APPROVAL;
     case OrderStatus.CHEF_APPROVED:
-      return stageIndex(OrderStatus.CHEF_REQUISITION_PENDING);
+      return OrderStatus.CHEF_REQUISITION_PENDING;
     case OrderStatus.REJECTED_BY_MANAGER:
-      return stageIndex(OrderStatus.PENDING_CHEF_APPROVAL);
+      return OrderStatus.PENDING_CHEF_APPROVAL;
     case OrderStatus.CANCELLED:
-      return -1;
+      return null;
     default:
-      return stageIndex(status);
+      return status;
   }
+}
+
+/** Where the stepper should highlight when current is an off-path branch. */
+export function effectiveStageIndex(status: OrderStatus): number {
+  const s = effectiveStageStatus(status);
+  return s ? stageIndex(s) : -1;
 }
