@@ -18,9 +18,14 @@
  *   - All petty cash floats, vouchers, top-ups
  *   - All salary runs + lines
  *   - All e-invoice logs
+ *   - All housekeeping / maintenance / banquet receipts + issues + lines
+ *   - All tasks (task presets kept), time entries, mobile sessions + op-log
+ *   - All uploaded documents (attachments to the deleted entities)
+ *   - All notifications (everyone's inbox)
  *   - All audit log rows (truly clean slate)
  *   - All FY sequence rows (so the next document numbers start at 0001)
  *   - Ingredient.onHandQty back to openingQty + avgUnitCost back to openingAvgCost
+ *   - Housekeeping / maintenance / banquet item stock back to 0
  *
  * Usage:
  *   npm run db:reset-transactional
@@ -106,6 +111,37 @@ async function main() {
       // E-invoice
       const eilDel = await tx.eInvoiceLog.deleteMany();
 
+      // ── Other departments — housekeeping / maintenance / banquet ──────
+      // Lines before headers. The item catalogues stay; their stock is
+      // reset to 0 below (they have no "opening" balance concept).
+      const hkIlDel = await tx.housekeepingIssueLine.deleteMany();
+      const hkIDel = await tx.housekeepingIssue.deleteMany();
+      const hkRlDel = await tx.housekeepingReceiptLine.deleteMany();
+      const hkRDel = await tx.housekeepingReceipt.deleteMany();
+
+      const mtAlDel = await tx.maintenanceActivityLine.deleteMany();
+      const mtADel = await tx.maintenanceActivity.deleteMany();
+      const mtRlDel = await tx.maintenanceReceiptLine.deleteMany();
+      const mtRDel = await tx.maintenanceReceipt.deleteMany();
+
+      const bqIlDel = await tx.banquetIssueLine.deleteMany();
+      const bqIDel = await tx.banquetIssue.deleteMany();
+      const bqRlDel = await tx.banquetReceiptLine.deleteMany();
+      const bqRDel = await tx.banquetReceipt.deleteMany();
+
+      // ── Tasks, attendance, mobile sessions, attachments ───────────────
+      // Task presets (TaskTemplate) stay — they're reusable master config.
+      const taskDel = await tx.task.deleteMany();
+      const teDel = await tx.timeEntry.deleteMany();
+      // Mobile op-log + auth sessions; registered devices (MobileDevice) stay.
+      const moDel = await tx.mobileOp.deleteMany();
+      const msDel = await tx.mobileSession.deleteMany();
+      // Documents are attachments to the entities we just deleted.
+      const docDel = await tx.document.deleteMany();
+
+      // ── Notifications — wipe everyone's inbox for a clean start ───────
+      const notifDel = await tx.notification.deleteMany();
+
       // ── Audit log ─────────────────────────────────────────────────────
       const alDel = await tx.auditLog.deleteMany();
 
@@ -132,6 +168,13 @@ async function main() {
         SET "onHandQty" = "openingQty",
             "avgUnitCost" = "openingAvgCost"
       `;
+
+      // Department item stock has no "opening" balance — it's built up
+      // entirely from receipts we just deleted, so reset it to 0. The item
+      // catalogues themselves (names, units, reusable flags) are kept.
+      await tx.$executeRaw`UPDATE "HousekeepingItem" SET "currentStock" = 0, "inCirculation" = 0`;
+      await tx.$executeRaw`UPDATE "MaintenanceItem" SET "currentStock" = 0`;
+      await tx.$executeRaw`UPDATE "BanquetItem" SET "currentStock" = 0`;
 
       console.log("Deleted rows:");
       console.log(`  Orders:                  ${orderDel.count}`);
@@ -167,6 +210,17 @@ async function main() {
       console.log(`  Salary runs:             ${srDel.count}`);
       console.log(`  Salary run lines:        ${srlDel.count}`);
       console.log(`  E-invoice logs:          ${eilDel.count}`);
+      console.log(`  Housekeeping receipts:   ${hkRDel.count}  (lines ${hkRlDel.count})`);
+      console.log(`  Housekeeping issues:     ${hkIDel.count}  (lines ${hkIlDel.count})`);
+      console.log(`  Maintenance receipts:    ${mtRDel.count}  (lines ${mtRlDel.count})`);
+      console.log(`  Maintenance activities:  ${mtADel.count}  (lines ${mtAlDel.count})`);
+      console.log(`  Banquet receipts:        ${bqRDel.count}  (lines ${bqRlDel.count})`);
+      console.log(`  Banquet issues:          ${bqIDel.count}  (lines ${bqIlDel.count})`);
+      console.log(`  Tasks:                   ${taskDel.count}`);
+      console.log(`  Time entries:            ${teDel.count}`);
+      console.log(`  Mobile ops / sessions:   ${moDel.count} / ${msDel.count}`);
+      console.log(`  Documents:               ${docDel.count}`);
+      console.log(`  Notifications:           ${notifDel.count}`);
       console.log(`  Audit log entries:       ${alDel.count}`);
       console.log(`  Ingredient stock rows reset: ${stockReset}`);
     },
@@ -178,7 +232,9 @@ async function main() {
     },
   );
 
-  console.log("\n✅ Done. Master data (users, customers, dishes, ingredients, vendors, settings) preserved.");
+  console.log("\n✅ Done. Master data preserved: users, customers, dishes, recipes,");
+  console.log("   ingredients, vendors, settings, salary structures, task presets,");
+  console.log("   rooms/staff, and the housekeeping/maintenance/banquet item catalogues.");
   console.log("All document number sequences will restart at 0001.");
 }
 

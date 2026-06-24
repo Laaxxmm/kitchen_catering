@@ -137,6 +137,26 @@ export default async function LoginPage({
             <p className="mt-4 text-center font-ik-mono text-[10px] uppercase tracking-[0.12em] text-ik-ink-3">
               Secure session · Asia/Kolkata · IST timestamps
             </p>
+            <p className="mt-2 text-center font-ik-sans text-[11px] text-ik-ink-3">
+              Developed &amp; maintained by{" "}
+              <a
+                href="https://indefine.in"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-brand-700 hover:underline"
+              >
+                Team Indefine
+              </a>{" "}
+              ·{" "}
+              <a
+                href="https://indefine.in"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-gold hover:underline"
+              >
+                indefine.in
+              </a>
+            </p>
           </div>
         </section>
       </div>

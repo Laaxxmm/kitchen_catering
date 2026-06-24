@@ -328,6 +328,29 @@ export function Sidebar({ userName, userRole, badges, footer }: SidebarProps) {
           {footer}
         </div>
       )}
+
+      {/* Credit — Team Indefine built & maintain this product. */}
+      {!collapsed && (
+        <a
+          href="https://indefine.in"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            padding: "8px 12px 10px",
+            borderTop: `1px solid ${IK.rule}`,
+            fontFamily: "var(--font-ik-sans), Inter Tight, system-ui, sans-serif",
+            fontSize: 10,
+            lineHeight: 1.4,
+            color: IK.ink3,
+            textDecoration: "none",
+          }}
+        >
+          Developed &amp; maintained by{" "}
+          <span style={{ color: IK.accentInk, fontWeight: 600 }}>Team Indefine</span>
+          {" · "}
+          <span style={{ color: IK.gold }}>indefine.in</span>
+        </a>
+      )}
     </aside>
   );
 }
