@@ -1,65 +1,20 @@
 import Link from "next/link";
-import { ProductionJobItemStatus, ProductionJobStatus } from "@prisma/client";
+import { ProductionJobItemStatus } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { listProductionJobs } from "@/server/actions/production-jobs";
 import { getOrdersWaitingOnIngredients } from "@/server/actions/dashboard";
 import { formatIST } from "@/lib/time";
 import { toDecimal } from "@/lib/money";
+import { KitchenBoard } from "./_components/KitchenBoard";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Kitchen board — kanban-style view of every cooking job in the
- * selected time window. Columns mirror the ProductionJob state machine:
- * Queued → Prep → Cooking → Ready. Each card surfaces what the chef
- * needs at a glance — customer, dispatch time, dish count, portion
- * total, item-level progress, urgency.
+ * Kitchen board — a compact stage-count strip (Queued → Prep → Cooking →
+ * Ready) over job cards grouped by stage, each with a per-stage primary
+ * action. Replaces the old four-column kanban that showed three empty
+ * "Nothing here" columns for a single job.
  */
-
-interface ColumnSpec {
-  status: ProductionJobStatus;
-  label: string;
-  /** Header / left-rail accent colour for the column. */
-  accent: string;
-  /** Subheader explaining the column for a new chef. */
-  hint: string;
-}
-
-const COLUMNS: ColumnSpec[] = [
-  { status: ProductionJobStatus.QUEUED, label: "Queued", accent: "#516056", hint: "Issued, not yet started" },
-  { status: ProductionJobStatus.PREP, label: "Prep", accent: "#BA7517", hint: "Mise en place" },
-  { status: ProductionJobStatus.COOKING, label: "Cooking", accent: "#A32D2D", hint: "On the burner" },
-  { status: ProductionJobStatus.READY, label: "Ready", accent: "#3B6D11", hint: "Plated, awaiting dispatch" },
-];
-
-/**
- * Human-friendly "time until ready-by" plus an urgency band. Anything
- * less than 2h to ready-by is red; less than 6h is amber; otherwise grey.
- */
-function timing(d: Date): { label: string; tone: "overdue" | "urgent" | "soon" | "ok" } {
-  const diffMs = d.getTime() - Date.now();
-  if (diffMs < 0) {
-    const lateMins = Math.floor(-diffMs / 60000);
-    if (lateMins >= 60) return { label: `${Math.floor(lateMins / 60)}h late`, tone: "overdue" };
-    return { label: `${lateMins}m late`, tone: "overdue" };
-  }
-  const hours = Math.floor(diffMs / (60 * 60 * 1000));
-  const mins = Math.floor((diffMs % (60 * 60 * 1000)) / 60000);
-  let label: string;
-  if (hours >= 24) label = `${Math.floor(hours / 24)}d ${hours % 24}h`;
-  else if (hours >= 1) label = `${hours}h ${mins}m`;
-  else label = `${mins}m`;
-  if (diffMs < 2 * 60 * 60 * 1000) return { label, tone: "urgent" };
-  if (diffMs < 6 * 60 * 60 * 1000) return { label, tone: "soon" };
-  return { label, tone: "ok" };
-}
-
-const TIMING_PILL: Record<"overdue" | "urgent" | "soon" | "ok", string> = {
-  overdue: "bg-alert text-white",
-  urgent: "bg-amber text-white",
-  soon: "bg-amber-wash text-amber",
-  ok: "bg-ik-paper-alt text-ik-ink-3",
-};
 
 export default async function KitchenPage({
   searchParams,
@@ -212,103 +167,25 @@ export default async function KitchenPage({
         </div>
       )}
 
-      {/* Kanban columns */}
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-        {COLUMNS.map((col) => {
-          const inCol = jobs.filter((j) => j.status === col.status);
-          return (
-            <section key={col.status} className="flex flex-col gap-2">
-              <header
-                className="rounded-md border-l-[3px] bg-ik-card px-3 py-2"
-                style={{ borderLeftColor: col.accent }}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-[13px] text-ik-ink">{col.label}</span>
-                  <span
-                    className="rounded-full px-2 font-mono text-[11px]"
-                    style={{ background: col.accent + "22", color: col.accent }}
-                  >
-                    {inCol.length}
-                  </span>
-                </div>
-                <p className="mt-0.5 text-[10.5px] text-ik-ink-3">{col.hint}</p>
-              </header>
-              {inCol.length === 0 ? (
-                <div className="rounded-md border border-dashed border-ik-rule bg-ik-paper-alt/40 px-3 py-6 text-center text-[11.5px] text-ik-ink-3">
-                  Nothing here.
-                </div>
-              ) : (
-                inCol.map((job) => {
-                  const t = timing(job.scheduledReady);
-                  const portionTotal = job.items.reduce((s, it) => s + Number(it.portions), 0);
-                  const readyItems = job.items.filter((it) => it.status === ProductionJobItemStatus.READY).length;
-                  return (
-                    <Link
-                      key={job.id}
-                      href={`/kitchen/${job.id}`}
-                      className="block rounded-md border border-ik-rule bg-ik-card p-3 transition hover:border-brand-300 hover:shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="truncate font-medium text-[13.5px] text-ik-ink">
-                            {job.order.customer.name}
-                          </div>
-                          <div className="text-[11.5px] font-mono text-ik-ink-3">{job.order.code}</div>
-                        </div>
-                        <span
-                          className={
-                            "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-medium " + TIMING_PILL[t.tone]
-                          }
-                          title="Time to ready-by"
-                        >
-                          {t.label}
-                        </span>
-                      </div>
-                      <div className="mt-2 text-[11.5px] text-ik-ink-2">
-                        Ready by{" "}
-                        <span className="font-mono text-ik-ink">
-                          {formatIST(job.scheduledReady, "EEE HH:mm")}
-                        </span>
-                      </div>
-                      <div className="mt-2 grid gap-1 text-[11.5px] text-ik-ink-2">
-                        {job.items.slice(0, 3).map((it) => (
-                          <div key={it.id} className="flex items-baseline justify-between gap-2">
-                            <span className="truncate">{it.dish.name}</span>
-                            <span className="shrink-0 font-mono text-ik-ink-3">{it.portions.toString()}</span>
-                          </div>
-                        ))}
-                        {job.items.length > 3 && (
-                          <div className="text-[10.5px] text-ik-ink-3">+ {job.items.length - 3} more…</div>
-                        )}
-                      </div>
-                      {/* Progress strip */}
-                      <div className="mt-2 flex items-center gap-2 text-[10.5px] text-ik-ink-3">
-                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-ik-rule">
-                          <div
-                            className="h-full bg-brand-500 transition-all"
-                            style={{
-                              width:
-                                job.items.length > 0
-                                  ? `${(readyItems / job.items.length) * 100}%`
-                                  : "0%",
-                            }}
-                          />
-                        </div>
-                        <span className="whitespace-nowrap">
-                          {readyItems}/{job.items.length} ready
-                        </span>
-                      </div>
-                      <div className="mt-1.5 text-[10.5px] text-ik-ink-3">
-                        {portionTotal} portion{portionTotal === 1 ? "" : "s"} total
-                      </div>
-                    </Link>
-                  );
-                })
-              )}
-            </section>
-          );
-        })}
-      </div>
+      {/* Compact stage strip + grouped job cards with per-stage actions. */}
+      {!boardEmpty && (
+        <KitchenBoard
+          jobs={jobs.map((j) => ({
+            id: j.id,
+            orderId: j.orderId,
+            status: j.status as "QUEUED" | "PREP" | "COOKING" | "READY",
+            code: j.order.code,
+            customerName: j.order.customer.name,
+            scheduledReady: j.scheduledReady.toISOString(),
+            items: j.items.map((it) => ({
+              id: it.id,
+              dishName: it.dish.name,
+              portions: it.portions.toString(),
+              ready: it.status === ProductionJobItemStatus.READY,
+            })),
+          }))}
+        />
+      )}
     </>
   );
 }
