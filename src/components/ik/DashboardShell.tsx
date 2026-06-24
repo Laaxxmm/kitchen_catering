@@ -6,6 +6,7 @@ import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { Icon } from "./Icon";
 import { IK } from "./tokens";
+import type { NavBadges } from "@/lib/nav-config";
 
 // Responsive shell used by the (dashboard) layout. Owns the mobile-drawer
 // state for the sidebar:
@@ -20,11 +21,12 @@ import { IK } from "./tokens";
 interface Props {
   userName: string;
   userRole: string;
+  navBadges?: NavBadges;
   topBarRight?: ReactNode;
   children: ReactNode;
 }
 
-export function DashboardShell({ userName, userRole, topBarRight, children }: Props) {
+export function DashboardShell({ userName, userRole, navBadges, topBarRight, children }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const pathname = usePathname();
 
@@ -102,7 +104,7 @@ export function DashboardShell({ userName, userRole, topBarRight, children }: Pr
           top: "max(env(safe-area-inset-top), 28px)",
         }}
       >
-        <Sidebar userName={userName} userRole={userRole} />
+        <Sidebar userName={userName} userRole={userRole} badges={navBadges} />
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col">

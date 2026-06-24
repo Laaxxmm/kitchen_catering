@@ -1,100 +1,97 @@
 "use client";
-// TODO refactor: 318 lines — over 250-line hard component cap. Split nav config out of component before extending.
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
-import { Icon, type IconName } from "./Icon";
+import { Icon } from "./Icon";
 import { Wordmark } from "./Wordmark";
 import { IK } from "./tokens";
 import { istFyLabel } from "@/lib/time";
 import { SIDEBAR_KEYS_BY_ROLE } from "@/lib/role-nav";
+import { NAV_GROUPS, type NavItem, type NavBadges } from "@/lib/nav-config";
 import { roleLabel } from "@/lib/role-labels";
 import { NotificationBell } from "./NotificationBell";
 import type { Role } from "@prisma/client";
 
-// Left-rail app shell — fixed 236px, collapsible. Sections separated by mono eyebrows.
-// Catering ops modules; ordered roughly by daily-workflow frequency.
-
-type NavItem = { kind: "item"; key: string; label: string; icon: IconName; href: string; count?: number; badge?: boolean };
-type NavSep = { kind: "sep"; label: string };
-type NavNode = NavItem | NavSep;
-
-const NAV: NavNode[] = [
-  { kind: "item", key: "dashboard", label: "Dashboard", icon: "home", href: "/dashboard" },
-  { kind: "item", key: "tasks", label: "Tasks", icon: "report", href: "/tasks" },
-
-  { kind: "sep", label: "Sales" },
-  { kind: "item", key: "customers", label: "Customers", icon: "building", href: "/customers" },
-  { kind: "item", key: "quotes", label: "Quotes", icon: "quote", href: "/quotes" },
-  { kind: "item", key: "orders", label: "Orders", icon: "folder", href: "/orders" },
-  { kind: "item", key: "dishes", label: "Dishes", icon: "report", href: "/dishes" },
-
-  { kind: "sep", label: "Operations" },
-  { kind: "item", key: "kitchen", label: "Kitchen", icon: "briefcase", href: "/kitchen" },
-  { kind: "item", key: "requisitions", label: "Requisitions", icon: "report", href: "/requisitions" },
-  { kind: "item", key: "deliveries", label: "Deliveries", icon: "truck", href: "/deliveries" },
-  { kind: "item", key: "inventory", label: "Inventory", icon: "box", href: "/inventory" },
-  { kind: "item", key: "housekeeping", label: "Housekeeping", icon: "box", href: "/housekeeping" },
-  { kind: "item", key: "maintenance", label: "Maintenance", icon: "briefcase", href: "/maintenance" },
-  { kind: "item", key: "banquet", label: "Banquet store", icon: "box", href: "/banquet" },
-
-  { kind: "sep", label: "Procurement" },
-  { kind: "item", key: "procurement", label: "Procurement", icon: "invoice", href: "/procurement" },
-
-  { kind: "sep", label: "Finance" },
-  { kind: "item", key: "invoices", label: "Tax invoices", icon: "invoice", href: "/invoices" },
-  { kind: "item", key: "payments", label: "Payments", icon: "pie", href: "/payments" },
-  { kind: "item", key: "pettycash", label: "Petty cash", icon: "pie", href: "/petty-cash" },
-  { kind: "item", key: "salary", label: "Salary", icon: "user", href: "/salary" },
-  { kind: "item", key: "reports", label: "Reports", icon: "report", href: "/reports" },
-
-  { kind: "sep", label: "Admin" },
-  { kind: "item", key: "admin", label: "Users & settings", icon: "user", href: "/admin" },
-];
+// Left-rail app shell — 8 collapsible groups (see lib/nav-config.ts). The
+// group containing the current page is open by default; others collapsed.
+// Per-group "needs you" badges come from getNavBadges() (admin/manager).
 
 interface SidebarProps {
   userName: string;
   userRole: string;
+  badges?: NavBadges;
   footer?: ReactNode;
 }
 
-export function Sidebar({ userName, userRole, footer }: SidebarProps) {
+export function Sidebar({ userName, userRole, badges, footer }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname() ?? "/dashboard";
 
-  // Per-role allowlist. Server-side guards still enforce real auth; this
-  // just hides modules from users who can't use them.
+  // Per-role allowlist → only the groups/items this role may use.
   const allowedKeys = SIDEBAR_KEYS_BY_ROLE[userRole as Role] ?? new Set<string>();
-  const navForRole = NAV.filter((n) => n.kind === "sep" ? true : allowedKeys.has(n.key));
-  // Collapse empty sections (e.g. SALES sees no "Operations" section header).
-  const visible: NavNode[] = [];
-  for (let i = 0; i < navForRole.length; i++) {
-    const node = navForRole[i];
-    if (node.kind === "sep") {
-      // Only keep this separator if there's at least one following item
-      // before the next separator.
-      const nextSep = navForRole.findIndex((x, j) => j > i && x.kind === "sep");
-      const slice = navForRole.slice(i + 1, nextSep === -1 ? undefined : nextSep);
-      if (slice.some((x) => x.kind === "item")) visible.push(node);
-    } else {
-      visible.push(node);
+  const groups = NAV_GROUPS.map((g) => ({
+    ...g,
+    items: g.items.filter((i) => allowedKeys.has(i.key)),
+  })).filter((g) => g.items.length > 0);
+
+  // Longest-prefix-wins so deep paths highlight the most specific item, and
+  // remember which group that item lives in so it opens by default.
+  let activeKey: string | null = null;
+  let activeGroupKey: string | null = null;
+  let activeHrefLen = -1;
+  for (const g of groups) {
+    for (const item of g.items) {
+      const matches =
+        pathname === item.href ||
+        (item.href !== "/dashboard" && pathname.startsWith(item.href + "/"));
+      if (matches && item.href.length > activeHrefLen) {
+        activeKey = item.key;
+        activeGroupKey = g.key;
+        activeHrefLen = item.href.length;
+      }
     }
   }
 
-  // Longest-prefix-wins so deep paths highlight the most specific item.
-  let activeKey: string | null = null;
-  let activeHrefLen = -1;
-  for (const n of visible) {
-    if (n.kind !== "item") continue;
-    const matches =
-      pathname === n.href ||
-      (n.href !== "/dashboard" &&
-        (pathname === n.href || pathname.startsWith(n.href + "/")));
-    if (matches && n.href.length > activeHrefLen) {
-      activeKey = n.key;
-      activeHrefLen = n.href.length;
-    }
+  const [openGroups, setOpenGroups] = useState<Set<string>>(
+    () => new Set(activeGroupKey ? [activeGroupKey] : []),
+  );
+  const toggleGroup = (key: string) =>
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  function renderItem(item: NavItem) {
+    const active = item.key === activeKey;
+    return (
+      <Link
+        key={item.key}
+        href={item.href}
+        title={collapsed ? item.label : undefined}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          width: "100%",
+          padding: collapsed ? "8px 9px" : "7px 10px",
+          fontFamily: "var(--font-ik-sans), Inter Tight, system-ui, sans-serif",
+          fontSize: 13,
+          fontWeight: active ? 600 : 500,
+          color: active ? IK.accentInk : IK.ink2,
+          background: active ? IK.accentWash : "transparent",
+          borderRadius: 4,
+          textDecoration: "none",
+          marginBottom: 1,
+          borderLeft: active ? `2px solid ${IK.accent}` : "2px solid transparent",
+        }}
+      >
+        <Icon name={item.icon} size={15} />
+        {!collapsed && <span style={{ flex: 1 }}>{item.label}</span>}
+      </Link>
+    );
   }
 
   const initials = userName
@@ -215,75 +212,56 @@ export function Sidebar({ userName, userRole, footer }: SidebarProps) {
       )}
 
       <nav style={{ flex: 1, overflowY: "auto", padding: "4px 8px 12px" }}>
-        {visible.map((n, i) => {
-          if (n.kind === "sep") {
-            return !collapsed ? (
-              <div
-                key={`sep-${i}`}
+        {groups.map((g) => {
+          // Collapsed rail, or a headerless group (Home): items flush, no toggle.
+          if (collapsed || !g.label) {
+            return <div key={g.key}>{g.items.map(renderItem)}</div>;
+          }
+          const open = openGroups.has(g.key);
+          const badge = g.badgeKey ? badges?.[g.badgeKey] : undefined;
+          return (
+            <div key={g.key} style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                onClick={() => toggleGroup(g.key)}
+                aria-expanded={open}
                 style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  width: "100%",
+                  padding: "6px 10px",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
                   fontFamily: "var(--font-ik-mono), ui-monospace, monospace",
                   fontSize: 9.5,
                   color: IK.ink3,
                   letterSpacing: ".12em",
                   textTransform: "uppercase",
                   fontWeight: 600,
-                  padding: "14px 10px 6px",
+                  textAlign: "left",
                 }}
               >
-                {n.label}
-              </div>
-            ) : (
-              <div key={`sep-${i}`} style={{ height: 12 }} />
-            );
-          }
-
-          const active = n.key === activeKey;
-
-          return (
-            <Link
-              key={n.key}
-              href={n.href}
-              title={collapsed ? n.label : undefined}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                width: "100%",
-                padding: collapsed ? "8px 9px" : "7px 10px",
-                fontFamily: "var(--font-ik-sans), Inter Tight, system-ui, sans-serif",
-                fontSize: 13,
-                fontWeight: active ? 600 : 500,
-                color: active ? IK.accentInk : IK.ink2,
-                background: active ? IK.accentWash : "transparent",
-                border: "none",
-                borderRadius: 4,
-                textDecoration: "none",
-                textAlign: "left",
-                marginBottom: 1,
-                borderLeft: active ? `2px solid ${IK.accent}` : "2px solid transparent",
-              }}
-            >
-              <Icon name={n.icon} size={15} />
-              {!collapsed && (
-                <>
-                  <span style={{ flex: 1 }}>{n.label}</span>
-                  {n.count !== undefined && (
-                    <span
-                      style={{
-                        fontFamily: "var(--font-ik-mono), ui-monospace, monospace",
-                        fontSize: 10,
-                        padding: "1px 5px",
-                        borderRadius: 3,
-                        background: n.badge ? IK.accent : IK.paperAlt,
-                        color: n.badge ? "#fff" : IK.ink3,
-                      }}
-                    >
-                      {n.count}
-                    </span>
-                  )}
-                </>
-              )}
-            </Link>
+                <span style={{ flex: 1 }}>{g.label}</span>
+                {badge && (
+                  <span
+                    style={{
+                      fontFamily: "var(--font-ik-mono), ui-monospace, monospace",
+                      fontSize: 9.5,
+                      padding: "1px 5px",
+                      borderRadius: 999,
+                      background: badge.tone === "red" ? IK.alertWash : IK.amberWash,
+                      color: badge.tone === "red" ? IK.alert : IK.amber,
+                    }}
+                  >
+                    {badge.count}
+                  </span>
+                )}
+                <span style={{ color: IK.ink4, fontSize: 11 }}>{open ? "▾" : "▸"}</span>
+              </button>
+              {open && <div>{g.items.map(renderItem)}</div>}
+            </div>
           );
         })}
       </nav>

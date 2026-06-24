@@ -12,13 +12,15 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   ADMIN: new Set([
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
     "kitchen", "requisitions", "deliveries", "inventory",
-    "procurement", "invoices", "payments", "pettycash", "salary", "reports",
+    "requests", "purchaseorders", "vendors", "supplierbills",
+    "invoices", "payments", "pettycash", "salary", "reports",
     "housekeeping", "maintenance", "banquet", "admin",
   ]),
   MANAGER: new Set([
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
     "kitchen", "requisitions", "deliveries", "inventory",
-    "procurement", "invoices", "payments", "pettycash", "salary", "reports",
+    "requests", "purchaseorders", "vendors", "supplierbills",
+    "invoices", "payments", "pettycash", "salary", "reports",
     "housekeeping", "maintenance", "banquet",
   ]),
   SALES: new Set([
@@ -28,7 +30,8 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   // Orders/dishes/quotes aren't part of their daily work — kept out so
   // the sidebar doesn't overwhelm.
   STORE_KEEPER: new Set([
-    "dashboard", "tasks", "requisitions", "inventory", "procurement",
+    "dashboard", "tasks", "requisitions", "inventory",
+    "requests", "purchaseorders", "vendors",
   ]),
   // Kitchen head: cooking-side work only. No Sales section — they drive
   // everything from the tabbed kitchen dashboard + Kitchen + Requisitions.
@@ -46,7 +49,8 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   // Mark-as-paid for customer invoices is also gated to admin/manager
   // (see customer-invoices.markCustomerInvoicePaid).
   ACCOUNTS: new Set([
-    "dashboard", "tasks", "invoices", "payments", "procurement", "inventory",
+    "dashboard", "tasks", "invoices", "payments", "inventory",
+    "purchaseorders", "vendors", "supplierbills",
   ]),
   // Housekeeping manager: laser-focused on the hotel-side stockroom.
   // Personal task list + housekeeping module only.

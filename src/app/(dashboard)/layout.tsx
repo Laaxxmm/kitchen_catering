@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth, signOut } from "@/server/auth";
 import { SignOutButton } from "@/components/ik";
 import { DashboardShell } from "@/components/ik/DashboardShell";
+import { getNavBadges } from "@/server/actions/nav";
 
 export default async function DashboardLayout({
   children,
@@ -10,6 +11,8 @@ export default async function DashboardLayout({
 }) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
+
+  const navBadges = await getNavBadges();
 
   async function handleSignOut() {
     "use server";
@@ -20,6 +23,7 @@ export default async function DashboardLayout({
     <DashboardShell
       userName={session.user.name ?? "User"}
       userRole={session.user.role ?? "USER"}
+      navBadges={navBadges}
       topBarRight={
         <form action={handleSignOut}>
           <SignOutButton />
