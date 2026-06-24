@@ -1,13 +1,25 @@
 import type { Metadata, Viewport } from "next";
-import { Inter_Tight, IBM_Plex_Mono } from "next/font/google";
+import { Inter, Fraunces, IBM_Plex_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 
-const interTight = Inter_Tight({
+// Body / UI / data — Inter (self-hosted via next/font, no layout shift).
+// Exposed as --font-ik-sans (kept for back-compat) and aliased to --font-sans
+// in globals.css.
+const inter = Inter({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-ik-sans",
   display: "swap",
+});
+
+// Headings / display / the one Total figure — Fraunces (variable, optical
+// sizing on). Exposed as --font-serif.
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-serif",
+  display: "swap",
+  axes: ["opsz"],
 });
 
 const plexMono = IBM_Plex_Mono({
@@ -43,7 +55,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0F6E56",
+  themeColor: "#15492F",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
@@ -53,7 +65,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${interTight.variable} ${plexMono.variable}`}
+      className={`${inter.variable} ${fraunces.variable} ${plexMono.variable}`}
       suppressHydrationWarning
     >
       <body className="min-h-screen bg-background text-foreground antialiased" suppressHydrationWarning>

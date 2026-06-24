@@ -49,44 +49,51 @@ const config: Config = {
           DEFAULT: "hsl(var(--popover))",
           foreground: "hsl(var(--popover-foreground))",
         },
-        // Brand accent (Fresh basil) — deep teal-green.
-        // Matches Vision/Forecast brand for cross-product coherence.
+        // Brand — Emerald. brand-500 = action emerald (buttons), brand-700 =
+        // deep brand emerald (titles / links). Ramp tuned for AA on ivory.
         brand: {
-          DEFAULT: "#0F6E56",
-          hover: "#0B5440",
+          DEFAULT: "#166534",
+          hover: "#125429",
           foreground: "#ffffff",
-          50: "#E1F5EE",
-          100: "#C8EBDD",
-          200: "#9FE1CB",
-          300: "#5DCAA5",
-          400: "#1D9E75",
-          500: "#0F6E56",
-          600: "#0B5440",
-          700: "#085041",
-          800: "#063A2F",
-          900: "#04342C",
+          50: "#E7F2EA",
+          100: "#D2E7D9",
+          200: "#A9D1B5",
+          300: "#74B188",
+          400: "#34875A",
+          500: "#166534",
+          600: "#125429",
+          700: "#15492F",
+          800: "#103A26",
+          900: "#0B2C1D",
         },
-        // Surfaces + ink — paper-cream canvas, deep warm ink.
+        // Gold — accents only (bars, links, focus, asterisks, badges).
+        // Use `text-gold-text` for text (AA-safe); `gold` for decorative fills.
+        gold: {
+          DEFAULT: "#B5882E",
+          text: "#9A6B14",
+          soft: "#FBEFD2",
+        },
+        // Surfaces + ink — ivory canvas, warm charcoal ink.
         // Reference via `bg-ik-paper`, `text-ik-ink-2`, `border-ik-rule`, etc.
         ik: {
-          paper: "oklch(0.985 0.003 95)",
-          "paper-alt": "oklch(0.975 0.005 95)",
-          ink: "oklch(0.22 0.012 80)",
-          "ink-2": "oklch(0.38 0.012 80)",
-          "ink-3": "oklch(0.55 0.012 80)",
-          "ink-4": "oklch(0.72 0.010 80)",
-          rule: "oklch(0.92 0.006 95)",
-          "rule-strong": "oklch(0.86 0.008 95)",
+          paper: "#FAF6EE",
+          "paper-alt": "#FBF9F3",
+          ink: "#20251F",
+          "ink-2": "#6E7268",
+          "ink-3": "#A9ADA3",
+          "ink-4": "#C2C5BC",
+          rule: "#EAE2D2",
+          "rule-strong": "#DED4C0",
           card: "#ffffff",
           // brand-aliased tokens for components that need a semantic name
-          accent: "#0F6E56",
-          "accent-ink": "#085041",
-          "accent-wash": "#E1F5EE",
+          accent: "#166534",
+          "accent-ink": "#15492F",
+          "accent-wash": "#E7F2EA",
         },
-        // Semantic — keep SAB's structure, retune values for Fresh basil
-        positive: { DEFAULT: "#3B6D11", wash: "#EAF3DE" },
-        alert:    { DEFAULT: "#A32D2D", wash: "#FCEBEB" },
-        amber:    { DEFAULT: "#BA7517", wash: "#FAEEDA" },
+        // Semantic status — kept separate from the brand for legibility.
+        positive: { DEFAULT: "#166534", wash: "#E7F2EA" },
+        alert:    { DEFAULT: "#B42318", wash: "#FEE4E2" },
+        amber:    { DEFAULT: "#B54708", wash: "#FEF0C7" },
         info:     { DEFAULT: "#185FA5", wash: "#E6F1FB" },
         success: {
           DEFAULT: "hsl(var(--success))",
@@ -101,12 +108,15 @@ const config: Config = {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        card: "14px",
       },
       fontFamily: {
-        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "monospace"],
-        // Fresh basil typography — Inter Tight / IBM Plex Mono via CSS vars.
-        // Mobile shell opts in via `font-ik-sans`; desktop stays on system-ui.
-        "ik-sans": ["var(--font-ik-sans)", "Inter Tight", "Inter", "system-ui", "sans-serif"],
+        // Emerald & Gold typography — Inter (body/data), Fraunces (display),
+        // IBM Plex Mono (codes), wired to next/font CSS vars.
+        sans: ["var(--font-ik-sans)", "Inter", "system-ui", "sans-serif"],
+        serif: ["var(--font-serif)", "Playfair Display", "Georgia", "serif"],
+        mono: ["var(--font-ik-mono)", "IBM Plex Mono", "ui-monospace", "monospace"],
+        "ik-sans": ["var(--font-ik-sans)", "Inter", "system-ui", "sans-serif"],
         "ik-mono": ["var(--font-ik-mono)", "IBM Plex Mono", "ui-monospace", "monospace"],
       },
       boxShadow: {

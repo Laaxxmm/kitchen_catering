@@ -11,77 +11,90 @@
 
 @layer base {
   :root {
-    /* ─── Surface: paper-cream ────────────────────────────────── */
-    --background: 60 40% 97%;            /* paper */
-    --foreground: 60 5% 18%;             /* ink */
+    /* ─── Emerald & Gold — premium ivory canvas ───────────────── */
+    /* Single source of truth. Colours are tuned to the Emerald & Gold
+     * palette; component classes (bg-brand-*, bg-ik-card, text-ik-ink,
+     * border-ik-rule …) inherit from here so the swap is global. */
+
+    /* Surface: ivory page, white cards */
+    --background: 43 38% 96%;            /* #FAF6EE ivory */
+    --foreground: 96 9% 13%;             /* #20251F charcoal */
 
     --card: 0 0% 100%;
-    --card-foreground: 60 5% 18%;
+    --card-foreground: 96 9% 13%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 60 5% 18%;
+    --popover-foreground: 96 9% 13%;
 
-    /* ─── Primary = Fresh basil (#0F6E56) ─────────────────────── */
-    --primary: 165 76% 25%;
+    /* Primary = action emerald (#166534) for filled buttons */
+    --primary: 143 64% 24%;
     --primary-foreground: 0 0% 100%;
 
-    /* ─── Secondary = paper-alt surface ───────────────────────── */
-    --secondary: 60 30% 95%;
-    --secondary-foreground: 60 5% 18%;
+    /* Secondary = sunken surface (#FBF9F3) */
+    --secondary: 45 40% 97%;
+    --secondary-foreground: 96 9% 13%;
 
-    /* ─── Muted ink scale ─────────────────────────────────────── */
-    --muted: 60 30% 95%;
-    --muted-foreground: 60 5% 38%;
+    /* Muted ink scale */
+    --muted: 60 6% 96%;                  /* #F5F5F4 neutral */
+    --muted-foreground: 96 4% 44%;       /* #6E7268 */
 
-    /* ─── Accent wash (light teal-green for hovers/active rows) ── */
-    --accent: 165 35% 92%;               /* accentWash */
-    --accent-foreground: 165 76% 18%;    /* accentInk */
+    /* Accent wash (light emerald for hovers / active rows) */
+    --accent: 140 28% 92%;               /* #E7F2EA */
+    --accent-foreground: 146 56% 18%;    /* #15492F brand emerald */
 
-    /* ─── Destructive ─────────────────────────────────────────── */
-    --destructive: 0 57% 41%;            /* #A32D2D */
+    /* Destructive = danger red (#B42318) */
+    --destructive: 4 78% 40%;
     --destructive-foreground: 0 0% 100%;
 
-    /* ─── Rules + rings ───────────────────────────────────────── */
-    --border: 60 12% 88%;
-    --input: 60 12% 88%;
-    --ring: 165 76% 25%;
+    /* Rules + rings — warm border, gold focus ring */
+    --border: 40 33% 87%;                /* #EAE2D2 warm border */
+    --input: 40 33% 87%;
+    --ring: 40 61% 45%;                  /* #B5882E gold focus ring */
 
-    --radius: 0.5rem;
+    --radius: 0.625rem;                   /* ~10px buttons; cards use 14px */
 
-    /* ─── Explicit brand channels ────────────────────────────── */
-    --brand: 165 76% 25%;
-    --brand-hover: 165 78% 18%;
+    /* Brand channels — action emerald + darker hover */
+    --brand: 143 64% 24%;                /* #166534 */
+    --brand-hover: 146 64% 20%;          /* #125429 */
     --brand-foreground: 0 0% 100%;
 
-    /* ─── Semantic status colours ────────────────────────────── */
-    --success: 95 73% 24%;               /* #3B6D11 */
-    --success-wash: 80 50% 91%;          /* #EAF3DE */
-    --warning: 32 79% 41%;               /* #BA7517 amber */
-    --warning-wash: 36 78% 92%;          /* #FAEEDA */
+    /* Semantic status colours (kept separate from brand for legibility) */
+    --success: 143 64% 24%;              /* #166534 */
+    --success-wash: 140 30% 93%;         /* #E7F2EA */
+    --warning: 23 92% 37%;               /* #B54708 */
+    --warning-wash: 45 96% 89%;          /* #FEF0C7 */
     --info: 210 75% 37%;                 /* #185FA5 */
-    --info-wash: 210 80% 95%;             /* #E6F1FB */
+    --info-wash: 210 80% 95%;            /* #E6F1FB */
+
+    /* Fonts (aliases — Inter is the sans, Fraunces the serif) */
+    --font-sans: var(--font-ik-sans);
 
     /* ─── Raw IK tokens for inline styles (SVGs, dynamic) ────── */
-    --ik-paper: oklch(0.985 0.003 95);
-    --ik-paper-alt: oklch(0.975 0.005 95);
-    --ik-ink: oklch(0.22 0.012 80);
-    --ik-ink2: oklch(0.38 0.012 80);
-    --ik-ink3: oklch(0.55 0.012 80);
-    --ik-ink4: oklch(0.72 0.010 80);
-    --ik-rule: oklch(0.92 0.006 95);
-    --ik-rule-strong: oklch(0.86 0.008 95);
-    --ik-accent: #0F6E56;
-    --ik-accent-hover: #0B5440;
-    --ik-accent-ink: #085041;
-    --ik-accent-wash: #E1F5EE;
-    --ik-positive: #3B6D11;
-    --ik-positive-wash: #EAF3DE;
-    --ik-alert: #A32D2D;
-    --ik-alert-wash: #FCEBEB;
-    --ik-amber: #BA7517;
-    --ik-amber-wash: #FAEEDA;
+    --ik-paper: #FAF6EE;
+    --ik-paper-alt: #FBF9F3;
+    --ik-ink: #20251F;
+    --ik-ink2: #6E7268;
+    --ik-ink3: #A9ADA3;
+    --ik-ink4: #C2C5BC;
+    --ik-rule: #EAE2D2;
+    --ik-rule-strong: #DED4C0;
+    --ik-accent: #166534;                /* action emerald */
+    --ik-accent-hover: #125429;
+    --ik-accent-ink: #15492F;            /* brand emerald — titles */
+    --ik-accent-wash: #E7F2EA;
+    --ik-positive: #166534;
+    --ik-positive-wash: #E7F2EA;
+    --ik-alert: #B42318;
+    --ik-alert-wash: #FEE4E2;
+    --ik-amber: #B54708;
+    --ik-amber-wash: #FEF0C7;
     --ik-info: #185FA5;
     --ik-info-wash: #E6F1FB;
+
+    /* ─── Gold accent (accents only — bars, links, focus, asterisks) ── */
+    --ik-gold: #B5882E;                  /* decorative gold */
+    --ik-gold-text: #9A6B14;             /* AA-safe gold as text */
+    --ik-gold-soft: #FBEFD2;             /* gold badge background */
   }
 
   .dark {
@@ -120,16 +133,23 @@
   }
 
   body {
-    font-family: var(--font-ik-sans), "Inter Tight", "Inter", system-ui, sans-serif;
-    font-feature-settings: "rlig" 1, "calt" 1, "tnum" 1, "ss01" 1;
+    font-family: var(--font-ik-sans), "Inter", system-ui, sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1, "tnum" 1;
     -webkit-font-smoothing: antialiased;
     letter-spacing: -0.005em;
   }
 
-  /* Editorial headings — tighter tracking, closer to display behaviour */
-  h1, h2, h3, h4 {
-    font-family: var(--font-ik-sans), "Inter Tight", system-ui, sans-serif;
-    letter-spacing: -0.02em;
+  /* Page titles → Fraunces serif (premium display). Section headers + the
+   * Total figure opt in via `.font-serif` / `.ik-serif`. Small h2/h3
+   * eyebrows + data stay on Inter. */
+  h1 {
+    font-family: var(--font-serif), "Playfair Display", Georgia, serif;
+    font-optical-sizing: auto;
+    letter-spacing: -0.01em;
+  }
+  h2, h3, h4 {
+    font-family: var(--font-ik-sans), "Inter", system-ui, sans-serif;
+    letter-spacing: -0.015em;
   }
 
   /* Data-heavy tables default to tabular numerics */
@@ -163,7 +183,7 @@
     font-weight: 600;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: var(--ik-ink3);
+    color: var(--ik-gold-text);
   }
 
   .ik-caps {
@@ -185,6 +205,28 @@
 
   .ik-tabular {
     font-variant-numeric: tabular-nums;
+  }
+
+  /* ─── Emerald & Gold premium primitives ──────────────────────── */
+  /* Serif for section headers + the one Total figure. */
+  .font-serif, .ik-serif {
+    font-family: var(--font-serif), "Playfair Display", Georgia, serif;
+    font-optical-sizing: auto;
+    letter-spacing: -0.01em;
+  }
+  /* Gold text link / accent (AA-safe). */
+  .text-gold { color: var(--ik-gold-text); }
+  .bg-gold-soft { background-color: var(--ik-gold-soft); }
+  /* 3px gold accent bar that precedes a section header. */
+  .ik-accent-bar::before {
+    content: "";
+    display: inline-block;
+    width: 3px;
+    height: 0.95em;
+    margin-right: 8px;
+    border-radius: 2px;
+    background: var(--ik-gold);
+    vertical-align: -1px;
   }
 
   /* Old aliases kept so existing utilities survive the palette swap */
