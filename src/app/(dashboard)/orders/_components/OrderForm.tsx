@@ -412,11 +412,17 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
                     </td>
                     <td className="py-1 pr-2">
                       <input
-                        className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono"
+                        className={
+                          "h-8 w-full rounded border bg-ik-card px-1 text-right font-mono " +
+                          (l.dishId && Number(l.unitPrice || "0") <= 0 ? "border-amber" : "border-ik-rule")
+                        }
                         type="number" step="0.01" min="0"
                         value={l.unitPrice}
                         onChange={(e) => setLine(idx, { unitPrice: e.target.value })}
                       />
+                      {l.dishId && Number(l.unitPrice || "0") <= 0 && (
+                        <div className="mt-0.5 text-[10px] text-amber-700">no price set</div>
+                      )}
                     </td>
                     <td className="py-1 pr-2">
                       <input

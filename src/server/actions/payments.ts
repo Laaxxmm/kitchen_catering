@@ -55,6 +55,23 @@ export async function recordCustomerInvoicePayment(raw: unknown) {
       throw new AuthorizationError(`Cannot record payment on invoice in status ${invoice.status}`);
     }
 
+    // Guardrail: block over-recording. If this payment would push total
+    // recorded above the invoice grand total, stop — it's almost always a
+    // duplicate entry (seen live: one invoice recorded three times).
+    const priorRows = await tx.customerInvoicePayment.findMany({
+      where: { invoiceId: invoice.id, reversedAt: null },
+      select: { amount: true },
+    });
+    const priorPaid = priorRows.reduce((s, r) => s.plus(toDecimal(r.amount)), new Decimal(0));
+    const grandTotal = toDecimal(invoice.grandTotal);
+    const wouldBe = priorPaid.plus(toDecimal(input.amount));
+    if (wouldBe.gt(grandTotal)) {
+      throw new Error(
+        `Recorded payments would be ₹${wouldBe.toFixed(2)} on a ₹${grandTotal.toFixed(2)} invoice ` +
+          `(₹${priorPaid.toFixed(2)} already recorded). Check for a duplicate payment.`,
+      );
+    }
+
     const payment = await tx.customerInvoicePayment.create({
       data: {
         invoiceId: invoice.id,

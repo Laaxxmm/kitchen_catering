@@ -6,23 +6,19 @@ import { Decimal } from "decimal.js";
 
 export const dynamic = "force-dynamic";
 
-function delta(now: string, before: string) {
-  const d = new Decimal(now).minus(new Decimal(before));
-  const pct = new Decimal(before).gt(0) ? d.div(before).times(100).toDecimalPlaces(1) : null;
-  return { d, pct };
-}
-
 function Row({ label, now, before }: { label: string; now: string; before: string }) {
-  const v = delta(now, before);
+  const d = new Decimal(now).minus(new Decimal(before));
   const isMoney = !["Invoice count", "Order count"].includes(label);
-  const tone = v.d.gt(0) ? "text-positive" : v.d.lt(0) ? "text-alert" : "text-ik-ink-3";
+  const tone = d.gt(0) ? "text-positive" : d.lt(0) ? "text-alert" : "text-ik-ink-3";
+  const sign = d.gt(0) ? "+" : "";
+  // Plain "this vs last" — the giant Δ% column (e.g. "14144%") was noise at
+  // low volume and has been dropped. A signed absolute change stays.
   return (
     <tr className="border-b border-ik-rule">
       <td className="py-2 pr-2">{label}</td>
       <td className="py-2 pr-2 text-right font-mono">{isMoney ? formatINR(now) : now}</td>
       <td className="py-2 pr-2 text-right font-mono text-ik-ink-3">{isMoney ? formatINR(before) : before}</td>
-      <td className={`py-2 pr-2 text-right font-mono ${tone}`}>{isMoney ? formatINR(v.d) : v.d.toString()}</td>
-      <td className={`py-2 pr-2 text-right font-mono ${tone}`}>{v.pct ? `${v.pct.toString()}%` : "—"}</td>
+      <td className={`py-2 pr-2 text-right font-mono ${tone}`}>{sign}{isMoney ? formatINR(d) : d.toString()}</td>
     </tr>
   );
 }
@@ -63,8 +59,7 @@ export default async function MonthlyVarianceReportPage({
             <th className="py-2 pr-2">Metric</th>
             <th className="py-2 pr-2 text-right">{thisLabel}</th>
             <th className="py-2 pr-2 text-right">{prevLabel}</th>
-            <th className="py-2 pr-2 text-right">Δ</th>
-            <th className="py-2 pr-2 text-right">Δ %</th>
+            <th className="py-2 pr-2 text-right">Change</th>
           </tr>
         </thead>
         <tbody>

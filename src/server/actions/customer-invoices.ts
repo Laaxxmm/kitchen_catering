@@ -65,12 +65,13 @@ export async function createCustomerInvoiceFromOrder(orderId: string) {
     if (order.status !== OrderStatus.DELIVERED) {
       throw new AuthorizationError(`Cannot invoice order in status ${order.status}`);
     }
-    // Disallow duplicates: one ORDER-kind invoice per order in Phase 1.
+    // Guardrail: one non-cancelled invoice per order. A cancelled one
+    // doesn't block re-invoicing. (Seen live: ORD → two invoices.)
     const existing = await tx.customerInvoice.findFirst({
-      where: { orderId, kind: CustomerInvoiceKind.ORDER },
+      where: { orderId, status: { not: CustomerInvoiceStatus.CANCELLED } },
     });
     if (existing) {
-      throw new Error(`Order already has an invoice: ${existing.invoiceNo}`);
+      throw new Error(`${order.code} already has invoice ${existing.invoiceNo} — cancel it first to re-invoice.`);
     }
 
     const supplierState = indefineStateCode();
