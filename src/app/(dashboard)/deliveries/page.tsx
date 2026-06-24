@@ -3,10 +3,19 @@ import { DeliveryStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { StatusBadge } from "@/components/ui/status-badge";
 import { auth } from "@/server/auth";
 import { listDeliveries, listDeliveryCustomers } from "@/server/actions/deliveries";
 import { formatIST, istToUtc, istMonthEnd } from "@/lib/time";
+import { StatusPill, type PillTone } from "@/components/ik/StatusPill";
+
+const STATUS_META: Record<DeliveryStatus, { label: string; tone: PillTone; active: boolean }> = {
+  SCHEDULED: { label: "Scheduled", tone: "amber", active: true },
+  DISPATCHED: { label: "Dispatched", tone: "amber", active: true },
+  IN_TRANSIT: { label: "In transit", tone: "amber", active: true },
+  DELIVERED: { label: "Delivered", tone: "green", active: false },
+  FAILED: { label: "Failed", tone: "red", active: false },
+  CANCELLED: { label: "Cancelled", tone: "grey", active: false },
+};
 
 export const dynamic = "force-dynamic";
 
@@ -124,43 +133,45 @@ export default async function DeliveriesPage({
               : "No deliveries yet."}
         </p>
       ) : (
-        <>
-          <p className="mb-2 text-[11.5px] text-ik-ink-3">
-            {deliveries.length} {deliveries.length === 1 ? "delivery" : "deliveries"}
-          </p>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Delivery no</TableHead>
-                <TableHead>Order</TableHead>
-                <TableHead>Customer</TableHead>
-                {!isDriver && <TableHead>Driver</TableHead>}
-                <TableHead>Scheduled</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {deliveries.map((d) => (
-                <TableRow key={d.id}>
-                  <TableCell>
-                    <Link href={`/deliveries/${d.id}`} className="font-mono text-brand hover:underline">
-                      {d.deliveryNo}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <Link href={`/orders/${d.orderId}`} className="font-mono text-brand hover:underline">
-                      {d.order.code}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{d.order.customer.name}</TableCell>
-                  {!isDriver && <TableCell>{d.driver?.name ?? "—"}</TableCell>}
-                  <TableCell className="font-mono text-[12px]">{formatIST(d.scheduledAt, "yyyy-MM-dd HH:mm")}</TableCell>
-                  <TableCell><StatusBadge status={d.status} /></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </>
+        (() => {
+          const inFlight = deliveries.filter((d) => STATUS_META[d.status].active);
+          const done = deliveries.filter((d) => !STATUS_META[d.status].active);
+          const section = (title: string, rows: typeof deliveries) =>
+            rows.length === 0 ? null : (
+              <section key={title}>
+                <h2 className="mb-2 text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">{title} · {rows.length}</h2>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Delivery</TableHead>
+                      <TableHead>Customer</TableHead>
+                      {!isDriver && <TableHead>Driver</TableHead>}
+                      <TableHead>Scheduled</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((d) => {
+                      const m = STATUS_META[d.status];
+                      return (
+                        <TableRow key={d.id}>
+                          <TableCell>
+                            <Link href={`/deliveries/${d.id}`} className="font-mono text-brand hover:underline">{d.deliveryNo}</Link>
+                            <Link href={`/orders/${d.orderId}`} className="ml-2 font-mono text-[11px] text-ik-ink-3 hover:underline">{d.order.code}</Link>
+                          </TableCell>
+                          <TableCell>{d.order.customer.name}</TableCell>
+                          {!isDriver && <TableCell>{d.driver?.name ?? "—"}</TableCell>}
+                          <TableCell className="font-mono text-[12px]">{formatIST(d.scheduledAt, "yyyy-MM-dd HH:mm")}</TableCell>
+                          <TableCell><StatusPill tone={m.tone}>{m.label}</StatusPill></TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </section>
+            );
+          return <div className="grid gap-5">{section("In flight", inFlight)}{section("Delivered & closed", done)}</div>;
+        })()
       )}
     </>
   );

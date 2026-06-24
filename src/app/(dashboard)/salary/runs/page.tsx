@@ -38,16 +38,27 @@ export default async function SalaryRunsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {runs.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell><Link href={`/salary/runs/${r.id}`} className="font-mono text-brand hover:underline">{r.runNo}</Link></TableCell>
-                <TableCell className="font-mono text-[12px]">{formatIST(r.periodMonth, "yyyy-MM")}</TableCell>
-                <TableCell><StatusBadge status={r.status} /></TableCell>
-                <TableCell className="text-right">{r._count.lines}</TableCell>
-                <TableCell className="text-right font-mono">{formatINR(r.totalAmount)}</TableCell>
-                <TableCell>{r.createdBy?.name ?? "—"}</TableCell>
-              </TableRow>
-            ))}
+            {runs.map((r) => {
+              const emptyDraft = r.status === "DRAFT" && r._count.lines === 0;
+              return (
+                <TableRow key={r.id}>
+                  <TableCell><Link href={`/salary/runs/${r.id}`} className="font-mono text-brand hover:underline">{r.runNo}</Link></TableCell>
+                  <TableCell className="font-mono text-[12px]">{formatIST(r.periodMonth, "yyyy-MM")}</TableCell>
+                  <TableCell><StatusBadge status={r.status} /></TableCell>
+                  {emptyDraft ? (
+                    <TableCell colSpan={2} className="text-[12.5px] text-amber-700">
+                      Draft run for {formatIST(r.periodMonth, "MMM yyyy")} — add lines or finalise.
+                    </TableCell>
+                  ) : (
+                    <>
+                      <TableCell className="text-right">{r._count.lines}</TableCell>
+                      <TableCell className="text-right font-mono">{formatINR(r.totalAmount)}</TableCell>
+                    </>
+                  )}
+                  <TableCell>{r.createdBy?.name ?? "—"}</TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       )}
