@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ThreeWayMatchInfo } from "@/components/ik/ThreeWayMatchInfo";
 import { isNextNavigationError } from "@/lib/next-error";
 
 interface Vendor { id: string; name: string; code: string }
@@ -86,6 +87,9 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
 
   return (
     <form onSubmit={submit} className="grid gap-4">
+      <div className="max-w-3xl">
+        <ThreeWayMatchInfo />
+      </div>
       <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 max-w-3xl sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Bill details</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

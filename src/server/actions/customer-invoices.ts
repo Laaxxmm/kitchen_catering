@@ -1077,6 +1077,30 @@ export async function listCustomerInvoices(opts: { status?: CustomerInvoiceStatu
   });
 }
 
+/**
+ * Orders that are delivered and ready to be invoiced — i.e. DELIVERED and
+ * without a non-cancelled customer invoice yet. Returned newest-first with
+ * the customer attached, so the "Generate invoice" screen can group them
+ * per client. (A DELIVERED order has no tax invoice by definition — issuing
+ * one advances it to INVOICED — so status alone is the billable filter.)
+ */
+export async function listBillableOrders() {
+  await requireRole(WRITE_ROLES);
+  return db.order.findMany({
+    where: { status: OrderStatus.DELIVERED },
+    select: {
+      id: true,
+      code: true,
+      channel: true,
+      eventDate: true,
+      contractValue: true,
+      customer: { select: { id: true, name: true } },
+    },
+    orderBy: [{ customerId: "asc" }, { eventDate: "asc" }],
+    take: 500,
+  });
+}
+
 export async function getCustomerInvoice(id: string) {
   await requireSession();
   return db.customerInvoice.findUnique({

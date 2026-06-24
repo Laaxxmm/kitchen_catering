@@ -78,7 +78,10 @@ function needsAdminApproval(total: Decimal, tiers: PoApprovalTiers): boolean {
 // =====================================================================
 
 export async function createVendorPO(raw: unknown) {
-  const session = await requireRole(WRITE_ROLES);
+  // Storekeepers only intimate shortages (the PR). Picking a vendor,
+  // setting prices and raising the PO is the manager's / admin's job —
+  // they still keep the GRN (goods receipt) step on the store side.
+  const session = await requireRole([Role.ADMIN, Role.MANAGER]);
   const input = VendorPOCreateInput.parse(raw);
 
   const supplierState = indefineStateCode();

@@ -31,7 +31,14 @@ export default async function InvoicesPage() {
         eyebrow="Money"
         title="Invoices"
         description="Unpaid invoices are up top; paid ones below. GST split CGST+SGST / IGST as applicable."
-        actions={canCreate ? <Link href="/invoices/new"><Button>New invoice</Button></Link> : null}
+        actions={
+          canCreate ? (
+            <div className="flex gap-2">
+              <Link href="/invoices/new"><Button variant="outline">New standalone</Button></Link>
+              <Link href="/invoices/generate"><Button>Generate from orders</Button></Link>
+            </div>
+          ) : null
+        }
       />
 
       <div className="mb-5">

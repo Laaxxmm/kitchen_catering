@@ -102,14 +102,23 @@ export default async function PRDetailPage({ params }: { params: Promise<{ id: s
       )}
       {pr.status === PurchaseRequisitionStatus.APPROVED && (
         <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">
-          <strong>Next:</strong> Approved — pick a vendor and issue the purchase order. Because the spend is
-          already signed off, the PO is created <strong>ready to send</strong> (no further approval).
-          {(isApprover || role === Role.STORE_KEEPER) && (
-            <div className="mt-2">
-              <Link href={`/procurement/purchase-orders/new?prId=${pr.id}`}>
-                <Button size="sm">Create Purchase Order from this request</Button>
-              </Link>
-            </div>
+          {isApprover ? (
+            <>
+              <strong>Next:</strong> Approved — pick a vendor and issue the purchase order. Because the
+              spend is already signed off, the PO is created <strong>ready to send</strong> (no further
+              approval).
+              <div className="mt-2">
+                <Link href={`/procurement/purchase-orders/new?prId=${pr.id}`}>
+                  <Button size="sm">Create Purchase Order from this request</Button>
+                </Link>
+              </div>
+            </>
+          ) : (
+            <>
+              <strong>Approved.</strong> Your request is cleared. The{" "}
+              <strong>manager / admin</strong> will pick the supplier and raise the purchase order —
+              you&apos;ll receive the goods against it when they arrive. Nothing more to do here.
+            </>
           )}
         </div>
       )}

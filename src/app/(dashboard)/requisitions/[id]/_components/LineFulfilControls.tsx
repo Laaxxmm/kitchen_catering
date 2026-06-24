@@ -57,17 +57,25 @@ export function LineFulfilControls({ lineId, requestedQty, issuedQty, onHand, st
     return <span className="text-[12px] text-ik-ink-3">—</span>;
   }
 
-  // Lines previously sent to procurement can still be issued once stock
-  // is back. Show an amber "Procurement" badge alongside the issue
-  // buttons so the storekeeper knows the line was originally flagged.
+  // Lines previously sent to procurement. The badge text must match
+  // reality: only say "you can issue now" once stock has actually come
+  // back in (on hand > 0). While on hand is still 0 the line is genuinely
+  // waiting on the supplier — saying "stock is back" there was confusing.
   const wasAwaitingProcurement = status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT;
+  const stockIsBack = onHandDec.gt(0);
 
   return (
     <div className="flex flex-col gap-1 text-[12.5px]">
       {wasAwaitingProcurement && (
-        <span className="self-start rounded-full bg-amber-wash px-2 py-0.5 text-[10.5px] font-medium text-amber">
-          Was sent to procurement — stock is back, you can issue now
-        </span>
+        stockIsBack ? (
+          <span className="self-start rounded-full bg-positive-wash px-2 py-0.5 text-[10.5px] font-medium text-positive">
+            Stock has arrived — you can issue this line now
+          </span>
+        ) : (
+          <span className="self-start rounded-full bg-amber-wash px-2 py-0.5 text-[10.5px] font-medium text-amber">
+            Waiting on procurement — no stock in yet
+          </span>
+        )
       )}
       <div className="flex flex-wrap gap-1">
         {fullPossible && (

@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { listVendors } from "@/server/actions/vendors";
 import { listIngredients } from "@/server/actions/inventory";
 import { createVendorPO } from "@/server/actions/procurement";
 import { getPurchaseRequisition } from "@/server/actions/purchase-requisitions";
+import { gateRolePage } from "@/server/rbac";
 import { VendorPOForm } from "./_components/VendorPOForm";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +16,8 @@ export default async function NewVendorPOPage({
 }: {
   searchParams: Promise<{ prId?: string }>;
 }) {
+  // Vendor selection + pricing is a manager/admin job, not the store's.
+  await gateRolePage([Role.ADMIN, Role.MANAGER]);
   const { prId } = await searchParams;
 
   const [vendors, ingredients, pr] = await Promise.all([

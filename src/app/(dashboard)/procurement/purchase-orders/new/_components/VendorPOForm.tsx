@@ -115,16 +115,26 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
 
   return (
     <form onSubmit={submit} className="grid gap-4">
-      <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4 max-w-3xl">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 max-w-3xl sm:p-5">
+        <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Supplier</h3>
+        {/* Vendor gets its own full-width row — the name is the most
+            important field here and was being truncated in the old
+            three-up grid. */}
+        <div className="grid gap-1">
+          <Label htmlFor="vendorId">Vendor<span className="text-gold" aria-hidden> *</span></Label>
+          <select
+            id="vendorId"
+            value={vendorId}
+            onChange={(e) => setVendorId(e.target.value)}
+            className="h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
+          >
+            {vendors.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
+          </select>
+          <p className="text-[11.5px] text-ik-ink-3">Who you&apos;re buying from. Pick the supplier, then set their prices below.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="grid gap-1">
-            <Label htmlFor="vendorId">Vendor</Label>
-            <select id="vendorId" value={vendorId} onChange={(e) => setVendorId(e.target.value)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
-              {vendors.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
-            </select>
-          </div>
-          <div className="grid gap-1">
-            <Label htmlFor="pos">Place of supply</Label>
+            <Label htmlFor="pos">Place of supply (state code)</Label>
             <Input id="pos" maxLength={2} value={placeOfSupplyStateCode} onChange={(e) => setPos(e.target.value)} />
           </div>
           <div className="grid gap-1">
