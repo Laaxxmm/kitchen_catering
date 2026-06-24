@@ -441,7 +441,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* 2 ─ Attention banner — the only strong-colour element on the page */}
-      <AttentionBanner count={attnCount} breakdown={attnBreakdown} reviewHref="/procurement" />
+      <AttentionBanner count={attnCount} breakdown={attnBreakdown} reviewHref="/review" />
 
       {/* 3 ─ Primary action + everything else behind "More" */}
       <div className="flex flex-wrap items-center gap-2">
