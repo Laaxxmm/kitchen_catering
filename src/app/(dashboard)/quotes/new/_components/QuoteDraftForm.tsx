@@ -167,10 +167,11 @@ export function QuoteDraftForm({ customers, dishes, onSubmit, onQuickAddCustomer
 
   return (
     <form onSubmit={submit} className="grid gap-4">
-      <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4 max-w-4xl">
+      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 max-w-4xl sm:p-5">
+        <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Quote details</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="grid gap-1">
-            <Label htmlFor="customerId">Customer</Label>
+            <Label htmlFor="customerId">Customer<span className="text-gold" aria-hidden> *</span></Label>
             <select
               id="customerId"
               value={customerId}
@@ -204,15 +205,15 @@ export function QuoteDraftForm({ customers, dishes, onSubmit, onQuickAddCustomer
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="grid gap-1">
-            <Label htmlFor="eventDate">Event date (optional)</Label>
+            <Label htmlFor="eventDate">Event date</Label>
             <Input id="eventDate" type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
           </div>
           <div className="grid gap-1">
-            <Label htmlFor="headcount">Headcount (optional)</Label>
+            <Label htmlFor="headcount">Headcount</Label>
             <Input id="headcount" type="number" min="1" value={headcount} onChange={(e) => setHeadcount(e.target.value)} />
           </div>
           <div className="grid gap-1">
-            <Label htmlFor="mealType">Meal type (optional)</Label>
+            <Label htmlFor="mealType">Meal type</Label>
             <select
               id="mealType"
               value={mealType}
@@ -228,28 +229,28 @@ export function QuoteDraftForm({ customers, dishes, onSubmit, onQuickAddCustomer
         </div>
 
         <div className="grid gap-1">
-          <Label htmlFor="deliveryAddress">Delivery address (optional)</Label>
+          <Label htmlFor="deliveryAddress">Delivery address</Label>
           <Input id="deliveryAddress" value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} />
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="grid gap-1">
-            <Label htmlFor="validUntil">Valid until (optional)</Label>
+            <Label htmlFor="validUntil">Valid until</Label>
             <Input id="validUntil" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
           </div>
         </div>
       </section>
 
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="font-medium text-[14px] text-ik-ink">Lines</h3>
+          <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Lines</h3>
           <Button type="button" size="sm" variant="outline" onClick={() => setLines((p) => [...p, emptyLine()])}>+ Add line</Button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-[12.5px]">
             <thead className="border-b border-ik-rule text-left text-ik-ink-3">
               <tr>
-                <th className="py-1 pr-2">Dish (optional)</th>
+                <th className="py-1 pr-2">Dish</th>
                 <th className="py-1 pr-2">Description</th>
                 <th className="w-16 py-1 pr-2">Unit</th>
                 <th className="w-20 py-1 pr-2 text-right">Qty</th>
@@ -345,13 +346,13 @@ export function QuoteDraftForm({ customers, dishes, onSubmit, onQuickAddCustomer
       </section>
 
       <div className="grid gap-1 max-w-2xl">
-        <Label htmlFor="notes">Notes / terms (optional)</Label>
+        <Label htmlFor="notes">Notes / terms</Label>
         <Textarea id="notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </div>
 
-      <div className="flex gap-2">
+      <div className="sticky bottom-0 z-10 -mx-4 mt-1 flex flex-wrap items-center justify-end gap-2 border-t border-ik-rule bg-ik-paper/90 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-ik-paper/75 md:-mx-6 md:px-6">
+        <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>
         <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create draft quote"}</Button>
-        <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
       </div>
     </form>
   );

@@ -86,10 +86,11 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
 
   return (
     <form onSubmit={submit} className="grid gap-4">
-      <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4 max-w-3xl">
+      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 max-w-3xl sm:p-5">
+        <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Bill details</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="grid gap-1">
-            <Label htmlFor="vendorId">Vendor</Label>
+            <Label htmlFor="vendorId">Vendor<span className="text-gold" aria-hidden> *</span></Label>
             <select id="vendorId" value={vendorId} onChange={(e) => { setVendorId(e.target.value); setPoId(""); }} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
               {vendors.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
             </select>
@@ -118,9 +119,9 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
         </div>
       </section>
 
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="font-medium text-[14px] text-ik-ink">Lines</h3>
+          <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Lines</h3>
           <Button type="button" size="sm" variant="outline" onClick={() => setLines((p) => [...p, empty()])}>+ Add line</Button>
         </div>
         <table className="w-full text-[12.5px]">
@@ -165,9 +166,12 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
         <Textarea id="notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </div>
 
-      <div className="flex gap-2">
-        <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create draft bill"}</Button>
-        <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
+      <div className="sticky bottom-0 z-10 -mx-4 mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-ik-rule bg-ik-paper/90 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-ik-paper/75 md:-mx-6 md:px-6">
+        <span className="text-[11.5px] text-ik-ink-3">{poId ? "3-way match (bill ↔ PO ↔ GRN) runs on save." : "Link a PO above to enable the 3-way match."}</span>
+        <div className="flex gap-2">
+          <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>
+          <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create draft bill"}</Button>
+        </div>
       </div>
     </form>
   );

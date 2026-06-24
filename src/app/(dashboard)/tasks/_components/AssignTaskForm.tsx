@@ -112,13 +112,13 @@ export function AssignTaskForm({ users, templates }: Props) {
   return (
     <form
       onSubmit={handleSubmit(onSubmit)}
-      className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4"
+      className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5"
     >
-      <div className="text-[12px] font-medium text-ik-ink-2">Assign a task</div>
+      <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Assign a task</h3>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-1.5">
-          <Label htmlFor="assignedToId">Assign to</Label>
+          <Label htmlFor="assignedToId">Assign to<span className="text-gold" aria-hidden> *</span></Label>
           <select
             id="assignedToId"
             {...register("assignedToId", { required: true })}
@@ -137,7 +137,7 @@ export function AssignTaskForm({ users, templates }: Props) {
         </div>
 
         <div className="grid gap-1.5">
-          <Label htmlFor="templateId">From preset (optional)</Label>
+          <Label htmlFor="templateId">From preset</Label>
           <select
             id="templateId"
             value={templateId}
@@ -157,7 +157,7 @@ export function AssignTaskForm({ users, templates }: Props) {
       </div>
 
       <div className="grid gap-1.5">
-        <Label htmlFor="title">Task</Label>
+        <Label htmlFor="title">Task<span className="text-gold" aria-hidden> *</span></Label>
         <Input
           id="title"
           placeholder="e.g. Recount freezer A"
@@ -170,7 +170,7 @@ export function AssignTaskForm({ users, templates }: Props) {
 
       {showDescription ? (
         <div className="grid gap-1.5">
-          <Label htmlFor="description">Details (optional)</Label>
+          <Label htmlFor="description">Details</Label>
           <Textarea id="description" rows={3} {...register("description")} />
         </div>
       ) : (

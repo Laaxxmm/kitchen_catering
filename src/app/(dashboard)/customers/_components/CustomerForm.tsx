@@ -70,40 +70,43 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
   }
 
   return (
-    <form onSubmit={handleSubmit(submit)} className="grid gap-4 max-w-3xl">
-      <div className="grid gap-2">
-        <Label htmlFor="name">Name</Label>
-        <Input id="name" {...register("name", { required: true })} />
-        {errors.name && <span className="text-[11px] text-alert">Name is required</span>}
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <form onSubmit={handleSubmit(submit)} className="grid max-w-3xl gap-4">
+      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+        <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Identity</h3>
         <div className="grid gap-2">
-          <Label htmlFor="gstin">GSTIN</Label>
-          <Input id="gstin" placeholder="29AAACI0000A1Z5" {...register("gstin")} />
+          <Label htmlFor="name">Name<span className="text-gold" aria-hidden> *</span></Label>
+          <Input id="name" {...register("name", { required: true })} />
+          {errors.name && <span className="text-[11px] text-alert">Name is required</span>}
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid gap-2">
+            <Label htmlFor="gstin">GSTIN</Label>
+            <Input id="gstin" placeholder="29AAACI0000A1Z5" {...register("gstin")} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="pan">PAN</Label>
+            <Input id="pan" {...register("pan")} />
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+        <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Addresses</h3>
+        <div className="grid gap-2">
+          <Label htmlFor="billingAddress">Billing address<span className="text-gold" aria-hidden> *</span></Label>
+          <Textarea id="billingAddress" rows={2} {...register("billingAddress", { required: true })} />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="pan">PAN</Label>
-          <Input id="pan" {...register("pan")} />
+          <Label htmlFor="shippingAddress">Shipping address</Label>
+          <Textarea id="shippingAddress" rows={2} {...register("shippingAddress")} />
         </div>
-      </div>
-
-      <div className="grid gap-2">
-        <Label htmlFor="billingAddress">Billing address</Label>
-        <Textarea id="billingAddress" rows={2} {...register("billingAddress", { required: true })} />
-      </div>
-      <div className="grid gap-2">
-        <Label htmlFor="shippingAddress">Shipping address (optional)</Label>
-        <Textarea id="shippingAddress" rows={2} {...register("shippingAddress")} />
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="grid gap-2">
           <Label htmlFor="stateCode">State code</Label>
           <Input id="stateCode" maxLength={2} {...register("stateCode", { required: true })} />
         </div>
         <div className="grid gap-2 sm:col-span-2">
-          <Label htmlFor="groupId">Group (optional)</Label>
+          <Label htmlFor="groupId">Group</Label>
           <select
             id="groupId"
             {...register("groupId")}
@@ -135,16 +138,19 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
             )}
           </p>
         </div>
-      </div>
+        </div>
+      </section>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+        <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Contact</h3>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="grid gap-2">
           <Label htmlFor="contactName">Contact name</Label>
           <Input id="contactName" {...register("contactName")} />
         </div>
         <div className="grid gap-2">
           <Label htmlFor="email">
-            Email <span className="text-alert">*</span>
+            Email<span className="text-gold" aria-hidden> *</span>
           </Label>
           <Input
             id="email"
@@ -159,7 +165,7 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
         </div>
         <div className="grid gap-2">
           <Label htmlFor="phone">
-            Phone <span className="text-alert">*</span>
+            Phone<span className="text-gold" aria-hidden> *</span>
           </Label>
           <Input
             id="phone"
@@ -172,12 +178,15 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
             </span>
           )}
         </div>
-      </div>
+        </div>
+      </section>
 
       {/* "Bill to" + credit terms — drives invoice header + approval routing. */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+        <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Billing &amp; credit</h3>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="grid gap-2 sm:col-span-3">
-          <Label htmlFor="billingCompanyName">Bill to company (optional)</Label>
+          <Label htmlFor="billingCompanyName">Bill to company</Label>
           <Input
             id="billingCompanyName"
             placeholder="Defaults to customer name when blank"
@@ -220,20 +229,16 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
             you enter.
           </p>
         </div>
-      </div>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="notes">Internal notes</Label>
+          <Textarea id="notes" rows={3} {...register("notes")} />
+        </div>
+      </section>
 
-      <div className="grid gap-2">
-        <Label htmlFor="notes">Internal notes</Label>
-        <Textarea id="notes" rows={3} {...register("notes")} />
-      </div>
-
-      <div className="flex gap-2">
-        <Button type="submit" disabled={pending}>
-          {pending ? "Saving…" : submitLabel}
-        </Button>
-        <Button type="button" variant="outline" onClick={() => router.back()}>
-          Cancel
-        </Button>
+      <div className="sticky bottom-0 z-10 -mx-4 mt-1 flex flex-wrap items-center justify-end gap-2 border-t border-ik-rule bg-ik-paper/90 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-ik-paper/75 md:-mx-6 md:px-6">
+        <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>
+        <Button type="submit" disabled={pending}>{pending ? "Saving…" : submitLabel}</Button>
       </div>
     </form>
   );

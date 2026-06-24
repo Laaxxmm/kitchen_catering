@@ -19,6 +19,7 @@ import {
   deactivateTaskTemplate,
   upsertTaskTemplate,
 } from "@/server/actions/tasks";
+import { EmptyState } from "@/components/ik/FormKit";
 import { isNextNavigationError } from "@/lib/next-error";
 
 interface Template {
@@ -87,11 +88,11 @@ export function TemplateManager({ templates }: { templates: Template[] }) {
 
   return (
     <div className="grid gap-5">
-      <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
-        <div className="text-[12px] font-medium text-ik-ink-2">Add preset</div>
+      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+        <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Add preset</h3>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="grid gap-1.5">
-            <Label htmlFor="title">Title</Label>
+            <Label htmlFor="title">Title<span className="text-gold" aria-hidden> *</span></Label>
             <Input
               id="title"
               placeholder="e.g. Daily fridge temp check"
@@ -100,7 +101,7 @@ export function TemplateManager({ templates }: { templates: Template[] }) {
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="description">Details (optional)</Label>
+            <Label htmlFor="description">Details</Label>
             <Textarea
               id="description"
               rows={2}
@@ -120,7 +121,10 @@ export function TemplateManager({ templates }: { templates: Template[] }) {
 
       <section>
         {templates.length === 0 ? (
-          <p className="text-[13px] text-ik-ink-3">No presets yet.</p>
+          <EmptyState
+            title="No presets yet"
+            body="Presets are reusable task templates — add common recurring jobs (fridge temp checks, daily counts) once, then assign them in a click."
+          />
         ) : (
           <Table>
             <TableHeader>

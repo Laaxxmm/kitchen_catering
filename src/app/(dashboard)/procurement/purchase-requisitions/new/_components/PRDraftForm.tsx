@@ -53,9 +53,9 @@ export function PRDraftForm({ ingredients, onSubmit }: Props) {
 
   return (
     <form onSubmit={submit} className="grid gap-4">
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="font-medium text-[14px] text-ik-ink">What do we need?</h3>
+          <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">What do we need?</h3>
           <Button type="button" size="sm" variant="outline" onClick={() => setLines((p) => [...p, { ingredientId: ingredients[0]?.id ?? "", requestedQty: "1", notes: "" }])}>+ Add line</Button>
         </div>
         <table className="w-full text-[12.5px]">
@@ -64,7 +64,7 @@ export function PRDraftForm({ ingredients, onSubmit }: Props) {
               <th className="py-1 pr-2">Ingredient</th>
               <th className="w-24 py-1 pr-2 text-right">Qty</th>
               <th className="w-16">Unit</th>
-              <th>Notes (optional)</th>
+              <th>Notes</th>
               <th className="w-6"></th>
             </tr>
           </thead>
@@ -125,9 +125,9 @@ export function PRDraftForm({ ingredients, onSubmit }: Props) {
         <Label htmlFor="notes">Notes</Label>
         <Textarea id="notes" rows={2} value={headerNotes} onChange={(e) => setHeaderNotes(e.target.value)} placeholder="Anything else the manager should know (urgency, vendor preference, etc.)" />
       </div>
-      <div className="flex gap-2">
+      <div className="sticky bottom-0 z-10 -mx-4 mt-1 flex flex-wrap items-center justify-end gap-2 border-t border-ik-rule bg-ik-paper/90 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-ik-paper/75 md:-mx-6 md:px-6">
+        <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>
         <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create request"}</Button>
-        <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
       </div>
     </form>
   );
