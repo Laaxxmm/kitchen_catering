@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { randomBytes } from "node:crypto";
 import { Decimal } from "decimal.js";
 import { ApprovalDecision, OrderStatus, Role } from "@prisma/client";
 import { db } from "@/server/db";
@@ -25,7 +26,7 @@ import { nextOrderCode } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
 import { indefineStateCode } from "@/lib/org";
-import { isImmediateChannel } from "@/lib/order-channels";
+import { isImmediateChannel, channelWantsFeedback } from "@/lib/order-channels";
 import { notifyRoles } from "@/server/actions/notifications";
 import { formatIST } from "@/lib/time";
 
@@ -749,6 +750,72 @@ export async function cancelOrder(id: string, reason: string) {
 
   revalidatePath(`/orders/${id}`);
   revalidatePath("/orders");
+}
+
+/**
+ * One-tap "Served" for in-house channels (room service / à la carte /
+ * management). These aren't driver-delivered — the plate is carried to the
+ * room/table — so they skip the whole delivery-scheduling flow. Marking
+ * served moves the order READY → DELIVERED, which is the billable state the
+ * room-service billing screen lists. Tolerant of a double-tap (already
+ * served/billed = no-op). Mints the feedback-link token like a real delivery.
+ */
+export async function markInHouseServed(orderId: string) {
+  const session = await requireRole([
+    Role.ADMIN,
+    Role.MANAGER,
+    Role.KITCHEN_HEAD,
+    Role.FNB_SERVICE,
+  ]);
+  await db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, code: true, status: true, channel: true, feedbackToken: true },
+    });
+    if (!order) throw new Error("Order not found");
+    if (!isImmediateChannel(order.channel)) {
+      throw new AuthorizationError(
+        "Only in-house orders (room service / à la carte / management) are served this way.",
+      );
+    }
+    // Already served / billed — harmless no-op so a double-tap doesn't error.
+    if (
+      order.status === OrderStatus.DELIVERED ||
+      order.status === OrderStatus.INVOICED ||
+      order.status === OrderStatus.PAID ||
+      order.status === OrderStatus.COMPLETED
+    ) {
+      return;
+    }
+    if (order.status !== OrderStatus.READY) {
+      throw new AuthorizationError(
+        `Order ${order.code} isn't ready to serve yet (it's ${order.status}). It needs to be cooked first.`,
+      );
+    }
+    const wantsFeedback = !order.feedbackToken && channelWantsFeedback(order.channel);
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        status: OrderStatus.DELIVERED,
+        ...(wantsFeedback
+          ? { feedbackToken: randomBytes(24).toString("base64url"), feedbackSentAt: new Date() }
+          : {}),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "ORDER_SERVED_INHOUSE",
+        entity: "Order",
+        entityId: orderId,
+      },
+    });
+  });
+
+  revalidatePath("/kitchen");
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/invoices/room-service");
 }
 
 export async function assignKitchenSupervisor(id: string, userId: string) {

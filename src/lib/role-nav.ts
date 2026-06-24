@@ -13,14 +13,14 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
     "kitchen", "requisitions", "deliveries", "inventory",
     "requests", "purchaseorders", "vendors", "supplierbills",
-    "invoices", "payments", "pettycash", "salary", "reports",
+    "roomservicebills", "invoices", "payments", "pettycash", "salary", "reports",
     "housekeeping", "maintenance", "banquet", "admin",
   ]),
   MANAGER: new Set([
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
     "kitchen", "requisitions", "deliveries", "inventory",
     "requests", "purchaseorders", "vendors", "supplierbills",
-    "invoices", "payments", "pettycash", "salary", "reports",
+    "roomservicebills", "invoices", "payments", "pettycash", "salary", "reports",
     "housekeeping", "maintenance", "banquet",
   ]),
   SALES: new Set([
@@ -49,7 +49,7 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   // Mark-as-paid for customer invoices is also gated to admin/manager
   // (see customer-invoices.markCustomerInvoicePaid).
   ACCOUNTS: new Set([
-    "dashboard", "tasks", "invoices", "payments", "inventory",
+    "dashboard", "tasks", "roomservicebills", "invoices", "payments", "inventory",
     "purchaseorders", "vendors", "supplierbills",
   ]),
   // Housekeeping manager: laser-focused on the hotel-side stockroom.
@@ -61,10 +61,11 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   MAINTENANCE_MANAGER: new Set([
     "dashboard", "tasks", "maintenance",
   ]),
-  // F&B service: takes room-service / alacarte / management orders
-  // (Phase 4) and drives the banquet store (Phase 3).
+  // F&B service: takes room-service / alacarte / management orders, serves
+  // them, and bills them (the in-house room-billing screen). Also drives the
+  // banquet store.
   FNB_SERVICE: new Set([
-    "dashboard", "tasks", "orders", "banquet",
+    "dashboard", "tasks", "orders", "roomservicebills", "banquet",
   ]),
 };
 

@@ -382,7 +382,7 @@ export async function listProductionJobs(opts: { window?: "today" | "tomorrow" |
     include: {
       order: {
         select: {
-          id: true, code: true, eventDate: true,
+          id: true, code: true, eventDate: true, channel: true,
           customer: { select: { name: true } },
         },
       },

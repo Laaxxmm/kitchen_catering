@@ -89,6 +89,7 @@ export const NAV_GROUPS: NavGroup[] = [
     collapsible: true,
     badgeKey: "money",
     items: [
+      { key: "roomservicebills", label: "Room billing", icon: "invoice", href: "/invoices/room-service" },
       { key: "invoices", label: "Invoices", icon: "invoice", href: "/invoices" },
       { key: "payments", label: "Payments", icon: "pie", href: "/payments" },
       { key: "pettycash", label: "Petty cash", icon: "pie", href: "/petty-cash" },

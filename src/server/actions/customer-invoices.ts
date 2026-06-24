@@ -7,6 +7,7 @@ import {
   CustomerInvoiceKind,
   CustomerInvoiceStatus,
   EInvoiceStatus,
+  OrderChannel,
   OrderStatus,
   PaymentMethod,
   Role,
@@ -17,6 +18,7 @@ import {
   requireRole,
   requireSession,
 } from "@/server/rbac";
+import { isImmediateChannel } from "@/lib/order-channels";
 import { nextCustomerInvoiceNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { summarise } from "@/lib/gst";
@@ -1099,6 +1101,192 @@ export async function listBillableOrders() {
     orderBy: [{ customerId: "asc" }, { eventDate: "asc" }],
     take: 500,
   });
+}
+
+// Roles that can run the in-house (room service) billing screen — the front-
+// of-house F&B staff who take those orders, plus finance/management.
+const INHOUSE_BILL_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.FNB_SERVICE];
+
+/**
+ * Served-but-unbilled in-house orders (room service / à la carte /
+ * management) for the room-service billing screen. Returned with room/table
+ * + customer + a short item summary so the screen can group them per
+ * room/guest and show the running total. "Served" = DELIVERED (set by the
+ * one-tap markInHouseServed); issuing the bill advances it to INVOICED.
+ */
+export async function listBillableInHouseOrders() {
+  await requireRole(INHOUSE_BILL_ROLES);
+  return db.order.findMany({
+    where: {
+      status: OrderStatus.DELIVERED,
+      channel: {
+        in: [OrderChannel.ROOM_SERVICE, OrderChannel.ALACARTE, OrderChannel.MANAGEMENT],
+      },
+    },
+    select: {
+      id: true,
+      code: true,
+      channel: true,
+      roomNumber: true,
+      tableNumber: true,
+      eventDate: true,
+      contractValue: true,
+      customer: { select: { id: true, name: true } },
+      items: {
+        orderBy: { sortOrder: "asc" },
+        select: { id: true, portions: true, dish: { select: { name: true } } },
+      },
+    },
+    orderBy: [{ roomNumber: "asc" }, { eventDate: "asc" }],
+    take: 500,
+  });
+}
+
+/**
+ * Consolidate several in-house orders for the SAME customer into ONE GST
+ * invoice — the hotel-folio model. Merges every order's line items, computes
+ * the GST split once (same customer ⇒ same place of supply), credits any
+ * payment collected on the way, and advances all the orders to INVOICED.
+ */
+export async function createConsolidatedInHouseInvoice(orderIds: string[]) {
+  const session = await requireRole(INHOUSE_BILL_ROLES);
+  if (!orderIds || orderIds.length === 0) {
+    throw new Error("Pick at least one order to bill.");
+  }
+
+  const result = await db.$transaction(async (tx) => {
+    const orders = await tx.order.findMany({
+      where: { id: { in: orderIds } },
+      include: {
+        items: {
+          include: { dish: { select: { name: true, unit: true, hsnSac: true } } },
+          orderBy: { sortOrder: "asc" },
+        },
+        customer: { select: { id: true, name: true } },
+        deliveries: {
+          where: { paymentCollected: true },
+          select: { paymentAmount: true, paymentMethod: true, paymentReference: true },
+        },
+      },
+    });
+    if (orders.length === 0) throw new Error("Orders not found.");
+
+    const customerId = orders[0].customer.id;
+    const pos = orders[0].placeOfSupplyStateCode;
+    for (const o of orders) {
+      if (o.status !== OrderStatus.DELIVERED) {
+        throw new Error(`${o.code} isn't ready to bill yet (it's ${o.status.toLowerCase()}).`);
+      }
+      if (!isImmediateChannel(o.channel)) {
+        throw new Error(`${o.code} isn't an in-house order.`);
+      }
+      if (o.customer.id !== customerId) {
+        throw new Error("All orders on one bill must belong to the same customer.");
+      }
+    }
+
+    const allItems = orders.flatMap((o) => o.items);
+    const summary = summarise({
+      lines: allItems.map((it) => ({
+        quantity: it.portions.toString(),
+        unitPrice: it.unitPrice.toString(),
+        discountPct: it.discountPct.toString(),
+        gstRatePct: it.gstRatePct.toString(),
+      })),
+      supplierStateCode: indefineStateCode(),
+      placeOfSupplyStateCode: pos,
+    });
+
+    const invoiceNo = await nextCustomerInvoiceNumber(tx);
+    const podTotal = orders
+      .flatMap((o) => o.deliveries)
+      .reduce((s, d) => s.plus(d.paymentAmount ? toDecimal(d.paymentAmount) : 0), new Decimal(0));
+    const fullyPaid = podTotal.gte(summary.grandTotal);
+    const partiallyPaid = podTotal.gt(0) && !fullyPaid;
+
+    const room = orders.find((o) => o.roomNumber)?.roomNumber;
+    const codes = orders.map((o) => o.code).join(", ");
+
+    const invoice = await tx.customerInvoice.create({
+      data: {
+        invoiceNo,
+        kind: CustomerInvoiceKind.ORDER,
+        status: fullyPaid
+          ? CustomerInvoiceStatus.PAID
+          : partiallyPaid
+            ? CustomerInvoiceStatus.PARTIAL
+            : CustomerInvoiceStatus.ISSUED,
+        issuedAt: new Date(),
+        amountPaid: podTotal.toFixed(2),
+        orderId: null, // consolidated — see notes for the source order codes
+        customerId,
+        placeOfSupplyStateCode: pos,
+        subtotal: summary.subtotal.toString(),
+        cgst: summary.cgst.toString(),
+        sgst: summary.sgst.toString(),
+        igst: summary.igst.toString(),
+        taxTotal: summary.taxTotal.toString(),
+        grandTotal: summary.grandTotal.toString(),
+        eInvoiceStatus: EInvoiceStatus.NOT_REQUIRED,
+        createdById: session.user.id,
+        shareToken: newShareToken(),
+        notes: `In-house bill${room ? ` · Room ${room}` : ""} · Orders: ${codes}`,
+        lines: {
+          create: allItems.map((it, idx) => ({
+            sortOrder: idx,
+            description: it.dish.name,
+            hsnSac: it.dish.hsnSac ?? null,
+            quantity: it.portions.toString(),
+            unit: it.dish.unit,
+            unitPrice: it.unitPrice.toString(),
+            discountPct: it.discountPct.toString(),
+            gstRatePct: it.gstRatePct.toString(),
+            lineSubtotal: it.lineSubtotal.toString(),
+            lineTax: it.lineTax.toString(),
+            lineTotal: it.lineTotal.toString(),
+          })),
+        },
+      },
+    });
+
+    for (const o of orders) {
+      for (const d of o.deliveries) {
+        if (!d.paymentAmount || !d.paymentMethod) continue;
+        await tx.customerInvoicePayment.create({
+          data: {
+            invoiceId: invoice.id,
+            amount: d.paymentAmount,
+            paidAt: new Date(),
+            method: d.paymentMethod as PaymentMethod,
+            reference: d.paymentReference,
+            notes: "Collected at delivery",
+            recordedById: session.user.id,
+          },
+        });
+      }
+    }
+
+    await tx.order.updateMany({
+      where: { id: { in: orders.map((o) => o.id) } },
+      data: { status: fullyPaid ? OrderStatus.PAID : OrderStatus.INVOICED },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "CUSTOMER_INVOICE_CREATED_INHOUSE",
+        entity: "CustomerInvoice",
+        entityId: invoice.id,
+        payloadHash: sha256Json({ orderIds, invoiceNo, grandTotal: summary.grandTotal.toString() }),
+      },
+    });
+
+    return invoice;
+  });
+
+  revalidatePath("/invoices");
+  revalidatePath("/invoices/room-service");
+  return { id: result.id, invoiceNo: result.invoiceNo };
 }
 
 export async function getCustomerInvoice(id: string) {

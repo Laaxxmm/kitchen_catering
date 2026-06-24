@@ -9,6 +9,9 @@ import { formatIST } from "@/lib/time";
 import { isNextNavigationError } from "@/lib/next-error";
 import { startCookingOrder, markOrderCooked } from "@/server/actions/production-jobs";
 import { handToDelivery } from "@/server/actions/deliveries";
+import { markInHouseServed } from "@/server/actions/orders";
+import { isImmediateChannel } from "@/lib/order-channels";
+import type { OrderChannel } from "@prisma/client";
 
 type Stage = "QUEUED" | "PREP" | "COOKING" | "READY";
 
@@ -17,6 +20,7 @@ export interface KitchenJob {
   orderId: string;
   status: Stage;
   code: string;
+  channel: OrderChannel;
   customerName: string;
   scheduledReady: string;
   items: { id: string; dishName: string; portions: string; ready: boolean }[];
@@ -103,9 +107,13 @@ function JobCard({ job }: { job: KitchenJob }) {
     });
   }
 
-  // One stage-appropriate primary action per card.
+  // One stage-appropriate primary action per card. In-house orders (room
+  // service / à la carte / management) skip the driver dispatch — once
+  // ready they're served straight to the room/table.
+  const inHouse = isImmediateChannel(job.channel);
   let action: { label: string; fn: () => Promise<unknown>; msg: string };
   if (job.status === "QUEUED") action = { label: "Start cooking", fn: () => startCookingOrder(job.orderId), msg: "Cooking started" };
+  else if (isReady && inHouse) action = { label: "Mark served", fn: () => markInHouseServed(job.orderId), msg: "Served — ready to bill" };
   else if (isReady) action = { label: "Send to dispatch", fn: () => handToDelivery(job.orderId), msg: "Delivery team notified" };
   else action = { label: "Mark ready", fn: () => markOrderCooked(job.orderId), msg: "Marked ready" };
 

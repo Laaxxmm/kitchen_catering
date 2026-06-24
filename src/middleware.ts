@@ -110,8 +110,16 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Banquet — F&B service-side packaging store.
   { pattern: /^\/banquet(\/|$)/, allow: ["ADMIN", "MANAGER", "FNB_SERVICE"] },
 
-  // Finance — invoices are accounts/management. Sales work from orders.
-  { pattern: /^\/invoices(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  // Finance — invoices are accounts/management. The in-house (room service)
+  // billing screen + viewing a generated bill are also open to F&B service
+  // (they take and serve those orders); the invoice list, standalone +
+  // from-order creation and editing stay finance-only.
+  { pattern: /^\/invoices\/?$/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  { pattern: /^\/invoices\/new(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  { pattern: /^\/invoices\/generate(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  { pattern: /^\/invoices\/[^/]+\/edit(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  { pattern: /^\/invoices\/room-service(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "FNB_SERVICE"] },
+  { pattern: /^\/invoices(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "FNB_SERVICE"] },
   { pattern: /^\/payments(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   // Petty cash / salary / reports are admin/manager territory. Accounts
   // is scoped to invoices + vendor bills + stock receipts.

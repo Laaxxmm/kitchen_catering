@@ -99,6 +99,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     );
     await markIngredientsAvailable(id);
   }
+  async function doMarkServed() {
+    "use server";
+    const { markInHouseServed } = await import("@/server/actions/orders");
+    await markInHouseServed(id);
+  }
 
   // ─── Approval block selection ────────────────────────────────────────
   // Chef sees the chef-approval block when order is PENDING_CHEF_APPROVAL.
@@ -162,6 +167,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         immediate={immediate}
         hasRequisitions={order.chefRequisitions.length > 0}
         onIngredientsAvailable={doIngredientsAvailable}
+        onMarkServed={doMarkServed}
       />
 
 
@@ -433,6 +439,8 @@ interface OrderNextStepProps {
   hasRequisitions: boolean;
   /** Server action: chef skips the requisition because stock is on hand. */
   onIngredientsAvailable: () => Promise<void>;
+  /** Server action: one-tap "served" for in-house orders (no driver). */
+  onMarkServed: () => Promise<void>;
 }
 
 /**
@@ -442,11 +450,13 @@ interface OrderNextStepProps {
  * via the header button, PAID/COMPLETED/CANCELLED are read-only) and the
  * approval states (those use dedicated blocks above).
  */
-function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisitions, onIngredientsAvailable }: OrderNextStepProps) {
+function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisitions, onIngredientsAvailable, onMarkServed }: OrderNextStepProps) {
   const isAdmin = role === Role.ADMIN;
   const isManager = role === Role.MANAGER || isAdmin;
   const isChef = role === Role.KITCHEN_HEAD || isAdmin;
   const isSales = role === Role.SALES || isManager;
+  // Who can mark an in-house order served: kitchen + F&B + management.
+  const canServe = isAdmin || isManager || isChef || role === Role.FNB_SERVICE;
 
   let title = "";
   let body: React.ReactNode = null;
@@ -580,6 +590,32 @@ function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisi
       break;
 
     case OrderStatus.READY:
+      if (immediate) {
+        // In-house: no driver — the plate goes straight to the room/table.
+        // One tap marks it served, which makes it billable on the room
+        // billing screen.
+        title = "Next: mark it served";
+        body = (
+          <>
+            Cooked and ready to take to the {role === Role.FNB_SERVICE ? "guest" : "room / table"}. Tap{" "}
+            <em>Served</em> once it&apos;s handed over — then raise the bill from{" "}
+            <Link href="/invoices/room-service" className="text-brand hover:underline">Room billing</Link>.
+            {!canServe && <span className="text-ik-ink-3"> (Serve action is for kitchen / F&amp;B / management.)</span>}
+            {canServe && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <form action={onMarkServed}>
+                  <Button type="submit" size="sm">Mark served</Button>
+                </form>
+                <Link href="/invoices/room-service">
+                  <Button type="button" size="sm" variant="outline">Open room billing</Button>
+                </Link>
+              </div>
+            )}
+          </>
+        );
+        tone = canServe ? "urgent" : "info";
+        break;
+      }
       title = "Next: schedule a delivery";
       body = (
         <>

@@ -10,10 +10,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Countdown } from "@/components/ik/dashboard/Countdown";
 import { formatIST } from "@/lib/time";
 import { isNextNavigationError } from "@/lib/next-error";
-import { chefApproveOrder } from "@/server/actions/orders";
+import { chefApproveOrder, markInHouseServed } from "@/server/actions/orders";
 import { markIngredientsAvailable } from "@/server/actions/chef-requisitions";
 import { startCookingOrder, markOrderCooked } from "@/server/actions/production-jobs";
 import { handToDelivery } from "@/server/actions/deliveries";
+import { isImmediateChannel } from "@/lib/order-channels";
 
 interface BoardItem {
   label: string;
@@ -298,15 +299,25 @@ function ChefOrderCard({ order, highlight = false }: { order: ChefBoardOrder; hi
           </Button>
         )}
 
-        {order.status === OrderStatus.READY && (
-          <Button
-            size="sm"
-            disabled={pending}
-            onClick={() => run(() => handToDelivery(order.id), "Delivery team notified — ready to dispatch")}
-          >
-            Hand to delivery
-          </Button>
-        )}
+        {order.status === OrderStatus.READY &&
+          (isImmediateChannel(order.channel) ? (
+            // In-house: served straight to the room/table, no driver.
+            <Button
+              size="sm"
+              disabled={pending}
+              onClick={() => run(() => markInHouseServed(order.id), "Served — ready to bill")}
+            >
+              Mark served
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              disabled={pending}
+              onClick={() => run(() => handToDelivery(order.id), "Delivery team notified — ready to dispatch")}
+            >
+              Hand to delivery
+            </Button>
+          ))}
 
         {order.status === OrderStatus.ISSUING && (
           <span className="text-[11.5px] text-ik-ink-3">Store is gathering ingredients…</span>
