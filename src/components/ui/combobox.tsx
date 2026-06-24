@@ -173,7 +173,7 @@ export function Combobox({
           setOpen((o) => !o);
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
-        className="flex h-9 w-full items-center justify-between rounded border border-[hsl(var(--border))] bg-white px-3 py-1.5 text-left text-[13px] text-[hsl(var(--foreground))] transition focus-visible:border-[hsl(var(--ring))] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[hsl(var(--ring))] disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex h-9 w-full items-center justify-between rounded border border-[hsl(var(--border))] bg-ik-card px-3 py-1.5 text-left text-[13px] text-[hsl(var(--foreground))] transition focus-visible:border-[hsl(var(--ring))] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[hsl(var(--ring))] disabled:cursor-not-allowed disabled:opacity-50"
       >
         <span className={cn("truncate", !selected && "text-[hsl(var(--muted-foreground))]")}>
           {selected?.label ?? placeholder}

@@ -75,7 +75,7 @@ export function TableSearchInput({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder={placeholder}
-        className="h-8 w-full rounded border border-slate-200 bg-white pl-7 pr-7 text-[12px] text-slate-800 placeholder:text-slate-400 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand/30"
+        className="h-8 w-full rounded border border-ik-rule bg-ik-card pl-7 pr-7 text-[12px] text-ik-ink placeholder:text-ik-ink-3 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand/30"
       />
       {value && (
         <button
@@ -141,7 +141,7 @@ export function TableDateRange({
         value={fromCurrent}
         max={toCurrent || undefined}
         onChange={(e) => setOne(fromParam, e.target.value)}
-        className="h-8 rounded border border-slate-200 bg-white px-2 text-[12px] text-slate-800 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand/30"
+        className="h-8 rounded border border-ik-rule bg-ik-card px-2 text-[12px] text-ik-ink focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand/30"
       />
       <span className="text-[11px] text-slate-400">–</span>
       <input
@@ -150,7 +150,7 @@ export function TableDateRange({
         value={toCurrent}
         min={fromCurrent || undefined}
         onChange={(e) => setOne(toParam, e.target.value)}
-        className="h-8 rounded border border-slate-200 bg-white px-2 text-[12px] text-slate-800 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand/30"
+        className="h-8 rounded border border-ik-rule bg-ik-card px-2 text-[12px] text-ik-ink focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand/30"
       />
     </div>
   );
@@ -194,7 +194,7 @@ export function TableSelectFilter({
       <select
         value={current}
         onChange={(e) => onChange(e.target.value)}
-        className="h-8 rounded border border-slate-200 bg-white px-2 text-[12px] text-slate-800 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand/30"
+        className="h-8 rounded border border-ik-rule bg-ik-card px-2 text-[12px] text-ik-ink focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand/30"
       >
         <option value="">{allLabel}</option>
         {options.map((o) => (

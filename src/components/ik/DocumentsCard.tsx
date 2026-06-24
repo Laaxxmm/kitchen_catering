@@ -169,7 +169,7 @@ export function DocumentsCard({
                   ref={fileRef}
                   type="file"
                   accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-                  className="block w-full text-[12px] file:mr-3 file:rounded file:border file:border-slate-200 file:bg-white file:px-2 file:py-1 file:text-[12px] file:font-medium hover:file:bg-slate-100"
+                  className="block w-full text-[12px] file:mr-3 file:rounded file:border file:border-ik-rule file:bg-ik-card file:px-2 file:py-1 file:text-[12px] file:font-medium hover:file:bg-ik-paper-alt"
                 />
                 <p className="mt-1 text-[11px] text-slate-500">
                   PDF, JPG, or PNG · up to 30 MB
@@ -180,7 +180,7 @@ export function DocumentsCard({
                 <select
                   value={kind}
                   onChange={(e) => setKind(e.target.value as DocumentKind)}
-                  className="h-8 w-full rounded border border-slate-200 bg-white px-2 text-[12px] text-slate-800 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand/30"
+                  className="h-8 w-full rounded border border-ik-rule bg-ik-card px-2 text-[12px] text-ik-ink focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand/30"
                 >
                   {kindOptions.map((k) => (
                     <option key={k} value={k}>

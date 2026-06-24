@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { Icon } from "./Icon";
 import { IK } from "./tokens";
+import { NotificationBell } from "./NotificationBell";
+import { ThemeToggle } from "./ThemeToggle";
 
 // 48px top strip above the page content. Shows FY pill + notifications + optional right-side actions.
 // Source: handoff shell.jsx · TopBar.
@@ -81,32 +82,12 @@ export function TopBar({ title, right, onMenuClick }: TopBarProps) {
           <span style={{ width: 6, height: 6, borderRadius: 6, background: IK.positive }} />
           FY 25-26
         </div>
-        <button
-          type="button"
-          aria-label="Notifications"
-          style={{
-            padding: 7,
-            background: "transparent",
-            border: `1px solid ${IK.rule}`,
-            borderRadius: 4,
-            cursor: "pointer",
-            color: IK.ink3,
-            position: "relative",
-          }}
-        >
-          <Icon name="bell" size={14} />
-          <span
-            style={{
-              position: "absolute",
-              top: 3,
-              right: 3,
-              width: 6,
-              height: 6,
-              borderRadius: 6,
-              background: IK.accent,
-            }}
-          />
-        </button>
+        {/* Real notification bell — always mounted here (the TopBar is
+            present on every breakpoint and regardless of sidebar collapse),
+            so the unread poll + chime keep running even when the sidebar is
+            collapsed or in its mobile/tablet drawer. Opens downward. */}
+        <ThemeToggle />
+        <NotificationBell placement="down" />
         {right}
       </div>
     </div>

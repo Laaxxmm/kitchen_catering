@@ -70,8 +70,12 @@
     --font-sans: var(--font-ik-sans);
 
     /* ─── Raw IK tokens for inline styles (SVGs, dynamic) ────── */
+    /* These drive BOTH inline `IK.*` styles and the Tailwind `ik-*`/`brand`
+       colour utilities (which are mapped to these vars in tailwind.config).
+       Overriding them under `.dark` re-themes the whole app. */
     --ik-paper: #FAF6EE;
     --ik-paper-alt: #FBF9F3;
+    --ik-card: #ffffff;
     --ik-ink: #20251F;
     --ik-ink2: #6E7268;
     --ik-ink3: #A9ADA3;
@@ -82,6 +86,7 @@
     --ik-accent-hover: #125429;
     --ik-accent-ink: #15492F;            /* brand emerald — titles */
     --ik-accent-wash: #E7F2EA;
+    --ik-accent-wash-hover: #D2E7D9;
     --ik-positive: #166534;
     --ik-positive-wash: #E7F2EA;
     --ik-alert: #B42318;
@@ -95,6 +100,40 @@
     --ik-gold: #B5882E;                  /* decorative gold */
     --ik-gold-text: #9A6B14;             /* AA-safe gold as text */
     --ik-gold-soft: #FBEFD2;             /* gold badge background */
+  }
+
+  /* ─── Dark theme ─────────────────────────────────────────────────────
+     Warm charcoal canvas, light warm ink, brighter emerald + gold so the
+     brand still reads on a dark surface. Applied by toggling `.dark` on
+     <html> (ThemeToggle + the no-flash script in layout.tsx). Every IK
+     surface/ink/rule/wash switches because the Tailwind tokens and the
+     inline `IK.*` object both resolve to these vars. */
+  .dark {
+    --ik-paper: #15170F;
+    --ik-paper-alt: #1C1E16;
+    --ik-card: #20231B;
+    --ik-ink: #F1EEE4;
+    --ik-ink2: #B9BCAE;
+    --ik-ink3: #898D80;
+    --ik-ink4: #676B5F;
+    --ik-rule: #34372C;
+    --ik-rule-strong: #45493B;
+    --ik-accent: #2FA063;                /* brighter action emerald on dark */
+    --ik-accent-hover: #3FB374;
+    --ik-accent-ink: #8FD3A8;            /* light emerald — titles / links */
+    --ik-accent-wash: #14361F;
+    --ik-accent-wash-hover: #1B4429;
+    --ik-positive: #4FB97D;
+    --ik-positive-wash: #14361F;
+    --ik-alert: #F2786B;
+    --ik-alert-wash: #3A1B18;
+    --ik-amber: #E0A042;
+    --ik-amber-wash: #392A12;
+    --ik-info: #5BA3E0;
+    --ik-info-wash: #15293A;
+    --ik-gold: #D4A94E;
+    --ik-gold-text: #E2C074;
+    --ik-gold-soft: #382E14;
   }
 
   .dark {

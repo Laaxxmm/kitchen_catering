@@ -10,7 +10,6 @@ import { istFyLabel } from "@/lib/time";
 import { SIDEBAR_KEYS_BY_ROLE } from "@/lib/role-nav";
 import { NAV_GROUPS, type NavItem, type NavBadges } from "@/lib/nav-config";
 import { roleLabel } from "@/lib/role-labels";
-import { NotificationBell } from "./NotificationBell";
 import type { Role } from "@prisma/client";
 
 // Left-rail app shell — 8 collapsible groups (see lib/nav-config.ts). The
@@ -129,47 +128,59 @@ export function Sidebar({ userName, userRole, badges, footer }: SidebarProps) {
         }}
       >
         {collapsed ? (
-          <div
+          // Collapsed: the toque doubles as the expand button so the rail is
+          // never a dead end (the old hidden toggle made it impossible to
+          // re-open once collapsed).
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            aria-label="Expand sidebar"
+            title="Expand sidebar"
             style={{
               width: 32,
               height: 32,
               borderRadius: 6,
               background: IK.accent,
+              border: "none",
+              cursor: "pointer",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              padding: 0,
             }}
           >
             {/* Chef's toque — same drawing as the full Wordmark mark.
-                Background is the surrounding green square (this container
-                already paints `IK.accent`), so we draw the toque alone. */}
+                Background is the green button, so we draw the toque alone. */}
             <svg width="22" height="22" viewBox="0 0 40 40">
               <circle cx="14" cy="20" r="5" fill="#fff" />
               <circle cx="20" cy="17" r="6" fill="#fff" />
               <circle cx="26" cy="20" r="5" fill="#fff" />
               <rect x="10" y="25" width="20" height="6.5" rx="1.6" fill="#fff" />
             </svg>
-          </div>
+          </button>
         ) : (
           <Link href="/dashboard" style={{ textDecoration: "none" }}>
             <Wordmark size={14} />
           </Link>
         )}
-        <button
-          type="button"
-          onClick={() => setCollapsed((c) => !c)}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          style={{
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            color: IK.ink3,
-            padding: 4,
-            display: collapsed ? "none" : "flex",
-          }}
-        >
-          <Icon name="menu" size={14} />
-        </button>
+        {!collapsed && (
+          <button
+            type="button"
+            onClick={() => setCollapsed(true)}
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              color: IK.ink3,
+              padding: 4,
+              display: "flex",
+            }}
+          >
+            <Icon name="menu" size={14} />
+          </button>
+        )}
       </div>
 
       {!collapsed && (
@@ -314,7 +325,6 @@ export function Sidebar({ userName, userRole, badges, footer }: SidebarProps) {
               {roleLabel(userRole)} · {istFyLabel(new Date())}
             </div>
           </div>
-          <NotificationBell />
           {footer}
         </div>
       )}

@@ -31,7 +31,7 @@ interface NotificationRow {
  * 60 s while mounted (no realtime; the user explicitly opens the bell
  * when they want fresh data).
  */
-export function NotificationBell() {
+export function NotificationBell({ placement = "up" }: { placement?: "up" | "down" } = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [count, setCount] = useState<number>(0);
@@ -181,7 +181,10 @@ export function NotificationBell() {
 
       {open && (
         <div
-          className="absolute bottom-10 right-0 z-50 w-[320px] rounded-md border border-ik-rule bg-ik-card shadow-lg"
+          className={
+            "absolute right-0 z-50 w-[320px] rounded-md border border-ik-rule bg-ik-card shadow-lg " +
+            (placement === "down" ? "top-10" : "bottom-10")
+          }
           style={{ maxHeight: "60vh" }}
         >
           <header className="flex items-center justify-between border-b border-ik-rule px-3 py-2">

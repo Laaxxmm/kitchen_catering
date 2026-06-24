@@ -46,8 +46,8 @@ export function OrderStepper({ current, immediate }: Props) {
                       (done
                         ? "border-brand-500 bg-brand-500 text-white"
                         : active
-                          ? "border-brand-500 bg-white text-brand-700 ring-2 ring-brand-200"
-                          : "border-ik-rule bg-white text-ik-ink-3")
+                          ? "border-brand-500 bg-ik-card text-brand-700 ring-2 ring-brand-200"
+                          : "border-ik-rule bg-ik-card text-ik-ink-3")
                     }
                   >
                     {done ? "✓" : i + 1}

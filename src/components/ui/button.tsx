@@ -16,7 +16,7 @@ const buttonVariants = cva(
         destructive:
           "bg-[hsl(var(--destructive))] text-[hsl(var(--destructive-foreground))] hover:opacity-90",
         outline:
-          "border border-[hsl(var(--border))] bg-white text-[hsl(var(--foreground))] hover:bg-[hsl(var(--secondary))]",
+          "border border-[hsl(var(--border))] bg-ik-card text-[hsl(var(--foreground))] hover:bg-[hsl(var(--secondary))]",
         secondary:
           "bg-[hsl(var(--secondary))] text-[hsl(var(--foreground))] hover:opacity-90",
         ghost:

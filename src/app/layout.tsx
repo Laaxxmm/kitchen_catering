@@ -69,6 +69,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
     >
       <body className="min-h-screen bg-background text-foreground antialiased" suppressHydrationWarning>
+        {/* No-flash theme: apply the saved choice before paint so a dark-mode
+            user never sees a light flash on load. Defaults to light (the
+            brand canvas) when nothing is saved. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{if(localStorage.getItem('ik.theme')==='dark')document.documentElement.classList.add('dark')}catch(e){}",
+          }}
+        />
         {children}
         <Toaster
           richColors
