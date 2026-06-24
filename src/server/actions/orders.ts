@@ -24,6 +24,7 @@ import {
 import { nextOrderCode } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
+import { indefineStateCode } from "@/lib/org";
 import { notifyRoles } from "@/server/actions/notifications";
 import { formatIST } from "@/lib/time";
 
@@ -180,18 +181,34 @@ export async function createOrder(raw: unknown) {
         ? new Decimal(input.packageTotal).toDecimalPlaces(2)
         : lineSum;
 
+    // Immediate channels (room service / à la carte / management) don't
+    // collect event date, delivery address/window or place of supply — the
+    // columns are NOT NULL, so fill sensible defaults: served now, to the
+    // room/table, taxed at the hotel's own state.
+    const eventDateVal = input.eventDate ? new Date(input.eventDate) : new Date();
+    const deliveryAddressVal =
+      input.deliveryAddress?.trim() ||
+      (input.roomNumber?.trim()
+        ? `Room ${input.roomNumber.trim()}`
+        : input.tableNumber?.trim()
+          ? `Table ${input.tableNumber.trim()}`
+          : "In-house service");
+    const windowStartVal = input.deliveryWindowStart ? new Date(input.deliveryWindowStart) : eventDateVal;
+    const windowEndVal = input.deliveryWindowEnd ? new Date(input.deliveryWindowEnd) : eventDateVal;
+    const placeOfSupplyVal = input.placeOfSupplyStateCode || indefineStateCode();
+
     const created = await tx.order.create({
       data: {
         code,
         customerId: input.customerId,
         channel: input.channel,
-        eventDate: new Date(input.eventDate),
+        eventDate: eventDateVal,
         headcount: input.headcount,
         mealType: input.mealType,
-        deliveryAddress: input.deliveryAddress,
-        deliveryWindowStart: new Date(input.deliveryWindowStart),
-        deliveryWindowEnd: new Date(input.deliveryWindowEnd),
-        placeOfSupplyStateCode: input.placeOfSupplyStateCode,
+        deliveryAddress: deliveryAddressVal,
+        deliveryWindowStart: windowStartVal,
+        deliveryWindowEnd: windowEndVal,
+        placeOfSupplyStateCode: placeOfSupplyVal,
         roomNumber: input.roomNumber?.trim() || null,
         tableNumber: input.tableNumber?.trim() || null,
         notes: input.notes ?? null,

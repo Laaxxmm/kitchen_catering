@@ -268,13 +268,19 @@ const orderCreateBase = z.object({
   // Channel defaults to BANQUET to preserve old semantics for legacy
   // clients that don't send the field yet.
   channel: z.nativeEnum(OrderChannel).default(OrderChannel.BANQUET),
-  eventDate: isoDate,
+  // The next four are required for pre-booked catering (BANQUET / ODC /
+  // PACKET) but NOT for the immediate in-house channels (room service /
+  // à la carte / management) — those are served "now" to a room/table, so
+  // event date, delivery address/window and place of supply don't apply.
+  // Conditionally enforced in the superRefine below; the server fills
+  // sensible defaults for immediate channels.
+  eventDate: isoDate.optional(),
   headcount: z.number().int().positive(),
   mealType: z.nativeEnum(MealType),
-  deliveryAddress: z.string().min(1).max(500),
-  deliveryWindowStart: isoDate,
-  deliveryWindowEnd: isoDate,
-  placeOfSupplyStateCode: stateCode,
+  deliveryAddress: z.string().max(500).optional(),
+  deliveryWindowStart: isoDate.optional(),
+  deliveryWindowEnd: isoDate.optional(),
+  placeOfSupplyStateCode: stateCode.optional(),
   // Required-IF-channel — enforced by the refinement on OrderCreateInput.
   roomNumber: z.string().max(40).nullable().optional(),
   tableNumber: z.string().max(40).nullable().optional(),
@@ -287,23 +293,41 @@ const orderCreateBase = z.object({
   items: z.array(OrderItemInput).min(1, "At least one item is required"),
 });
 
-export const OrderCreateInput = orderCreateBase.refine(
-  (v) => {
-    // Room service AND à la carte both require a room number — the guest
-    // is in a room either way (dine-in is charged to the room folio).
-    if (
-      v.channel === OrderChannel.ROOM_SERVICE ||
-      v.channel === OrderChannel.ALACARTE
-    ) {
-      return !!(v.roomNumber && v.roomNumber.trim().length > 0);
+// Immediate in-house channels — served now to a room/table, not pre-booked.
+const IMMEDIATE_CHANNELS: OrderChannel[] = [
+  OrderChannel.ROOM_SERVICE,
+  OrderChannel.ALACARTE,
+  OrderChannel.MANAGEMENT,
+];
+
+export const OrderCreateInput = orderCreateBase.superRefine((v, ctx) => {
+  // Room service AND à la carte both require a room number — the guest is in
+  // a room either way (dine-in is charged to the room folio).
+  if (
+    (v.channel === OrderChannel.ROOM_SERVICE || v.channel === OrderChannel.ALACARTE) &&
+    !(v.roomNumber && v.roomNumber.trim().length > 0)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["roomNumber"],
+      message: "Room service and à la carte orders require a room number",
+    });
+  }
+
+  // Pre-booked catering needs an event date, delivery address and place of
+  // supply. The immediate channels don't — the server defaults those.
+  if (!IMMEDIATE_CHANNELS.includes(v.channel)) {
+    if (!v.eventDate) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["eventDate"], message: "Event date is required" });
     }
-    return true;
-  },
-  {
-    message: "Room service and à la carte orders require a room number",
-    path: ["roomNumber"],
-  },
-);
+    if (!v.deliveryAddress || v.deliveryAddress.trim().length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["deliveryAddress"], message: "Delivery address is required" });
+    }
+    if (!v.placeOfSupplyStateCode) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["placeOfSupplyStateCode"], message: "Place of supply is required" });
+    }
+  }
+});
 export type OrderCreateInputT = z.infer<typeof OrderCreateInput>;
 
 export const OrderUpdateInput = orderCreateBase.partial().extend({

@@ -88,6 +88,13 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
   const [deliveryWindowEnd, setDeliveryWindowEnd] = useState(defaults?.deliveryWindowEnd ?? "");
   const [placeOfSupplyStateCode, setPlaceOfSupplyStateCode] = useState(defaults?.placeOfSupplyStateCode ?? "29");
   const [notes, setNotes] = useState(defaults?.notes ?? "");
+  // Immediate in-house channels: served now to a room/table, so we hide and
+  // skip event date, delivery address/window and place of supply — the
+  // server defaults them (now / the room / hotel's own state).
+  const immediate =
+    channel === OrderChannel.ROOM_SERVICE ||
+    channel === OrderChannel.ALACARTE ||
+    channel === OrderChannel.MANAGEMENT;
   const [lines, setLines] = useState<DraftLine[]>(() => {
     if (defaults?.items && defaults.items.length > 0) {
       return defaults.items.map((it) => ({
@@ -158,8 +165,9 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!customerId) return toast.error("Choose a customer");
-    if (!eventDate) return toast.error("Event date is required");
-    if (!deliveryAddress.trim()) return toast.error("Delivery address is required");
+    // Event date + delivery address only matter for pre-booked catering.
+    if (!immediate && !eventDate) return toast.error("Event date is required");
+    if (!immediate && !deliveryAddress.trim()) return toast.error("Delivery address is required");
     const items: OrderItemInputT[] = lines
       .filter((l) => l.dishId)
       .map((l) => ({
@@ -190,13 +198,18 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
     const payload: OrderCreateInputT = {
       customerId,
       channel,
-      eventDate,
       headcount: Number(headcount),
       mealType,
-      deliveryAddress,
-      deliveryWindowStart: deliveryWindowStart || eventDate,
-      deliveryWindowEnd: deliveryWindowEnd || eventDate,
-      placeOfSupplyStateCode,
+      // Immediate channels omit these — the server fills sensible defaults.
+      ...(immediate
+        ? {}
+        : {
+            eventDate,
+            deliveryAddress,
+            deliveryWindowStart: deliveryWindowStart || eventDate,
+            deliveryWindowEnd: deliveryWindowEnd || eventDate,
+            placeOfSupplyStateCode,
+          }),
       roomNumber: roomNumber.trim() || null,
       tableNumber: tableNumber.trim() || null,
       packageTotal: isPackage ? packageTotal.trim() : null,
@@ -243,22 +256,26 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
               />
             )}
           </div>
-          <div className="grid gap-1">
-            <Label htmlFor="placeOfSupplyStateCode">Place of supply (state code)</Label>
-            <Input
-              id="placeOfSupplyStateCode"
-              maxLength={2}
-              value={placeOfSupplyStateCode}
-              onChange={(e) => setPlaceOfSupplyStateCode(e.target.value)}
-            />
-          </div>
+          {!immediate && (
+            <div className="grid gap-1">
+              <Label htmlFor="placeOfSupplyStateCode">Place of supply (state code)</Label>
+              <Input
+                id="placeOfSupplyStateCode"
+                maxLength={2}
+                value={placeOfSupplyStateCode}
+                onChange={(e) => setPlaceOfSupplyStateCode(e.target.value)}
+              />
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="grid gap-1">
-            <Label htmlFor="eventDate">Event date</Label>
-            <Input id="eventDate" type="datetime-local" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
-          </div>
+          {!immediate && (
+            <div className="grid gap-1">
+              <Label htmlFor="eventDate">Event date</Label>
+              <Input id="eventDate" type="datetime-local" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
+            </div>
+          )}
           <div className="grid gap-1">
             <Label htmlFor="headcount">Headcount</Label>
             <Input id="headcount" type="number" min="1" value={headcount} onChange={(e) => setHeadcount(e.target.value)} />
@@ -343,20 +360,29 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
           )}
         </div>
 
-        <div className="grid gap-1">
-          <Label htmlFor="deliveryAddress">Delivery address</Label>
-          <Textarea id="deliveryAddress" rows={2} value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} />
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="grid gap-1">
-            <Label htmlFor="dws">Delivery window — start</Label>
-            <Input id="dws" type="datetime-local" value={deliveryWindowStart} onChange={(e) => setDeliveryWindowStart(e.target.value)} />
-          </div>
-          <div className="grid gap-1">
-            <Label htmlFor="dwe">Delivery window — end</Label>
-            <Input id="dwe" type="datetime-local" value={deliveryWindowEnd} onChange={(e) => setDeliveryWindowEnd(e.target.value)} />
-          </div>
-        </div>
+        {immediate ? (
+          <p className="rounded-md border border-ik-rule bg-ik-paper-alt p-2.5 text-[11.5px] text-ik-ink-3">
+            Served now to the {channel === OrderChannel.ALACARTE ? "table" : channel === OrderChannel.MANAGEMENT ? "team" : "room"} —
+            no event date, delivery window or address needed.
+          </p>
+        ) : (
+          <>
+            <div className="grid gap-1">
+              <Label htmlFor="deliveryAddress">Delivery address</Label>
+              <Textarea id="deliveryAddress" rows={2} value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="grid gap-1">
+                <Label htmlFor="dws">Delivery window — start</Label>
+                <Input id="dws" type="datetime-local" value={deliveryWindowStart} onChange={(e) => setDeliveryWindowStart(e.target.value)} />
+              </div>
+              <div className="grid gap-1">
+                <Label htmlFor="dwe">Delivery window — end</Label>
+                <Input id="dwe" type="datetime-local" value={deliveryWindowEnd} onChange={(e) => setDeliveryWindowEnd(e.target.value)} />
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
