@@ -19,6 +19,7 @@ export default async function MaintenanceLandingPage() {
         <div className="flex flex-wrap gap-2">
           <Link href="/maintenance/activities/new"><Button>Log activity</Button></Link>
           <Link href="/maintenance/receipts/new"><Button variant="outline">Record receipt</Button></Link>
+          <Link href="/maintenance/adjust"><Button variant="outline">Adjust stock</Button></Link>
         </div>
       }
       tabs={[
@@ -26,6 +27,7 @@ export default async function MaintenanceLandingPage() {
         { label: "Staff", href: "/maintenance/staff" },
         { label: "Receipts", href: "/maintenance/receipts" },
         { label: "Activities", href: "/maintenance/activities" },
+        { label: "Adjust stock", href: "/maintenance/adjust" },
         { label: "Reports", href: "/maintenance/reports" },
       ]}
       stock={stock}

@@ -1,13 +1,22 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { Role } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { toDecimal } from "@/lib/money";
+import { sha256Json } from "@/lib/audit";
 
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER, Role.MAINTENANCE_MANAGER, Role.FNB_SERVICE,
 ];
+// Who may correct on-hand for a given store: admin/manager + the store's
+// own manager. Mirrors the receipt-write roles for each module.
+const WRITE_ROLES_BY_STORE: Record<StoreKey, Role[]> = {
+  housekeeping: [Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER],
+  maintenance: [Role.ADMIN, Role.MANAGER, Role.MAINTENANCE_MANAGER],
+  banquet: [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE],
+};
 
 export type StoreKey = "housekeeping" | "maintenance" | "banquet";
 
@@ -84,4 +93,80 @@ export async function getStoreStock(store: StoreKey) {
   needsReorder.sort((a, b) => (a.out === b.out ? a.name.localeCompare(b.name) : a.out ? -1 : 1));
 
   return { out, low, inStock, noThreshold, needsReorder, received, issued, itemCount: items.length };
+}
+
+/** Active items for a store's adjust-stock picker (id · name · unit · on-hand). */
+export async function listStoreItems(store: StoreKey) {
+  await requireRole(WRITE_ROLES_BY_STORE[store]);
+  const select = { id: true, name: true, unit: true, currentStock: true } as const;
+  const rows =
+    store === "housekeeping"
+      ? await db.housekeepingItem.findMany({ where: { active: true }, select, orderBy: { name: "asc" } })
+      : store === "maintenance"
+        ? await db.maintenanceItem.findMany({ where: { active: true }, select, orderBy: { name: "asc" } })
+        : await db.banquetItem.findMany({ where: { active: true }, select, orderBy: { name: "asc" } });
+  return rows.map((r) => ({ id: r.id, name: r.name, unit: r.unit, currentStock: toDecimal(r.currentStock).toString() }));
+}
+
+/**
+ * Correct a store item's on-hand quantity — opening balance, physical-count
+ * fix, or damage/write-off. Two modes:
+ *   mode "set"   → currentStock becomes qty
+ *   mode "delta" → currentStock += qty (qty may be negative)
+ * The change + reason is recorded in the audit log (these stores have no
+ * dedicated adjustment ledger; receipts/issues remain the movement history).
+ * For *incoming purchased* stock use the store's "Record receipt" instead.
+ */
+export async function adjustStoreStock(input: {
+  store: StoreKey;
+  itemId: string;
+  mode: "set" | "delta";
+  qty: string;
+  reason: string;
+  note?: string;
+}) {
+  const session = await requireRole(WRITE_ROLES_BY_STORE[input.store]);
+  if (!input.reason?.trim()) throw new Error("A reason is required");
+  const amount = toDecimal(input.qty || "0");
+
+  await db.$transaction(async (tx) => {
+    const find = { where: { id: input.itemId }, select: { currentStock: true, name: true } };
+    const item =
+      input.store === "housekeeping"
+        ? await tx.housekeepingItem.findUnique(find)
+        : input.store === "maintenance"
+          ? await tx.maintenanceItem.findUnique(find)
+          : await tx.banquetItem.findUnique(find);
+    if (!item) throw new Error("Item not found");
+
+    const before = toDecimal(item.currentStock);
+    const after = input.mode === "set" ? amount : before.plus(amount);
+    if (after.lt(0)) throw new Error("Adjusted on-hand cannot be negative");
+    if (after.eq(before)) throw new Error("No change — the quantity matches current on-hand");
+    const next = after.toDecimalPlaces(3).toString();
+
+    if (input.store === "housekeeping") await tx.housekeepingItem.update({ where: { id: input.itemId }, data: { currentStock: next } });
+    else if (input.store === "maintenance") await tx.maintenanceItem.update({ where: { id: input.itemId }, data: { currentStock: next } });
+    else await tx.banquetItem.update({ where: { id: input.itemId }, data: { currentStock: next } });
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "STORE_STOCK_ADJUSTED",
+        entity: input.store === "housekeeping" ? "HousekeepingItem" : input.store === "maintenance" ? "MaintenanceItem" : "BanquetItem",
+        entityId: input.itemId,
+        payloadHash: sha256Json({
+          store: input.store,
+          before: before.toString(),
+          after: after.toString(),
+          delta: after.minus(before).toString(),
+          reason: input.reason,
+          note: input.note ?? null,
+        }),
+      },
+    });
+  });
+
+  revalidatePath(`/${input.store}`);
+  revalidatePath(`/${input.store}/items`);
 }

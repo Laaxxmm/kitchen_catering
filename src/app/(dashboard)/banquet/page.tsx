@@ -19,12 +19,14 @@ export default async function BanquetLandingPage() {
         <div className="flex flex-wrap gap-2">
           <Link href="/banquet/issues/new"><Button>Issue to event</Button></Link>
           <Link href="/banquet/receipts/new"><Button variant="outline">Record receipt</Button></Link>
+          <Link href="/banquet/adjust"><Button variant="outline">Adjust stock</Button></Link>
         </div>
       }
       tabs={[
         { label: "Items", href: "/banquet/items", active: true },
         { label: "Receipts", href: "/banquet/receipts" },
         { label: "Issues", href: "/banquet/issues" },
+        { label: "Adjust stock", href: "/banquet/adjust" },
         { label: "Reports", href: "/banquet/reports" },
       ]}
       stock={stock}
