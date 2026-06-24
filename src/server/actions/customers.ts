@@ -6,6 +6,8 @@ import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { CustomerInput, type CustomerInputT } from "@/lib/validators";
 import { sha256Json } from "@/lib/audit";
+import { Decimal } from "decimal.js";
+import { toDecimal } from "@/lib/money";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.SALES];
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.SALES, Role.ACCOUNTS, Role.KITCHEN_HEAD, Role.STORE_KEEPER];
@@ -136,6 +138,70 @@ export async function reactivateCustomer(id: string) {
   });
   revalidatePath("/customers");
   revalidatePath(`/customers/${id}`);
+}
+
+/**
+ * Customers with a computed lifecycle and order summary — no schema change,
+ * all derived from existing orders:
+ *   - Active   = at least one order placed in the last 90 days
+ *   - Dormant  = has past orders but none in 90 days
+ *   - Prospect = no orders yet
+ * Plus orderCount, totalRevenue (sum of contract value, excluding
+ * cancelled / rejected orders), and lastOrderAt (most recent createdAt).
+ */
+export async function listCustomersWithLifecycle(opts: { query?: string; active?: boolean } = {}) {
+  await requireRole(READ_ROLES);
+  const ninetyAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+
+  const rows = await db.customer.findMany({
+    where: {
+      ...(opts.active !== undefined ? { active: opts.active } : {}),
+      ...(opts.query
+        ? {
+            OR: [
+              { name: { contains: opts.query, mode: "insensitive" } },
+              { gstin: { contains: opts.query, mode: "insensitive" } },
+              { contactName: { contains: opts.query, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    },
+    select: {
+      id: true,
+      name: true,
+      gstin: true,
+      active: true,
+      orders: { select: { createdAt: true, contractValue: true, status: true } },
+    },
+    orderBy: { name: "asc" },
+    take: 300,
+  });
+
+  return rows.map((c) => {
+    const counted = c.orders.filter(
+      (o) => o.status !== "CANCELLED" && !o.status.startsWith("REJECTED"),
+    );
+    const orderCount = counted.length;
+    const revenue = counted.reduce((s, o) => s.plus(toDecimal(o.contractValue)), new Decimal(0));
+    const lastOrderAt = c.orders.reduce<Date | null>(
+      (max, o) => (max === null || o.createdAt > max ? o.createdAt : max),
+      null,
+    );
+    const recent = c.orders.some((o) => o.createdAt >= ninetyAgo);
+    const lifecycle: "active" | "dormant" | "prospect" =
+      orderCount === 0 ? "prospect" : recent ? "active" : "dormant";
+
+    return {
+      id: c.id,
+      name: c.name,
+      gstin: c.gstin,
+      active: c.active,
+      orderCount,
+      totalRevenue: revenue.toDecimalPlaces(2).toString(),
+      lastOrderAt: lastOrderAt ? lastOrderAt.toISOString() : null,
+      lifecycle,
+    };
+  });
 }
 
 export async function listCustomers(opts: { query?: string; active?: boolean; groupId?: string | null } = {}) {
