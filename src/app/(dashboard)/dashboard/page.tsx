@@ -1,7 +1,7 @@
 import type { Role } from "@prisma/client";
 import Link from "next/link";
 import { Plus } from "lucide-react";
-import { PageHeader } from "@/components/ui/page-header";
+import { LauncherGreeting } from "@/components/ik/dashboard/LauncherGreeting";
 import { auth } from "@/server/auth";
 import { getDashboardSummary } from "@/server/actions/dashboard";
 import { AttentionBanner } from "@/components/ik/dashboard/launcher/AttentionBanner";
@@ -61,6 +61,7 @@ function logBucket(date: Date): LogBucket {
 export default async function DashboardPage() {
   const session = await auth();
   const name = session?.user?.name ?? "there";
+  const firstName = name.split(" ")[0];
   const role = session?.user?.role as Role | undefined;
   const isManagerScope = role === "ADMIN" || role === "MANAGER";
   const isDriver = role === "DELIVERY";
@@ -79,10 +80,9 @@ export default async function DashboardPage() {
     const board = await listChefBoardOrders();
     return (
       <>
-        <PageHeader
-          eyebrow="Kitchen"
-          title={`Welcome, ${name}`}
-          description="Every order that needs you, with the next action on the card. Accept it, get ingredients, cook, mark done — then hand to delivery."
+        <LauncherGreeting
+          firstName={firstName}
+          subtitle="Every order that needs you, with the next action on the card — accept, get ingredients, cook, hand to delivery."
         />
         <div className="grid gap-5">
           <MyTasksPanel />
@@ -111,10 +111,9 @@ export default async function DashboardPage() {
     const orders = await listOrders();
     return (
       <>
-        <PageHeader
-          eyebrow="Sales"
-          title={`Welcome, ${name}`}
-          description="Your orders by stage. Submit drafts here; tap any order to see the detail."
+        <LauncherGreeting
+          firstName={firstName}
+          subtitle="Your orders by stage. Submit drafts here; tap any order to see the detail."
           actions={
             <div className="flex flex-wrap gap-2">
               <Link href="/orders/new"><Button>Take new order</Button></Link>
@@ -157,10 +156,9 @@ export default async function DashboardPage() {
     ]);
     return (
       <>
-        <PageHeader
-          eyebrow="Store"
-          title={`Welcome, ${name}`}
-          description="Ingredient requests from the kitchen, and the stock requests you've raised. Open a request to issue line by line."
+        <LauncherGreeting
+          firstName={firstName}
+          subtitle="Ingredient requests from the kitchen, and the stock requests you've raised. Open a request to issue line by line."
         />
         <div className="grid gap-5">
           <MyTasksPanel />
@@ -220,10 +218,9 @@ export default async function DashboardPage() {
       .filter((p) => p.outstanding.gt(0));
     return (
       <>
-        <PageHeader
-          eyebrow="Finance"
-          title={`Welcome, ${name}`}
-          description="Money to collect and money to pay, in two tabs. Mark anything paid right here."
+        <LauncherGreeting
+          firstName={firstName}
+          subtitle="Money to collect and money to pay, in two tabs. Mark anything paid right here."
         />
         <div className="grid gap-5">
           <MyTasksPanel />
@@ -251,10 +248,9 @@ export default async function DashboardPage() {
     }));
     return (
       <>
-        <PageHeader
-          eyebrow="Housekeeping"
-          title={`Welcome, ${name}`}
-          description="Every issue-to-room, grouped by Today / This week / Earlier. Record new issues and receipts up top."
+        <LauncherGreeting
+          firstName={firstName}
+          subtitle="Every issue-to-room, grouped by Today / This week / Earlier. Record new issues and receipts up top."
           actions={
             <div className="flex flex-wrap gap-2">
               <Link href="/housekeeping/issues/new">
@@ -290,10 +286,9 @@ export default async function DashboardPage() {
     }));
     return (
       <>
-        <PageHeader
-          eyebrow="Maintenance"
-          title={`Welcome, ${name}`}
-          description="Every electrical / mechanical activity, grouped by Today / This week / Earlier. Log new activities and receipts up top."
+        <LauncherGreeting
+          firstName={firstName}
+          subtitle="Every electrical / mechanical activity, grouped by Today / This week / Earlier. Log new activities and receipts up top."
           actions={
             <div className="flex flex-wrap gap-2">
               <Link href="/maintenance/activities/new"><Button>Log activity</Button></Link>
@@ -316,10 +311,9 @@ export default async function DashboardPage() {
   if (isFnb) {
     return (
       <>
-        <PageHeader
-          eyebrow="Overview"
-          title={`Welcome, ${name}`}
-          description="Banquet store + service desk. Record stock IN from vendors and stock OUT to today's events."
+        <LauncherGreeting
+          firstName={firstName}
+          subtitle="Banquet store + service desk. Record stock IN from vendors and stock OUT to today's events."
           actions={
             <div className="flex flex-wrap gap-2">
               <Link href="/banquet/issues/new"><Button>Issue to event</Button></Link>
@@ -359,10 +353,9 @@ export default async function DashboardPage() {
     ]);
     return (
       <>
-        <PageHeader
-          eyebrow="Delivery"
-          title={`Welcome, ${name}`}
-          description="Your whole run in three tabs — take a cooked order, dispatch it, then mark it delivered. Every action is on the card."
+        <LauncherGreeting
+          firstName={firstName}
+          subtitle="Your whole run in three tabs — take a cooked order, dispatch it, then mark it delivered. Every action is on the card."
         />
         <div className="grid gap-5">
           <MyTasksPanel />
@@ -394,9 +387,6 @@ export default async function DashboardPage() {
   }
 
   // ─── Admin / Manager launcher ─────────────────────────────────────────
-  const firstName = name.split(" ")[0];
-  const greeting = formatIST(new Date(), "EEEE, d MMMM · h:mm a");
-
   const proc = summary.procurement;
   const needPO = proc?.prApprovedNoPO ?? 0;
   const needMatch = proc?.billsPendingMatch ?? 0;
@@ -435,10 +425,7 @@ export default async function DashboardPage() {
   return (
     <div className="grid gap-5">
       {/* 1 ─ Greeting (compact) */}
-      <div>
-        <div className="text-[12px] text-ik-ink-3">{greeting}</div>
-        <h1 className="mt-0.5 text-[22px] font-medium text-ik-ink">Hi {firstName}</h1>
-      </div>
+      <LauncherGreeting firstName={firstName} />
 
       {/* 2 ─ Attention banner — the only strong-colour element on the page */}
       <AttentionBanner count={attnCount} breakdown={attnBreakdown} reviewHref="/review" />
