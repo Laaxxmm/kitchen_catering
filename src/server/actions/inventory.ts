@@ -24,6 +24,34 @@ const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.SALES, Role.ACCOUNTS,
 ];
 
+/**
+ * Set an ingredient's reorder level inline from the stock list. The field
+ * already exists on the schema (it just defaulted to 0 everywhere); this
+ * gives the store a quick way to populate it so the Out/Low/In-stock status
+ * actually means something. Accepts any non-negative quantity.
+ */
+export async function setReorderLevel(id: string, value: string) {
+  const session = await requireRole(WRITE_ROLES);
+  const qty = toDecimal(value || "0");
+  if (qty.lt(0)) throw new Error("Reorder level can't be negative");
+  await db.$transaction(async (tx) => {
+    await tx.ingredient.update({
+      where: { id },
+      data: { reorderLevel: qty.toDecimalPlaces(3).toString() },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "INGREDIENT_REORDER_LEVEL_SET",
+        entity: "Ingredient",
+        entityId: id,
+        payloadHash: sha256Json({ reorderLevel: qty.toString() }),
+      },
+    });
+  });
+  revalidatePath("/inventory/ingredients");
+}
+
 export async function createIngredient(raw: unknown) {
   const session = await requireRole(WRITE_ROLES);
   const input = IngredientInput.parse(raw);
