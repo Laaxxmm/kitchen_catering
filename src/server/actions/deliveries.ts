@@ -69,7 +69,22 @@ export async function handToDelivery(orderId: string) {
     },
   });
   if (!order) throw new Error("Order not found");
+  // Already handed off / scheduled / delivered — treat as a harmless no-op
+  // so a stale board card (or a double-tap) doesn't surface an error.
+  const ALREADY_DISPATCHED: OrderStatus[] = [
+    OrderStatus.OUT_FOR_DELIVERY,
+    OrderStatus.DELIVERED,
+    OrderStatus.INVOICED,
+    OrderStatus.PAID,
+    OrderStatus.COMPLETED,
+  ];
+  if (ALREADY_DISPATCHED.includes(order.status)) {
+    revalidatePath("/kitchen");
+    return;
+  }
   if (order.status !== OrderStatus.READY) {
+    // Still cooking — genuinely not ready. (Message is masked in prod, but
+    // the kitchen board no longer shows a dispatch button this early.)
     throw new AuthorizationError(
       `Order ${order.code} isn't ready to dispatch yet (it's ${order.status}).`,
     );

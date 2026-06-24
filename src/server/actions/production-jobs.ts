@@ -365,6 +365,19 @@ export async function listProductionJobs(opts: { window?: "today" | "tomorrow" |
     where: {
       ...(opts.window ? { scheduledReady: dateFilter } : {}),
       status: { not: ProductionJobStatus.CANCELLED },
+      // Only show jobs whose order is still in a kitchen-relevant state.
+      // Once an order is handed to delivery / delivered / invoiced, its job
+      // would otherwise linger here forever as a stale READY card — and
+      // tapping "Send to dispatch" on it throws (order no longer READY).
+      order: {
+        status: {
+          in: [
+            OrderStatus.READY_FOR_PRODUCTION,
+            OrderStatus.IN_PREP,
+            OrderStatus.READY,
+          ],
+        },
+      },
     },
     include: {
       order: {
