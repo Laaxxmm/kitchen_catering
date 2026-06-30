@@ -118,7 +118,7 @@ async function notifyOrderToChef(orderId: string) {
   await notifyRoles([Role.KITCHEN_HEAD], {
     kind: "GENERIC",
     title: `Order ${order.code} approved — chef review`,
-    body: `${order.customer.name}: admin signed off. Accept or suggest changes in the kitchen queue.`,
+    body: `${order.customer.name}: manager signed off. Accept or suggest changes in the kitchen queue.`,
     link: `/orders/${orderId}`,
     dedupeKey: `order-to-chef:${orderId}`,
   });
@@ -386,11 +386,14 @@ export async function submitOrder(id: string) {
  * stamps the admin's decision on the order; rejection is terminal
  * (REJECTED_BY_ADMIN), with a required reason.
  */
+// The first commercial gate is the MANAGER's (admin may also act as an
+// override). The DB columns + the PENDING_ADMIN_APPROVAL enum keep their
+// historical names, but every user-facing label says "Manager".
 export async function adminApproveOrder(
   id: string,
   input: { decision: "APPROVED" | "REJECTED"; note: string },
 ) {
-  const session = await requireRole([Role.ADMIN]);
+  const session = await requireRole([Role.MANAGER, Role.ADMIN]);
   if (!input.note?.trim()) {
     throw new Error("A note is required — record why you approved or rejected");
   }
@@ -403,7 +406,7 @@ export async function adminApproveOrder(
     if (!order) throw new Error("Order not found");
     if (order.status !== OrderStatus.PENDING_ADMIN_APPROVAL) {
       throw new AuthorizationError(
-        `Order is not awaiting admin approval (current: ${order.status})`,
+        `Order is not awaiting manager approval (current: ${order.status})`,
       );
     }
 

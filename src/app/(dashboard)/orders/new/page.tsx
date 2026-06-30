@@ -56,7 +56,7 @@ export default async function NewOrderPage() {
       <PageHeader
         eyebrow="Sales · Orders"
         title="New order"
-        description="Saves as DRAFT. Submit from the detail page to send for admin approval — the admin signs off before the chef sees it."
+        description="Saves as DRAFT. Submit from the detail page to send for manager approval — the manager signs off before the chef sees it."
       />
       <OrderForm
         customers={customers.map((c) => ({ id: c.id, name: c.name, stateCode: c.stateCode }))}

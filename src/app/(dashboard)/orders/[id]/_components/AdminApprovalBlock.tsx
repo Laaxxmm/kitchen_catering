@@ -50,7 +50,7 @@ export function AdminApprovalBlock({ onApprove, onReject }: Props) {
 
   return (
     <div className="rounded-md border border-brand-200 bg-brand-50 p-4">
-      <h3 className="mb-1 font-medium text-[14px] text-brand-700">Admin review</h3>
+      <h3 className="mb-1 font-medium text-[14px] text-brand-700">Manager review</h3>
       <p className="mb-3 text-[12.5px] text-ik-ink-2">
         This order needs your sign-off before the chef sees it. Approve so the kitchen can start
         planning, or reject if it shouldn&apos;t go ahead. Either action is logged.

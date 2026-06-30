@@ -39,7 +39,8 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Queues — admin-approvals (PENDING_ADMIN_APPROVAL) is the v3 first
   // stop; chef-approvals (PENDING_CHEF_APPROVAL) is the next hand-off;
   // manager-approvals handles chef-proposed changes; issuing is store-side.
-  { pattern: /^\/queue\/admin-approvals(\/|$)/, allow: ["ADMIN"] },
+  // First order gate — now the manager's call (admin may also act).
+  { pattern: /^\/queue\/admin-approvals(\/|$)/, allow: ["ADMIN", "MANAGER"] },
   { pattern: /^\/queue\/chef-approvals(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD"] },
   { pattern: /^\/queue\/manager-approvals(\/|$)/, allow: ["ADMIN", "MANAGER"] },
   { pattern: /^\/queue\/issuing(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },

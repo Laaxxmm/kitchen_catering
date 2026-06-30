@@ -58,9 +58,9 @@ export function ActionFeed({ role, kitchen, procurement, storeKeeper, ar, todayD
   const isStore = role === "STORE_KEEPER" || isAdmin;
   const isAccounts = role === "ACCOUNTS" || isManager;
 
-  // — Admin gate (workflow v3) — top priority since nothing else moves
-  // until admin signs off. Only shown to admin.
-  if (isAdmin && kitchen?.awaitingAdminApproval) {
+  // — First order gate — top priority since nothing else moves until it's
+  // signed off. Now the manager's call (admin may also act).
+  if (isManager && kitchen?.awaitingAdminApproval) {
     items.push({
       text: line(kitchen.awaitingAdminApproval, "order", "waiting on your approval"),
       href: "/queue/admin-approvals",

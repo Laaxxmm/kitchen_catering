@@ -47,11 +47,29 @@ export async function getDashboardSummary() {
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
-  const [todayOrders, todayDeliveries, deliveredToday, openInvoices, lowStockIngredients] = await Promise.all([
+  const [todayOrders, dueOrders, todayDeliveries, deliveredToday, openInvoices, lowStockIngredients] = await Promise.all([
     db.order.count({
       where: {
         eventDate: { gte: todayStart, lt: tomorrowStart },
         status: { notIn: [OrderStatus.CANCELLED, OrderStatus.REJECTED_BY_MANAGER, OrderStatus.REJECTED_BY_STORE] },
+      },
+    }),
+    // Total *open* orders — everything still in the pipeline, regardless of
+    // date. Drives the "due" count on the Orders launcher tile (the team
+    // wants the full backlog, not just today's). Closed = paid / completed /
+    // cancelled / rejected.
+    db.order.count({
+      where: {
+        status: {
+          notIn: [
+            OrderStatus.PAID,
+            OrderStatus.COMPLETED,
+            OrderStatus.CANCELLED,
+            OrderStatus.REJECTED_BY_MANAGER,
+            OrderStatus.REJECTED_BY_ADMIN,
+            OrderStatus.REJECTED_BY_STORE,
+          ],
+        },
       },
     }),
     db.delivery.count({
@@ -93,10 +111,17 @@ export async function getDashboardSummary() {
     });
     myQueue = { count: c, label: "Awaiting issuing", href: "/queue/issuing" };
   } else if (hasRole(session, [Role.MANAGER])) {
+    // The manager now owns the first order-approval gate, plus chef-proposed
+    // changes. Surface both as one "needs you" count, pointing at the
+    // approvals queue (the more frequent one).
     const c = await db.order.count({
-      where: { status: OrderStatus.CHANGES_PROPOSED_BY_CHEF },
+      where: {
+        status: {
+          in: [OrderStatus.PENDING_ADMIN_APPROVAL, OrderStatus.CHANGES_PROPOSED_BY_CHEF],
+        },
+      },
     });
-    myQueue = { count: c, label: "Chef-suggested changes", href: "/queue/manager-approvals" };
+    myQueue = { count: c, label: "Orders to approve", href: "/queue/admin-approvals" };
   } else if (hasRole(session, [Role.KITCHEN_HEAD])) {
     const c = await db.order.count({
       where: {
@@ -567,6 +592,7 @@ export async function getDashboardSummary() {
 
   return {
     todayOrders,
+    dueOrders,
     todayDeliveries,
     deliveredToday,
     outstandingAR: outstandingAR.toString(),

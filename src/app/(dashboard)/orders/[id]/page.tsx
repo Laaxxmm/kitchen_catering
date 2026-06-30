@@ -108,7 +108,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // ─── Approval block selection ────────────────────────────────────────
   // Chef sees the chef-approval block when order is PENDING_CHEF_APPROVAL.
   // Manager sees the changes-review block when order is CHANGES_PROPOSED_BY_CHEF.
-  const showAdminBlock = isAdmin && order.status === OrderStatus.PENDING_ADMIN_APPROVAL;
+  // First commercial gate is the manager's (admin may also act). The enum is
+  // still named PENDING_ADMIN_APPROVAL for historical reasons.
+  const showAdminBlock = isManager && order.status === OrderStatus.PENDING_ADMIN_APPROVAL;
   const showChefBlock = isChef && order.status === OrderStatus.PENDING_CHEF_APPROVAL;
   const showManagerChangesBlock = isManager && order.status === OrderStatus.CHANGES_PROPOSED_BY_CHEF;
   // The chef sees the order as a cooking brief — no pricing, no
@@ -134,7 +136,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             {order.status === OrderStatus.DRAFT && isSales && (
               <form action={doSubmit}>
                 <Button type="submit">
-                  {immediate ? "Submit to kitchen" : "Submit for admin approval"}
+                  {immediate ? "Submit to kitchen" : "Submit for manager approval"}
                 </Button>
               </form>
             )}
@@ -464,16 +466,16 @@ function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisi
 
   switch (status) {
     case OrderStatus.DRAFT:
-      title = immediate ? "Next: submit to the kitchen" : "Next: submit for admin approval";
+      title = immediate ? "Next: submit to the kitchen" : "Next: submit for manager approval";
       body = immediate ? (
         <>
-          This is an in-house order (room service / à la carte / management), so it skips admin
+          This is an in-house order (room service / à la carte / management), so it skips manager
           sign-off and goes straight to the chef when submitted from the header.{" "}
           {!isSales && <span className="text-ik-ink-3">(Submit action is for sales / manager / admin.)</span>}
         </>
       ) : (
         <>
-          Front desk / sales submits this order from the header. It goes to the admin for sign-off
+          Front desk / sales submits this order from the header. It goes to the manager for sign-off
           first, and only then to the chef.{" "}
           {!isSales && <span className="text-ik-ink-3">(Submit action is for sales / manager / admin.)</span>}
         </>
@@ -482,10 +484,10 @@ function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisi
       break;
 
     case OrderStatus.PENDING_ADMIN_APPROVAL:
-      title = isAdmin
+      title = isManager
         ? "Next: review and approve (or reject) this order"
-        : "Next: waiting on admin approval";
-      body = isAdmin ? (
+        : "Next: waiting on manager approval";
+      body = isManager ? (
         <>
           This order is waiting on your sign-off. Approve to send it to the chef for feasibility
           review, or reject if it shouldn&apos;t proceed. Either way, leave a short note for the
@@ -493,11 +495,11 @@ function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisi
         </>
       ) : (
         <>
-          The admin will review and either approve (passes to the chef) or reject. Self-approval is
-          required even for admin-raised orders — there&apos;s no auto-pass.
+          The manager will review and either approve (passes to the chef) or reject. Self-approval is
+          required even for manager-raised orders — there&apos;s no auto-pass.
         </>
       );
-      tone = isAdmin ? "urgent" : "info";
+      tone = isManager ? "urgent" : "info";
       break;
 
     case OrderStatus.REJECTED_BY_ADMIN:

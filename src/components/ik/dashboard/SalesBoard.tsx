@@ -46,7 +46,7 @@ const DONE_STATUSES: ReadonlySet<OrderStatus> = new Set([
 
 const STATUS_LABEL: Partial<Record<OrderStatus, string>> = {
   DRAFT: "Draft — not submitted",
-  PENDING_ADMIN_APPROVAL: "Waiting on admin approval",
+  PENDING_ADMIN_APPROVAL: "Waiting on manager approval",
   PENDING_CHEF_APPROVAL: "With the chef",
   CHANGES_PROPOSED_BY_CHEF: "Chef suggested changes",
   CHEF_REQUISITION_PENDING: "Chef raising ingredients",

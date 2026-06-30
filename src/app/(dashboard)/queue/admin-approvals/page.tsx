@@ -13,9 +13,9 @@ export default async function AdminApprovalsQueuePage() {
   return (
     <>
       <PageHeader
-        eyebrow="Queue · Admin"
+        eyebrow="Queue · Manager"
         title="Orders awaiting your approval"
-        description="Every new order — including self-raised ones — needs an explicit admin sign-off before the chef sees it. Approve or reject from each order's detail page."
+        description="Every new catering order needs an explicit manager sign-off before the chef sees it. Approve or reject from each order's detail page."
       />
       {orders.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">Queue is clear.</p>

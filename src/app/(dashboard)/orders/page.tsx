@@ -45,7 +45,7 @@ type Group = "approval" | "production" | "payment" | "done" | "other";
 // shared language (red = needs you, amber = in progress, green = done).
 const STATUS_LABEL: Record<OrderStatus, string> = {
   DRAFT: "Draft",
-  PENDING_ADMIN_APPROVAL: "Admin review",
+  PENDING_ADMIN_APPROVAL: "Manager review",
   PENDING_STORE_APPROVAL: "Store review",
   PENDING_MANAGER_APPROVAL: "Manager review",
   PENDING_CHEF_APPROVAL: "Chef review",

@@ -405,7 +405,7 @@ export default async function DashboardPage() {
   const kWait = summary.kitchen?.waitingOnStore ?? 0;
   const billsToAction = needMatch + needPay;
   const tiles: TaskTile[] = [
-    { key: "orders", icon: "orders", label: "Orders", status: `${summary.todayOrders} active today`, href: "/orders" },
+    { key: "orders", icon: "orders", label: "Orders", status: `${summary.dueOrders} due`, href: "/orders" },
     { key: "kitchen", icon: "kitchen", label: "Kitchen", status: `${kWait} waiting on stock`, href: "/kitchen", tone: kWait > 0 ? "amber" : "default" },
     { key: "stock", icon: "stock", label: "Stock", status: `${needReorder} to reorder`, href: "/inventory/ingredients", tone: needReorder > 0 ? "red" : "default" },
     { key: "bills", icon: "bills", label: "Bills & pay", status: `${billsToAction} to action`, href: "/payments", tone: billsToAction > 0 ? "amber" : "default" },

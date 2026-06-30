@@ -8,7 +8,7 @@ import { OrderStatus } from "@prisma/client";
  */
 export const STATUS_LABEL: Record<OrderStatus, string> = {
   DRAFT: "Draft",
-  PENDING_ADMIN_APPROVAL: "Awaiting admin approval",
+  PENDING_ADMIN_APPROVAL: "Awaiting manager approval",
   REJECTED_BY_ADMIN: "Rejected by admin",
   PENDING_CHEF_APPROVAL: "Awaiting chef approval",
   CHANGES_PROPOSED_BY_CHEF: "Changes proposed — manager to review",
@@ -73,7 +73,7 @@ export const STATUS_TONE: Record<OrderStatus, "neutral" | "pending" | "positive"
  */
 export const STAGE_FLOW: Array<{ status: OrderStatus; short: string }> = [
   { status: OrderStatus.DRAFT, short: "Draft" },
-  { status: OrderStatus.PENDING_ADMIN_APPROVAL, short: "Admin review" },
+  { status: OrderStatus.PENDING_ADMIN_APPROVAL, short: "Manager review" },
   { status: OrderStatus.PENDING_CHEF_APPROVAL, short: "Chef review" },
   { status: OrderStatus.CHEF_REQUISITION_PENDING, short: "Requisition" },
   { status: OrderStatus.ISSUING, short: "Issuing" },
