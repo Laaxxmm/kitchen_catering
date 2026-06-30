@@ -835,6 +835,94 @@ export async function markInHouseServed(orderId: string) {
   revalidatePath("/invoices/room-service");
 }
 
+/**
+ * Chef applies a dish swap directly on the order — e.g. an ingredient is
+ * unavailable, so they substitute another dish. Replaces the order item's
+ * dish, reprices that line from the new dish, and (for non-package channels)
+ * recomputes the order's contract value. The order's items genuinely change,
+ * so the requisition and everything downstream use the NEW dish. Allowed up
+ * until the food is being cooked.
+ */
+export async function swapOrderItemDish(
+  orderId: string,
+  orderItemId: string,
+  newDishId: string,
+  reason?: string | null,
+) {
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD]);
+  await db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, status: true, channel: true },
+    });
+    if (!order) throw new Error("Order not found");
+    const SWAPPABLE: OrderStatus[] = [
+      OrderStatus.PENDING_CHEF_APPROVAL,
+      OrderStatus.CHANGES_PROPOSED_BY_CHEF,
+      OrderStatus.CHEF_REQUISITION_PENDING,
+      OrderStatus.ISSUING,
+      OrderStatus.READY_FOR_PRODUCTION,
+    ];
+    if (!SWAPPABLE.includes(order.status)) {
+      throw new AuthorizationError(
+        `Can't swap a dish once the order is ${order.status.toLowerCase()}.`,
+      );
+    }
+    const item = await tx.orderItem.findFirst({
+      where: { id: orderItemId, orderId },
+      select: { id: true, portions: true, discountPct: true, dish: { select: { name: true } } },
+    });
+    if (!item) throw new Error("That dish isn't on this order.");
+    const newDish = await tx.dish.findUnique({
+      where: { id: newDishId },
+      select: { id: true, name: true, unitPrice: true, gstRatePct: true },
+    });
+    if (!newDish) throw new Error("Replacement dish not found.");
+
+    const c = computeLine(
+      item.portions.toString(),
+      newDish.unitPrice.toString(),
+      item.discountPct.toString(),
+      newDish.gstRatePct.toString(),
+    );
+    await tx.orderItem.update({
+      where: { id: orderItemId },
+      data: {
+        dishId: newDish.id,
+        unitPrice: newDish.unitPrice.toString(),
+        gstRatePct: newDish.gstRatePct.toString(),
+        lineSubtotal: c.subtotal.toString(),
+        lineTax: c.tax.toString(),
+        lineTotal: c.total.toString(),
+      },
+    });
+
+    // Reprice the order (line-sum) except for ODC / PACKET, which carry a
+    // fixed lump-sum package price.
+    if (order.channel !== "ODC" && order.channel !== "PACKET") {
+      const items = await tx.orderItem.findMany({ where: { orderId }, select: { lineTotal: true } });
+      const total = items
+        .reduce((s, it) => s.plus(toDecimal(it.lineTotal)), new Decimal(0))
+        .toDecimalPlaces(2);
+      await tx.order.update({ where: { id: orderId }, data: { contractValue: total.toString() } });
+    }
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "ORDER_ITEM_SWAPPED",
+        entity: "OrderItem",
+        entityId: orderItemId,
+        payloadHash: sha256Json({ from: item.dish.name, to: newDish.name, reason: reason ?? null }),
+      },
+    });
+  });
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/orders/${orderId}/requisition`);
+  revalidatePath("/orders");
+}
+
 export async function assignKitchenSupervisor(id: string, userId: string) {
   const session = await requireRole([...ORDER_MANAGER_ROLES, ...ORDER_KITCHEN_ROLES]);
   await db.$transaction(async (tx) => {

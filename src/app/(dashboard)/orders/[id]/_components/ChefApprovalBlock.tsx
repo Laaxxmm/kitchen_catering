@@ -10,6 +10,8 @@ import { Combobox } from "@/components/ui/combobox";
 import { isNextNavigationError } from "@/lib/next-error";
 
 interface OrderItemOption {
+  /** The order-item id — the swap targets this specific line. */
+  id: string;
   /** The dish name currently on the order (e.g. "Samosa"). */
   label: string;
   portions: string;
@@ -24,6 +26,8 @@ interface DishOption {
 interface Props {
   onApprove: (note: string) => Promise<void>;
   onSuggest: (note: string) => Promise<void>;
+  /** Apply a dish swap directly to the order (chef's call). */
+  onApplySwap: (orderItemId: string, newDishId: string, reason: string) => Promise<void>;
   /** Current dishes on the order — populates the "Replace" dropdown. */
   orderItems: OrderItemOption[];
   /** Full dish catalogue — populates the "With" dropdown. */
@@ -45,7 +49,7 @@ interface Props {
  * A note is required for either action so there's always context for the
  * manager (and for the audit log).
  */
-export function ChefApprovalBlock({ onApprove, onSuggest, orderItems, dishes }: Props) {
+export function ChefApprovalBlock({ onApprove, onSuggest, onApplySwap, orderItems, dishes }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [note, setNote] = useState("");
@@ -53,7 +57,7 @@ export function ChefApprovalBlock({ onApprove, onSuggest, orderItems, dishes }: 
   // Swap helper state — held locally; the chef can compose multiple swaps
   // by clicking "Add to note" repeatedly, each appending one line.
   const [showSwap, setShowSwap] = useState(false);
-  const [fromDish, setFromDish] = useState(orderItems[0]?.label ?? "");
+  const [fromDish, setFromDish] = useState(orderItems[0]?.id ?? "");
   const [toDishId, setToDishId] = useState(dishes[0]?.id ?? "");
   const [swapReason, setSwapReason] = useState("");
 
@@ -84,16 +88,24 @@ export function ChefApprovalBlock({ onApprove, onSuggest, orderItems, dishes }: 
     });
   }
 
-  function appendSwapToNote() {
+  // Apply the swap directly to the order item — the dish genuinely changes,
+  // so the requisition and everything downstream use the new dish. Doesn't
+  // need the approval note (it's its own logged action).
+  function applySwap() {
     if (!fromDish) return toast.error("Pick the dish to replace");
-    const to = dishes.find((d) => d.id === toDishId);
-    if (!to) return toast.error("Pick a replacement dish");
-    const line =
-      `Replace "${fromDish}" with "${to.name}"` +
-      (swapReason.trim() ? ` — ${swapReason.trim()}` : "");
-    setNote((prev) => (prev.trim() ? `${prev.trim()}\n• ${line}` : `• ${line}`));
-    setSwapReason("");
-    toast.success("Swap added to note");
+    if (!toDishId) return toast.error("Pick a replacement dish");
+    startTransition(async () => {
+      try {
+        await onApplySwap(fromDish, toDishId, swapReason.trim());
+        toast.success("Dish swapped on the order");
+        setSwapReason("");
+        setShowSwap(false);
+        router.refresh();
+      } catch (err) {
+        if (isNextNavigationError(err)) throw err;
+        toast.error(err instanceof Error ? err.message : "Swap failed");
+      }
+    });
   }
 
   return (
@@ -133,7 +145,7 @@ export function ChefApprovalBlock({ onApprove, onSuggest, orderItems, dishes }: 
                     <option value="">(no items on order)</option>
                   ) : (
                     orderItems.map((it) => (
-                      <option key={it.label} value={it.label}>
+                      <option key={it.id} value={it.id}>
                         {it.label} · {it.portions}
                       </option>
                     ))
@@ -163,12 +175,13 @@ export function ChefApprovalBlock({ onApprove, onSuggest, orderItems, dishes }: 
               />
             </div>
             <div>
-              <Button type="button" size="sm" variant="outline" onClick={appendSwapToNote}>
-                Add swap to note
+              <Button type="button" size="sm" disabled={pending} onClick={applySwap}>
+                {pending ? "Swapping…" : "Apply swap"}
               </Button>
             </div>
             <p className="text-[10.5px] text-ik-ink-3">
-              Adds a structured bullet to the note below. You can repeat for multiple swaps.
+              Replaces the dish on the order right away and reprices that line — the requisition will
+              use the new dish. Repeat for multiple swaps.
             </p>
           </div>
         )}

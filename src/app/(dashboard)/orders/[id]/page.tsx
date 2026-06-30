@@ -14,6 +14,7 @@ import {
   getOrder,
   managerApproveChefSuggestion,
   submitOrder,
+  swapOrderItemDish,
 } from "@/server/actions/orders";
 import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoices";
 import { listDishes } from "@/server/actions/dishes";
@@ -64,6 +65,10 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   async function doChefSuggest(note: string) {
     "use server";
     await chefApproveOrder(id, { decision: "SUGGESTED_CHANGES", note });
+  }
+  async function doApplySwap(orderItemId: string, newDishId: string, reason: string) {
+    "use server";
+    await swapOrderItemDish(id, orderItemId, newDishId, reason || null);
   }
   async function doManagerApproveChanges(note: string) {
     "use server";
@@ -183,7 +188,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             <ChefApprovalBlock
               onApprove={doChefApprove}
               onSuggest={doChefSuggest}
+              onApplySwap={doApplySwap}
               orderItems={order.items.map((it) => ({
+                id: it.id,
                 label: it.dish.name,
                 portions: `${it.portions.toString()} ${it.dish.unit}`,
               }))}
