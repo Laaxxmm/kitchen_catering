@@ -57,10 +57,10 @@ async function notifyOrderApproved(orderId: string) {
   });
   if (!order) return;
   const evt = formatIST(order.eventDate, "dd MMM yyyy");
-  await notifyRoles([Role.KITCHEN_HEAD, Role.DELIVERY], {
+  await notifyRoles([Role.KITCHEN_HEAD, Role.DELIVERY, Role.FNB_SERVICE], {
     kind: "ORDER_APPROVED",
     title: `Order ${order.code} confirmed — ${order.customer.name}`,
-    body: `${order.channel} · ${order.headcount} pax · event ${evt}. Kitchen: raise requisition. Delivery: prep cutlery + arrangements.`,
+    body: `${order.channel} · ${order.headcount} pax · event ${evt}. Kitchen: raise requisition. Delivery: prep cutlery + arrangements. Service: ready it for the guest.`,
     link: `/orders/${orderId}`,
     dedupeKey: `order-approved:${orderId}`,
   });
@@ -90,10 +90,12 @@ async function notifyOrderSubmitted(orderId: string) {
   const evt = formatIST(order.eventDate, "dd MMM yyyy");
   const where = order.roomNumber ? ` · Room ${order.roomNumber}` : "";
   if (order.status === OrderStatus.PENDING_CHEF_APPROVAL) {
-    await notifyRoles([Role.KITCHEN_HEAD], {
+    // In-house orders (room service / à la carte / management) go straight to
+    // the chef — loop in F&B service too, since they take it to the guest.
+    await notifyRoles([Role.KITCHEN_HEAD, Role.FNB_SERVICE], {
       kind: "GENERIC",
       title: `New order ${order.code} — ${order.customer.name}`,
-      body: `${order.channel}${where} · ${order.headcount ?? "?"} pax. Accept or reject in the kitchen queue.`,
+      body: `${order.channel}${where} · ${order.headcount ?? "?"} pax. Chef: accept or reject. Service: prepare to serve.`,
       link: `/orders/${orderId}`,
       dedupeKey: `order-submitted:${orderId}`,
     });
@@ -108,17 +110,21 @@ async function notifyOrderSubmitted(orderId: string) {
   }
 }
 
-/** Fire-and-forget: order cleared the admin gate, now needs chef review. */
+/**
+ * Fire-and-forget: order cleared the manager gate, now needs chef review.
+ * Fans out to the chef (review feasibility) AND gives the delivery team and
+ * F&B service an early heads-up that an order is coming through.
+ */
 async function notifyOrderToChef(orderId: string) {
   const order = await db.order.findUnique({
     where: { id: orderId },
     select: { code: true, customer: { select: { name: true } } },
   });
   if (!order) return;
-  await notifyRoles([Role.KITCHEN_HEAD], {
+  await notifyRoles([Role.KITCHEN_HEAD, Role.DELIVERY, Role.FNB_SERVICE], {
     kind: "GENERIC",
     title: `Order ${order.code} approved — chef review`,
-    body: `${order.customer.name}: manager signed off. Accept or suggest changes in the kitchen queue.`,
+    body: `${order.customer.name}: manager signed off. Chef: accept or suggest changes. Delivery & service: heads-up, an order is on the way.`,
     link: `/orders/${orderId}`,
     dedupeKey: `order-to-chef:${orderId}`,
   });
