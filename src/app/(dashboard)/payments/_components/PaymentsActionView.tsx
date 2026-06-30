@@ -8,6 +8,7 @@ import { MarkPaidModal } from "@/components/ik/finance/MarkPaidModal";
 import { formatINRWhole } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { markVendorBillPaid } from "@/server/actions/procurement";
+import { markCustomerInvoicePaid } from "@/server/actions/customer-invoices";
 
 export interface PayBill {
   id: string;
@@ -37,9 +38,12 @@ interface Props {
   toPay: PayBill[];
   toCollect: CollectInvoice[];
   overpaid: Overpaid[];
+  /** Admin/manager can close a customer invoice with the one-click modal;
+   *  accounts records detailed receipts on the invoice page instead. */
+  canMarkCustomerPaid: boolean;
 }
 
-export function PaymentsActionView({ toPay, toCollect, overpaid }: Props) {
+export function PaymentsActionView({ toPay, toCollect, overpaid, canMarkCustomerPaid }: Props) {
   return (
     <div className="grid gap-5">
       {/* Duplicate / over-payment warning */}
@@ -110,9 +114,24 @@ export function PaymentsActionView({ toPay, toCollect, overpaid }: Props) {
                   ? <StatusPill tone="red">Overdue {formatIST(new Date(inv.due), "d MMM")}</StatusPill>
                   : <span className="text-[11.5px] text-ik-ink-3">due {formatIST(new Date(inv.due), "d MMM")}</span>)}
                 <span className="ml-auto font-mono text-[13px] text-ik-ink">{formatINRWhole(inv.amount)}</span>
-                <Link href={`/invoices/${inv.id}`}>
-                  <Button size="sm" variant="outline">Record</Button>
-                </Link>
+                {canMarkCustomerPaid ? (
+                  <MarkPaidModal
+                    outstanding={inv.amount}
+                    onSubmit={async (input) => {
+                      await markCustomerInvoicePaid({
+                        invoiceId: inv.id,
+                        method: input.method,
+                        reference: input.reference,
+                        paidAt: input.paidAt,
+                        notes: input.notes,
+                      });
+                    }}
+                  />
+                ) : (
+                  <Link href={`/invoices/${inv.id}`}>
+                    <Button size="sm" variant="outline">Record</Button>
+                  </Link>
+                )}
               </li>
             ))}
           </ul>

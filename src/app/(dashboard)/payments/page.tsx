@@ -10,7 +10,11 @@ import { PaymentsActionView } from "./_components/PaymentsActionView";
 export const dynamic = "force-dynamic";
 
 export default async function PaymentsPage() {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
+  const session = await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
+  // One-click "mark paid" on a customer invoice is admin/manager only;
+  // accounts records detailed receipts via the invoice's RecordPayment form.
+  const canMarkCustomerPaid =
+    session.user.role === Role.ADMIN || session.user.role === Role.MANAGER;
   const now = new Date();
 
   const [invoices, bills] = await Promise.all([
@@ -80,6 +84,7 @@ export default async function PaymentsPage() {
         toPay={toPay.map((b) => ({ ...b, amount: b.amount.toFixed(2) }))}
         toCollect={toCollect.map((inv) => ({ ...inv, amount: inv.amount.toFixed(2) }))}
         overpaid={overpaid}
+        canMarkCustomerPaid={canMarkCustomerPaid}
       />
     </>
   );
