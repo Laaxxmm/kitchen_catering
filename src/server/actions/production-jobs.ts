@@ -332,6 +332,7 @@ export async function listChefBoardOrders() {
       eventDate: true,
       roomNumber: true,
       tableNumber: true,
+      handedToDeliveryAt: true,
       customer: { select: { name: true } },
       items: { select: { id: true, portions: true, dish: { select: { name: true } } }, orderBy: { sortOrder: "asc" } },
     },
@@ -382,7 +383,7 @@ export async function listProductionJobs(opts: { window?: "today" | "tomorrow" |
     include: {
       order: {
         select: {
-          id: true, code: true, eventDate: true, channel: true,
+          id: true, code: true, eventDate: true, channel: true, handedToDeliveryAt: true,
           customer: { select: { name: true } },
         },
       },

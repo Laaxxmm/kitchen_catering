@@ -21,6 +21,7 @@ export interface KitchenJob {
   status: Stage;
   code: string;
   channel: OrderChannel;
+  handedToDelivery: boolean;
   customerName: string;
   scheduledReady: string;
   items: { id: string; dishName: string; portions: string; ready: boolean }[];
@@ -114,6 +115,7 @@ function JobCard({ job }: { job: KitchenJob }) {
   let action: { label: string; fn: () => Promise<unknown>; msg: string };
   if (job.status === "QUEUED") action = { label: "Start cooking", fn: () => startCookingOrder(job.orderId), msg: "Cooking started" };
   else if (isReady && inHouse) action = { label: "Mark served", fn: () => markInHouseServed(job.orderId), msg: "Served — ready to bill" };
+  else if (isReady && job.handedToDelivery) action = { label: "✓ Delivery informed", fn: () => handToDelivery(job.orderId), msg: "Delivery reminded" };
   else if (isReady) action = { label: "Send to dispatch", fn: () => handToDelivery(job.orderId), msg: "Delivery team notified" };
   else action = { label: "Mark ready", fn: () => markOrderCooked(job.orderId), msg: "Marked ready" };
 
@@ -149,7 +151,14 @@ function JobCard({ job }: { job: KitchenJob }) {
       </div>
 
       <div className="mt-2.5 flex items-center gap-2">
-        <Button size="sm" disabled={pending} onClick={() => run(action.fn, action.msg)}>{action.label}</Button>
+        <Button
+          size="sm"
+          variant={isReady && job.handedToDelivery && !inHouse ? "outline" : "default"}
+          disabled={pending}
+          onClick={() => run(action.fn, action.msg)}
+        >
+          {action.label}
+        </Button>
         <Link href={`/kitchen/${job.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open checklist</Link>
       </div>
     </div>

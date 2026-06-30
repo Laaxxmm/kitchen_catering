@@ -96,6 +96,7 @@ export default async function DashboardPage() {
               eventDate: o.eventDate.toISOString(),
               roomNumber: o.roomNumber,
               tableNumber: o.tableNumber,
+              handedToDelivery: o.handedToDeliveryAt != null,
               customerName: o.customer.name,
               items: o.items.map((it) => ({ label: it.dish.name, portions: it.portions.toString() })),
             }))}
@@ -142,15 +143,19 @@ export default async function DashboardPage() {
   // requests, grouped in tabs. Issuing is line-level so cards open the
   // fulfilment page.
   if (isStore) {
-    const [chefReqs, prs] = await Promise.all([
+    const [chefReqs, pos] = await Promise.all([
       listChefRequisitions({
         status: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED],
       }),
-      listPurchaseRequisitions({
+      // The store's open purchase orders — so they can submit drafts, watch
+      // for the manager's approval, then send to the vendor + record the GRN.
+      listVendorPOs({
         status: [
-          PurchaseRequisitionStatus.DRAFT,
-          PurchaseRequisitionStatus.PENDING_APPROVAL,
-          PurchaseRequisitionStatus.APPROVED,
+          VendorPOStatus.DRAFT,
+          VendorPOStatus.PENDING_APPROVAL,
+          VendorPOStatus.APPROVED,
+          VendorPOStatus.SENT,
+          VendorPOStatus.PARTIALLY_RECEIVED,
         ],
       }),
     ]);
@@ -158,7 +163,7 @@ export default async function DashboardPage() {
       <>
         <LauncherGreeting
           firstName={firstName}
-          subtitle="Ingredient requests from the kitchen, and the stock requests you've raised. Open a request to issue line by line."
+          subtitle="Ingredient requests from the kitchen, and the purchase orders you've raised. Open a request to issue line by line."
         />
         <div className="grid gap-5">
           <MyTasksPanel />
@@ -172,12 +177,12 @@ export default async function DashboardPage() {
               eventDate: r.order.eventDate.toISOString(),
               lines: r._count.lines,
             }))}
-            prs={prs.map((p) => ({
+            pos={pos.map((p) => ({
               id: p.id,
-              prNo: p.prNo,
+              poNo: p.poNo,
               status: p.status,
-              requestedBy: p.requestedBy?.name ?? "—",
-              lines: p._count.lines,
+              vendor: p.vendor.name,
+              total: p.grandTotal.toString(),
             }))}
           />
         </div>

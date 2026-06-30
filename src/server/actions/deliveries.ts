@@ -90,6 +90,11 @@ export async function handToDelivery(orderId: string) {
       `Order ${order.code} isn't ready to dispatch yet (it's ${order.status}).`,
     );
   }
+  // Stamp the intimation so the kitchen card flips to "Delivery informed".
+  await db.order.update({
+    where: { id: orderId },
+    data: { handedToDeliveryAt: new Date() },
+  });
   await db.auditLog.create({
     data: {
       userId: session.user.id,
@@ -107,6 +112,7 @@ export async function handToDelivery(orderId: string) {
     dedupeKey: `order-ready-dispatch:${orderId}`,
   });
   revalidatePath("/dashboard");
+  revalidatePath("/kitchen");
   revalidatePath("/deliveries");
 }
 

@@ -30,6 +30,7 @@ export interface ChefBoardOrder {
   eventDate: string;
   roomNumber: string | null;
   tableNumber: string | null;
+  handedToDelivery: boolean;
   customerName: string;
   items: BoardItem[];
 }
@@ -308,6 +309,17 @@ function ChefOrderCard({ order, highlight = false }: { order: ChefBoardOrder; hi
               onClick={() => run(() => markInHouseServed(order.id), "Served — ready to bill")}
             >
               Mark served
+            </Button>
+          ) : order.handedToDelivery ? (
+            // Already intimated — show it's done (still re-notifiable).
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => run(() => handToDelivery(order.id), "Delivery reminded")}
+              title="Delivery team already informed — tap to remind"
+            >
+              ✓ Delivery informed
             </Button>
           ) : (
             <Button

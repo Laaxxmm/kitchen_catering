@@ -856,6 +856,12 @@ model Order {
   feedbackComment   String?
   feedbackSubmittedAt DateTime?
 
+  // Set when the kitchen taps "Hand to delivery" / "Send to dispatch" — the
+  // delivery team has been pinged. The order stays READY until a delivery is
+  // actually scheduled; this just lets the kitchen card show "Delivery
+  // informed" instead of the action button after they've intimated.
+  handedToDeliveryAt     DateTime?
+
   status                 OrderStatus @default(DRAFT)
   contractValue          Decimal     @db.Decimal(14, 2)
   placeOfSupplyStateCode String

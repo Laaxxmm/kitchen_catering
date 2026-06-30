@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { ChefRequisitionStatus, PurchaseRequisitionStatus } from "@prisma/client";
+import { ChefRequisitionStatus, VendorPOStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { WorkTabs } from "@/components/ik/dashboard/WorkTabs";
 import { formatIST } from "@/lib/time";
+import { formatINRWhole } from "@/lib/money";
 
 export interface StoreReq {
   id: string;
@@ -15,39 +16,49 @@ export interface StoreReq {
   eventDate: string;
   lines: number;
 }
-export interface StorePR {
+export interface StorePO {
   id: string;
-  prNo: string;
-  status: PurchaseRequisitionStatus;
-  requestedBy: string;
-  lines: number;
+  poNo: string;
+  status: VendorPOStatus;
+  vendor: string;
+  total: string;
 }
 
-const PR_LABEL: Partial<Record<PurchaseRequisitionStatus, string>> = {
-  DRAFT: "Draft — submit it",
-  PENDING_APPROVAL: "Waiting on approval",
-  APPROVED: "Approved — make the PO",
-  ISSUED: "Turned into a PO",
-  REJECTED: "Rejected",
+// What the store should DO next for each PO status.
+const PO_LABEL: Partial<Record<VendorPOStatus, string>> = {
+  DRAFT: "Draft — submit it for approval",
+  PENDING_APPROVAL: "Waiting on manager / admin approval",
+  APPROVED: "Approved — send to vendor & record the GRN",
+  SENT: "Sent to vendor — record the GRN when goods arrive",
+  PARTIALLY_RECEIVED: "Partly received — record the rest",
+  RECEIVED: "Received",
+  CANCELLED: "Cancelled",
 };
 
+// Statuses that need the store to act now (highlighted).
+const PO_NEEDS_ACTION = new Set<VendorPOStatus>([
+  VendorPOStatus.DRAFT,
+  VendorPOStatus.APPROVED,
+  VendorPOStatus.SENT,
+  VendorPOStatus.PARTIALLY_RECEIVED,
+]);
+
 /**
- * Store keeper's board: chef ingredient requests to fulfil, and the stock
- * (purchase) requests they've raised. Issuing is line-by-line, so each
- * request opens its fulfilment page; the board keeps everything one tap
- * away and grouped by what needs doing.
+ * Store keeper's board: chef ingredient requests to fulfil, and the purchase
+ * orders they've raised for shortfalls — submit, watch for approval, then
+ * send to the vendor + record the GRN.
  */
-export function StoreBoard({ chefReqs, prs }: { chefReqs: StoreReq[]; prs: StorePR[] }) {
+export function StoreBoard({ chefReqs, pos }: { chefReqs: StoreReq[]; pos: StorePO[] }) {
   const tabs = [
     { key: "fulfil", label: "Chef requests", hint: "Issue from stock", count: chefReqs.length },
-    { key: "stock", label: "My stock requests", hint: "Buy more", count: prs.length },
+    { key: "stock", label: "My purchase orders", hint: "Buy & receive", count: pos.length },
   ];
 
   return (
     <div>
       <div className="mb-3 flex justify-end">
-        <Link href="/procurement/purchase-requisitions/new">
-          <Button size="sm" variant="outline">Raise stock request</Button>
+        <Link href="/procurement/purchase-orders/new">
+          <Button size="sm" variant="outline">New purchase order</Button>
         </Link>
       </div>
       <WorkTabs tabs={tabs} emptyHint="Nothing in {tab} right now.">
@@ -76,18 +87,34 @@ export function StoreBoard({ chefReqs, prs }: { chefReqs: StoreReq[]; prs: Store
             </ul>
           ) : (
             <ul className="grid gap-2.5">
-              {prs.map((p) => (
-                <li key={p.id} className="rounded-md border border-ik-rule bg-ik-card p-3">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="font-mono text-[12.5px] text-brand-700">{p.prNo}</span>
-                    <span className="text-[11.5px] text-ik-ink-3">{p.lines} {p.lines === 1 ? "item" : "items"}</span>
-                  </div>
-                  <div className="mt-0.5 text-[12px] text-ik-ink-2">{PR_LABEL[p.status] ?? p.status}</div>
-                  <div className="mt-2.5 flex items-center gap-2">
-                    <Link href={`/procurement/purchase-requisitions/${p.id}`} className="text-[11.5px] text-brand hover:underline">Open</Link>
-                  </div>
-                </li>
-              ))}
+              {pos.map((p) => {
+                const act = PO_NEEDS_ACTION.has(p.status);
+                return (
+                  <li
+                    key={p.id}
+                    className={
+                      "rounded-md border p-3 " +
+                      (act ? "border-amber bg-amber-wash" : "border-ik-rule bg-ik-card")
+                    }
+                  >
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="font-mono text-[12.5px] text-brand-700">{p.poNo}</span>
+                      <span className="font-mono text-[12px] text-ik-ink">{formatINRWhole(p.total)}</span>
+                    </div>
+                    <div className="mt-1 text-[13px] text-ik-ink">
+                      <strong>{p.vendor}</strong>
+                    </div>
+                    <div className="mt-0.5 text-[12px] text-ik-ink-2">{PO_LABEL[p.status] ?? p.status}</div>
+                    <div className="mt-2.5">
+                      <Link href={`/procurement/purchase-orders/${p.id}`}>
+                        <Button size="sm" variant={act ? "default" : "outline"}>
+                          {act ? "Open to act" : "Open"}
+                        </Button>
+                      </Link>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )
         }

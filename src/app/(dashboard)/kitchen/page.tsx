@@ -176,6 +176,7 @@ export default async function KitchenPage({
             status: j.status as "QUEUED" | "PREP" | "COOKING" | "READY",
             code: j.order.code,
             channel: j.order.channel,
+            handedToDelivery: j.order.handedToDeliveryAt != null,
             customerName: j.order.customer.name,
             scheduledReady: j.scheduledReady.toISOString(),
             items: j.items.map((it) => ({
