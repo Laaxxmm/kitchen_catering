@@ -951,6 +951,16 @@ export interface OrderFilter {
   query?: string;
 }
 
+/** Count of orders per status across the whole table — drives the orders-page
+ *  tab counts so they're accurate regardless of the active filter. */
+export async function getOrderStatusCounts(): Promise<Partial<Record<OrderStatus, number>>> {
+  await requireRole(READ_ROLES);
+  const rows = await db.order.groupBy({ by: ["status"], _count: { _all: true } });
+  const out: Partial<Record<OrderStatus, number>> = {};
+  for (const r of rows) out[r.status] = r._count._all;
+  return out;
+}
+
 export async function listOrders(filter: OrderFilter = {}) {
   const session = await requireRole(READ_ROLES);
 

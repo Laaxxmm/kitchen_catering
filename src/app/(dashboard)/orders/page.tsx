@@ -3,37 +3,36 @@ import { OrderStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { listOrders } from "@/server/actions/orders";
+import { getOrderStatusCounts, listOrders } from "@/server/actions/orders";
 import { auth } from "@/server/auth";
 import { formatINRWhole } from "@/lib/money";
 import { formatIST } from "@/lib/time";
-import { SummaryStrip } from "@/components/ik/StatChips";
 import { StatusPill, type PillTone } from "@/components/ik/StatusPill";
 
 export const dynamic = "force-dynamic";
 
-const FILTER_PILLS = [
-  { key: "all", label: "All" },
-  { key: "mine", label: "My queue" },
-  { key: "draft", label: "Draft" },
-  { key: "pending", label: "Pending approval" },
-  { key: "active", label: "Active" },
-  { key: "rejected", label: "Rejected" },
-  { key: "completed", label: "Completed" },
-] as const;
-
 function statusesForFilter(key: string): OrderStatus[] | undefined {
   switch (key) {
-    case "draft": return [OrderStatus.DRAFT];
-    case "pending":
-      return [OrderStatus.PENDING_STORE_APPROVAL, OrderStatus.PENDING_MANAGER_APPROVAL, OrderStatus.REJECTED_BY_STORE];
-    case "active":
+    // The clickable KPI tabs map straight onto the order groups.
+    case "approval":
       return [
-        OrderStatus.CHEF_REQUISITION_PENDING, OrderStatus.ISSUING, OrderStatus.READY_FOR_PRODUCTION,
-        OrderStatus.IN_PREP, OrderStatus.READY, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERED, OrderStatus.INVOICED,
+        OrderStatus.PENDING_ADMIN_APPROVAL, OrderStatus.PENDING_STORE_APPROVAL,
+        OrderStatus.PENDING_MANAGER_APPROVAL, OrderStatus.PENDING_CHEF_APPROVAL,
+        OrderStatus.CHANGES_PROPOSED_BY_CHEF,
       ];
-    case "rejected": return [OrderStatus.REJECTED_BY_MANAGER, OrderStatus.CANCELLED];
-    case "completed": return [OrderStatus.PAID, OrderStatus.COMPLETED];
+    case "production":
+      return [
+        OrderStatus.CHEF_APPROVED, OrderStatus.APPROVED,
+        OrderStatus.CHEF_REQUISITION_PENDING, OrderStatus.ISSUING, OrderStatus.READY_FOR_PRODUCTION,
+        OrderStatus.IN_PREP, OrderStatus.READY, OrderStatus.OUT_FOR_DELIVERY,
+      ];
+    case "payment": return [OrderStatus.DELIVERED, OrderStatus.INVOICED];
+    case "done": return [OrderStatus.PAID, OrderStatus.COMPLETED];
+    case "other":
+      return [
+        OrderStatus.DRAFT, OrderStatus.REJECTED_BY_ADMIN, OrderStatus.REJECTED_BY_MANAGER,
+        OrderStatus.REJECTED_BY_STORE, OrderStatus.CANCELLED,
+      ];
     default: return undefined;
   }
 }
@@ -112,6 +111,17 @@ const GROUP_ORDER: { key: Group; label: string }[] = [
   { key: "other", label: "Drafts & other" },
 ];
 
+// The clickable KPI tabs at the top of the page. "all" shows the grouped
+// overview; each group key filters to that group's flat list.
+const TAB_DEFS: { key: string; label: string; group: Group | null; tone?: "red" | "amber" | "green" }[] = [
+  { key: "all", label: "All", group: null },
+  { key: "approval", label: "Needs approval", group: "approval", tone: "red" },
+  { key: "production", label: "In production", group: "production", tone: "amber" },
+  { key: "payment", label: "Awaiting payment", group: "payment" },
+  { key: "done", label: "Completed", group: "done", tone: "green" },
+  { key: "other", label: "Drafts & other", group: "other" },
+];
+
 type OrderRow = Awaited<ReturnType<typeof listOrders>>[number];
 
 export default async function OrdersPage({
@@ -123,16 +133,20 @@ export default async function OrdersPage({
   const filter = sp.filter ?? "all";
   const myQueue = filter === "mine";
   const statuses = myQueue ? undefined : statusesForFilter(filter);
-  const [session, orders] = await Promise.all([
+  const [session, orders, statusCounts] = await Promise.all([
     auth(),
     listOrders({ myQueue, status: statuses, query: sp.q }),
+    getOrderStatusCounts(),
   ]);
   const role = session?.user?.role;
   const canCreate = role === Role.ADMIN || role === Role.MANAGER || role === Role.SALES;
   const isAll = filter === "all" && !sp.q;
 
+  // Group counts across ALL orders (not just the filtered view) so the tabs
+  // stay accurate whichever one is selected.
   const counts = { approval: 0, production: 0, payment: 0, done: 0, other: 0 } as Record<Group, number>;
-  for (const o of orders) counts[groupOf(o.status)] += 1;
+  for (const [st, n] of Object.entries(statusCounts)) counts[groupOf(st as OrderStatus)] += n ?? 0;
+  const totalCount = Object.values(statusCounts).reduce((s, n) => s + (n ?? 0), 0);
 
   return (
     <>
@@ -143,36 +157,39 @@ export default async function OrdersPage({
         actions={canCreate ? <Link href="/orders/new"><Button>New order</Button></Link> : null}
       />
 
-      <div className="mb-4">
-        <SummaryStrip
-          chips={[
-            { label: "Needs approval", value: counts.approval, tone: counts.approval > 0 ? "red" : "grey" },
-            { label: "In production", value: counts.production, tone: counts.production > 0 ? "amber" : "grey" },
-            { label: "Awaiting payment", value: counts.payment, tone: "grey" },
-            { label: "Completed", value: counts.done, tone: "green" },
-          ]}
-        />
-      </div>
-
-      <div className="mb-4 flex flex-wrap gap-2">
-        {FILTER_PILLS.map((p) => {
-          const active = (sp.filter ?? "all") === p.key;
+      {/* Clickable KPI tabs — switch the view by status group. Counts are
+          whole-table totals; the active tab is highlighted. */}
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {TAB_DEFS.map((t) => {
+          const active = filter === t.key;
+          const count = t.group ? counts[t.group] : totalCount;
+          const dotTone =
+            t.tone === "red" && count > 0
+              ? "text-alert"
+              : t.tone === "amber" && count > 0
+                ? "text-amber"
+                : t.tone === "green"
+                  ? "text-positive"
+                  : "text-ik-ink";
           return (
             <Link
-              key={p.key}
-              href={`/orders?filter=${p.key}${sp.q ? `&q=${encodeURIComponent(sp.q)}` : ""}`}
+              key={t.key}
+              href={`/orders?filter=${t.key}${sp.q ? `&q=${encodeURIComponent(sp.q)}` : ""}`}
               className={
-                "rounded-full px-3 py-1 text-[12px] " +
-                (active ? "bg-brand-500 text-white" : "bg-ik-paper-alt text-ik-ink-2 hover:bg-brand-50 hover:text-brand-700")
+                "rounded-[12px] border p-3 transition " +
+                (active
+                  ? "border-brand-500 bg-brand-50"
+                  : "border-ik-rule bg-ik-card hover:border-brand-200")
               }
             >
-              {p.label}
+              <div className={"font-mono text-[20px] leading-none " + dotTone}>{count}</div>
+              <div className="mt-1 text-[11.5px] text-ik-ink-2">{t.label}</div>
             </Link>
           );
         })}
       </div>
 
-      <form className="mb-4 flex flex-wrap items-end gap-2" action="/orders">
+      <form className="mb-4 flex flex-wrap items-center gap-2" action="/orders">
         <input type="hidden" name="filter" value={filter} />
         <input
           name="q"
@@ -181,6 +198,15 @@ export default async function OrdersPage({
           className="h-9 w-72 rounded-md border border-ik-rule bg-ik-card px-3 text-[13px]"
         />
         <Button type="submit" variant="outline" size="sm">Search</Button>
+        <Link
+          href="/orders?filter=mine"
+          className={
+            "ml-1 rounded-full px-3 py-1 text-[12px] " +
+            (myQueue ? "bg-brand-500 text-white" : "bg-ik-paper-alt text-ik-ink-2 hover:bg-brand-50 hover:text-brand-700")
+          }
+        >
+          My queue
+        </Link>
       </form>
 
       {orders.length === 0 ? (

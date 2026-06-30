@@ -393,12 +393,16 @@ export default async function DashboardPage() {
 
   // ─── Admin / Manager launcher ─────────────────────────────────────────
   const proc = summary.procurement;
+  // Orders waiting on the manager's commercial sign-off — the most urgent
+  // thing, since nothing moves to the kitchen until it's approved.
+  const needApproval = summary.kitchen?.awaitingAdminApproval ?? 0;
   const needPO = proc?.prApprovedNoPO ?? 0;
   const needMatch = proc?.billsPendingMatch ?? 0;
   const needPay = proc?.billsPendingPayment ?? 0;
   const needReorder = summary.lowStockCount;
-  const attnCount = needPO + needMatch + needPay + needReorder;
+  const attnCount = needApproval + needPO + needMatch + needPay + needReorder;
   const attnBreakdown = [
+    needApproval ? `${needApproval} order${needApproval === 1 ? "" : "s"} to approve` : null,
     needPO ? `${needPO} PO` : null,
     needMatch ? `${needMatch} ${needMatch === 1 ? "bill" : "bills"} to match` : null,
     needPay ? `${needPay} to pay` : null,
@@ -410,7 +414,9 @@ export default async function DashboardPage() {
   const kWait = summary.kitchen?.waitingOnStore ?? 0;
   const billsToAction = needMatch + needPay;
   const tiles: TaskTile[] = [
-    { key: "orders", icon: "orders", label: "Orders", status: `${summary.dueOrders} due`, href: "/orders" },
+    needApproval > 0
+      ? { key: "orders", icon: "orders", label: "Orders", status: `${needApproval} to approve`, href: "/queue/admin-approvals", tone: "red" }
+      : { key: "orders", icon: "orders", label: "Orders", status: `${summary.dueOrders} due`, href: "/orders" },
     { key: "kitchen", icon: "kitchen", label: "Kitchen", status: `${kWait} waiting on stock`, href: "/kitchen", tone: kWait > 0 ? "amber" : "default" },
     { key: "stock", icon: "stock", label: "Stock", status: `${needReorder} to reorder`, href: "/inventory/ingredients", tone: needReorder > 0 ? "red" : "default" },
     { key: "bills", icon: "bills", label: "Bills & pay", status: `${billsToAction} to action`, href: "/payments", tone: billsToAction > 0 ? "amber" : "default" },
