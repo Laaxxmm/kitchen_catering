@@ -336,6 +336,7 @@ export default async function DashboardPage() {
   // approvals board at the top of the operational dashboard.
   const approvals = isManagerScope
     ? await Promise.all([
+        listOrders({ status: [OrderStatus.PENDING_ADMIN_APPROVAL] }),
         listOrders({ status: [OrderStatus.CHANGES_PROPOSED_BY_CHEF] }),
         listVendorPOs({ status: [VendorPOStatus.PENDING_APPROVAL] }),
       ])
@@ -451,14 +452,23 @@ export default async function DashboardPage() {
           inline. Self-hides when nothing is waiting. */}
       {approvals && (
           <ManagerApprovalsBoard
-            orderChanges={approvals[0].map((o) => ({
+            ordersToApprove={approvals[0].map((o) => ({
+              id: o.id,
+              code: o.code,
+              customerName: o.customer.name,
+              eventDate: o.eventDate.toISOString(),
+              channel: o.channel,
+              headcount: o.headcount,
+              contractValue: o.contractValue.toString(),
+            }))}
+            orderChanges={approvals[1].map((o) => ({
               id: o.id,
               code: o.code,
               customerName: o.customer.name,
               eventDate: o.eventDate.toISOString(),
               note: o.chefSuggestionNotes ?? null,
             }))}
-            purchaseOrders={approvals[1].map((po) => ({
+            purchaseOrders={approvals[2].map((po) => ({
               id: po.id,
               poNo: po.poNo,
               vendor: po.vendor.name,
