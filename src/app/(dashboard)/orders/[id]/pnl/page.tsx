@@ -52,7 +52,7 @@ export default async function OrderPnLPage({ params }: { params: Promise<{ id: s
           const total = pnl.totalCost.toNumber();
           if (total <= 0) return <p className="text-[12.5px] text-ik-ink-3">No costs recorded yet.</p>;
           const segs = [
-            { label: "Ingredients (actual)", value: pnl.ingredientCost.actual.toNumber(), colour: "bg-brand-500" },
+            { label: "Ingredients", value: pnl.ingredientCost.used.toNumber(), colour: "bg-brand-500" },
             { label: "Labour", value: pnl.labourCost.toNumber(), colour: "bg-amber" },
             { label: "Overhead", value: pnl.overheadCost.toNumber(), colour: "bg-info" },
           ];

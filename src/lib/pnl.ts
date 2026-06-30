@@ -1,6 +1,7 @@
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { toDecimal } from "./money";
+import { computeOrderRecipeCost } from "./recipe-cost";
 
 export interface OrderPnL {
   orderId: string;
@@ -11,6 +12,12 @@ export interface OrderPnL {
   ingredientCost: {
     planned: Decimal;
     actual: Decimal;
+    // Full recipe cost of every dish — includes ingredients used from existing
+    // store stock that were never separately issued.
+    recipe: Decimal;
+    // What profitability actually charges: the greater of recipe cost and what
+    // was issued (so nothing is undercounted, and ad-hoc extras still count).
+    used: Decimal;
     variance: Decimal;
     lines: Array<{
       ingredient: string;
@@ -46,6 +53,7 @@ export async function computeOrderPnL(orderId: string): Promise<OrderPnL | null>
     select: {
       id: true, code: true, status: true, eventDate: true,
       customer: { select: { name: true } },
+      items: { select: { dishId: true, portions: true } },
     },
   });
   if (!order) return null;
@@ -109,7 +117,16 @@ export async function computeOrderPnL(orderId: string): Promise<OrderPnL | null>
   }));
 
   const plannedCost = ingLines.reduce((s, l) => s.plus(l.planned.cost), new Decimal(0));
-  const actualCost = ingLines.reduce((s, l) => s.plus(l.actual.cost), new Decimal(0));
+  const issuedCost = ingLines.reduce((s, l) => s.plus(l.actual.cost), new Decimal(0));
+
+  // Recipe-based cost — the full cost of every dish's ingredients, including
+  // those used from existing store stock. Profitability charges the greater of
+  // this and what was issued, so nothing is undercounted (and recipes that
+  // aren't set up gracefully fall back to the issued cost).
+  const recipeCost = await computeOrderRecipeCost(
+    order.items.map((it) => ({ dishId: it.dishId, portions: toDecimal(it.portions) })),
+  );
+  const usedCost = recipeCost.gt(issuedCost) ? recipeCost : issuedCost;
 
   // Labour — TimeEntry minutes × current hourly rate from SalaryStructure
   const timeEntries = await db.timeEntry.findMany({
@@ -140,7 +157,7 @@ export async function computeOrderPnL(orderId: string): Promise<OrderPnL | null>
   });
   const overhead = overheads.reduce((s, o) => s.plus(toDecimal(o.amount)), new Decimal(0));
 
-  const totalCost = actualCost.plus(labour).plus(overhead).toDecimalPlaces(2);
+  const totalCost = usedCost.plus(labour).plus(overhead).toDecimalPlaces(2);
   const grossProfit = revenueInvoiced.minus(totalCost).toDecimalPlaces(2);
   const grossMarginPct = revenueInvoiced.gt(0)
     ? grossProfit.div(revenueInvoiced).times(100).toDecimalPlaces(2)
@@ -154,8 +171,10 @@ export async function computeOrderPnL(orderId: string): Promise<OrderPnL | null>
     revenue: { invoiced: revenueInvoiced.toDecimalPlaces(2), collected: revenueCollected.toDecimalPlaces(2) },
     ingredientCost: {
       planned: plannedCost.toDecimalPlaces(2),
-      actual: actualCost.toDecimalPlaces(2),
-      variance: actualCost.minus(plannedCost).toDecimalPlaces(2),
+      actual: issuedCost.toDecimalPlaces(2),
+      recipe: recipeCost.toDecimalPlaces(2),
+      used: usedCost.toDecimalPlaces(2),
+      variance: issuedCost.minus(plannedCost).toDecimalPlaces(2),
       lines: ingLines,
     },
     labourCost: labour,

@@ -60,7 +60,17 @@ export async function OrderCostSummary({ orderId }: Props) {
             value={formatINR(revenue.toFixed(2))}
             sub={`Collected ${formatINR(pnl.revenue.collected)}`}
           />
-          <Kpi label="Ingredient cost" value={formatINR(pnl.ingredientCost.actual)} />
+          <Kpi
+            label="Ingredient cost"
+            value={formatINR(pnl.ingredientCost.used)}
+            sub={
+              pnl.ingredientCost.recipe.gt(pnl.ingredientCost.actual)
+                ? "Full recipe (incl. store stock)"
+                : pnl.ingredientCost.actual.gt(0)
+                  ? "Issued from store"
+                  : undefined
+            }
+          />
           <Kpi label="Gross profit" value={formatINR(profit.toFixed(2))} valueClass={profitTone} />
           <Kpi
             label="Gross margin"
@@ -70,10 +80,18 @@ export async function OrderCostSummary({ orderId }: Props) {
         </div>
       )}
 
+      {pnl.ingredientCost.recipe.gt(pnl.ingredientCost.actual) && (
+        <p className="mt-3 rounded-md border border-ik-rule bg-ik-paper-alt p-2.5 text-[11.5px] text-ik-ink-2">
+          Ingredient cost is the <strong>full recipe cost</strong> of the dishes ({formatINR(pnl.ingredientCost.recipe)}),
+          which counts ingredients used from existing store stock too — not just the
+          {" "}{formatINR(pnl.ingredientCost.actual)} that was freshly issued for this order.
+        </p>
+      )}
+
       {pnl.ingredientCost.lines.length > 0 && (
         <details className="mt-4 text-[12.5px] text-ik-ink-2">
           <summary className="cursor-pointer text-ik-ink-3 hover:text-ik-ink">
-            Show ingredients used ({pnl.ingredientCost.lines.length})
+            Issued from store ({pnl.ingredientCost.lines.length})
           </summary>
           <table className="mt-2 w-full border-t border-ik-rule">
             <thead className="border-b border-ik-rule text-left text-[11px] uppercase tracking-[0.08em] text-ik-ink-3">
