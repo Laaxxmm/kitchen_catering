@@ -23,7 +23,12 @@ export function OrderStepper({ current, immediate }: Props) {
     ? STAGE_FLOW.filter((s) => s.status !== OrderStatus.PENDING_ADMIN_APPROVAL)
     : STAGE_FLOW;
   const activeStatus = effectiveStageStatus(current);
-  const activeIdx = activeStatus ? flow.findIndex((s) => s.status === activeStatus) : -1;
+  let activeIdx = activeStatus ? flow.findIndex((s) => s.status === activeStatus) : -1;
+  // "Delivered" is a finished event, not an in-progress step — tick it and
+  // shift the highlight to the next pending action (Invoiced).
+  if (current === OrderStatus.DELIVERED && activeIdx >= 0 && activeIdx < flow.length - 1) {
+    activeIdx += 1;
+  }
   const isCancelled = current === OrderStatus.CANCELLED;
   const isRejected = current === OrderStatus.REJECTED_BY_MANAGER;
   const isChanges = current === OrderStatus.CHANGES_PROPOSED_BY_CHEF;
@@ -33,7 +38,7 @@ export function OrderStepper({ current, immediate }: Props) {
       {/* Horizontal scroll on small screens so the steps don't crush */}
       <div className="overflow-x-auto">
         <ol className="flex min-w-max items-center gap-0">
-          {STAGE_FLOW.map((s, i) => {
+          {flow.map((s, i) => {
             const done = i < activeIdx;
             const active = i === activeIdx;
             const upcoming = i > activeIdx;
@@ -61,7 +66,7 @@ export function OrderStepper({ current, immediate }: Props) {
                     {s.short}
                   </div>
                 </div>
-                {i < STAGE_FLOW.length - 1 && (
+                {i < flow.length - 1 && (
                   <div
                     className={
                       "h-[2px] w-8 " + (done ? "bg-brand-500" : "bg-ik-rule")
