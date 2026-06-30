@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Decimal } from "decimal.js";
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { isNextNavigationError } from "@/lib/next-error";
 
 interface Ingredient { id: string; name: string; sku: string; unit: string; avgCost: string }
@@ -31,6 +32,13 @@ export function RequisitionDraftForm({ ingredients, orderItems, onSubmit }: Prop
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [lines, setLines] = useState<DraftLine[]>([emptyLine(ingredients[0]?.id ?? "")]);
+
+  // Searchable ingredient options — the catalogue is long, so the chef types
+  // to filter instead of scrolling a giant dropdown.
+  const ingredientOptions = useMemo(
+    () => ingredients.map((i) => ({ value: i.id, label: `${i.sku} · ${i.name}` })),
+    [ingredients],
+  );
 
   function setLine(idx: number, patch: Partial<DraftLine>) {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
@@ -98,16 +106,14 @@ export function RequisitionDraftForm({ ingredients, orderItems, onSubmit }: Prop
                   : new Decimal(0);
                 return (
                   <tr key={idx} className="border-b border-ik-rule">
-                    <td className="py-1 pr-2">
-                      <select
+                    <td className="py-1 pr-2 min-w-[220px]">
+                      <Combobox
                         value={l.ingredientId}
-                        onChange={(e) => setLine(idx, { ingredientId: e.target.value })}
-                        className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1"
-                      >
-                        {ingredients.map((i) => (
-                          <option key={i.id} value={i.id}>{i.sku} · {i.name}</option>
-                        ))}
-                      </select>
+                        onChange={(v) => setLine(idx, { ingredientId: v })}
+                        options={ingredientOptions}
+                        placeholder="Search an ingredient…"
+                        emptyText="No ingredient matches"
+                      />
                     </td>
                     <td className="py-1 pr-2">
                       <input

@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Combobox } from "@/components/ui/combobox";
 import { isNextNavigationError } from "@/lib/next-error";
 
 interface Ingredient { id: string; sku: string; name: string; unit: string }
@@ -34,6 +35,10 @@ export function PRDraftForm({ ingredients, onSubmit }: Props) {
   const router = useRouter();
   const [headerNotes, setHeaderNotes] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([{ ingredientId: ingredients[0]?.id ?? "", requestedQty: "1", notes: "" }]);
+  const ingredientOptions = useMemo(
+    () => ingredients.map((i) => ({ value: i.id, label: `${i.sku} · ${i.name}` })),
+    [ingredients],
+  );
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -73,18 +78,14 @@ export function PRDraftForm({ ingredients, onSubmit }: Props) {
               const ing = ingredients.find((i) => i.id === l.ingredientId);
               return (
                 <tr key={idx} className="border-b border-ik-rule">
-                  <td className="py-1 pr-2">
-                    <select
+                  <td className="py-1 pr-2 min-w-[220px]">
+                    <Combobox
                       value={l.ingredientId}
-                      onChange={(e) => setLines((p) => p.map((x, i) => (i === idx ? { ...x, ingredientId: e.target.value } : x)))}
-                      className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1"
-                    >
-                      {ingredients.map((i) => (
-                        <option key={i.id} value={i.id}>
-                          {i.sku} · {i.name}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => setLines((p) => p.map((x, i) => (i === idx ? { ...x, ingredientId: v } : x)))}
+                      options={ingredientOptions}
+                      placeholder="Search an ingredient…"
+                      emptyText="No ingredient matches"
+                    />
                   </td>
                   <td className="py-1 pr-2">
                     <input

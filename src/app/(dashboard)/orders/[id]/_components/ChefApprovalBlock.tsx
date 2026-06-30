@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Combobox } from "@/components/ui/combobox";
 import { isNextNavigationError } from "@/lib/next-error";
 
 interface OrderItemOption {
@@ -55,6 +56,13 @@ export function ChefApprovalBlock({ onApprove, onSuggest, orderItems, dishes }: 
   const [fromDish, setFromDish] = useState(orderItems[0]?.label ?? "");
   const [toDishId, setToDishId] = useState(dishes[0]?.id ?? "");
   const [swapReason, setSwapReason] = useState("");
+
+  // Searchable options for the "with this dish" picker — the full catalogue
+  // can be long, so the chef types to filter instead of scrolling.
+  const dishOptions = useMemo(
+    () => dishes.map((d) => ({ value: d.id, label: d.code ? `${d.code} · ${d.name}` : d.name })),
+    [dishes],
+  );
 
   function run(fn: () => Promise<void>, successMsg: string) {
     if (!note.trim()) {
@@ -134,18 +142,14 @@ export function ChefApprovalBlock({ onApprove, onSuggest, orderItems, dishes }: 
               </div>
               <div className="grid gap-1">
                 <Label htmlFor="swap-to" className="text-[11.5px]">With this dish</Label>
-                <select
+                <Combobox
                   id="swap-to"
                   value={toDishId}
-                  onChange={(e) => setToDishId(e.target.value)}
-                  className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[12.5px]"
-                >
-                  {dishes.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.code ? `${d.code} · ${d.name}` : d.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setToDishId}
+                  options={dishOptions}
+                  placeholder="Search a dish…"
+                  emptyText="No dish matches"
+                />
               </div>
             </div>
             <div className="grid gap-1">
