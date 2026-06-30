@@ -26,7 +26,7 @@ import { nextOrderCode } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
 import { indefineStateCode } from "@/lib/org";
-import { isImmediateChannel, channelWantsFeedback } from "@/lib/order-channels";
+import { isImmediateChannel, channelWantsFeedback, isEventDeliveryChannel } from "@/lib/order-channels";
 import { getOrCreateHouseCustomerId } from "@/lib/house-customer";
 import { notifyRoles } from "@/server/actions/notifications";
 import { formatIST } from "@/lib/time";
@@ -58,10 +58,22 @@ async function notifyOrderApproved(orderId: string) {
   });
   if (!order) return;
   const evt = formatIST(order.eventDate, "dd MMM yyyy");
-  await notifyRoles([Role.KITCHEN_HEAD, Role.DELIVERY, Role.FNB_SERVICE], {
+  // Off-site catering (banquet / ODC / packed) needs the delivery team to
+  // prep cutlery + arrangements ahead of the event, so loop them in with a
+  // clear instruction. In-house channels (room service / à la carte /
+  // management) are served on the premises — no delivery prep, so it's the
+  // chef + F&B service who get the heads-up.
+  const eventDelivery = isEventDeliveryChannel(order.channel);
+  const roles = eventDelivery
+    ? [Role.KITCHEN_HEAD, Role.DELIVERY, Role.FNB_SERVICE]
+    : [Role.KITCHEN_HEAD, Role.FNB_SERVICE];
+  const body = eventDelivery
+    ? `${order.channel} · ${order.headcount} pax · event ${evt}. Kitchen: raise requisition. Delivery: prep cutlery + arrangements, then mark ready. Service: ready it for the guest.`
+    : `${order.channel} · ${order.headcount} pax · event ${evt}. Kitchen: raise requisition. Service: ready it for the guest.`;
+  await notifyRoles(roles, {
     kind: "ORDER_APPROVED",
     title: `Order ${order.code} confirmed — ${order.customer.name}`,
-    body: `${order.channel} · ${order.headcount} pax · event ${evt}. Kitchen: raise requisition. Delivery: prep cutlery + arrangements. Service: ready it for the guest.`,
+    body,
     link: `/orders/${orderId}`,
     dedupeKey: `order-approved:${orderId}`,
   });

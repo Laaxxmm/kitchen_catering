@@ -9,6 +9,8 @@ import { sha256Json } from "@/lib/audit";
 
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER, Role.MAINTENANCE_MANAGER, Role.FNB_SERVICE,
+  // Delivery reads the banquet store to prep event cutlery/arrangements.
+  Role.DELIVERY,
 ];
 // Who may correct on-hand for a given store: admin/manager + the store's
 // own manager. Mirrors the receipt-write roles for each module.

@@ -15,7 +15,7 @@ import { BanquetPanel } from "@/components/ik/dashboard/BanquetPanel";
 import { ChefWorkScreen } from "@/components/ik/dashboard/ChefWorkScreen";
 import { listChefBoardOrders } from "@/server/actions/production-jobs";
 import { DriverWorkScreen } from "@/components/ik/dashboard/DriverWorkScreen";
-import { listReadyForDispatch, listMyActiveDeliveries } from "@/server/actions/deliveries";
+import { listReadyForDispatch, listMyActiveDeliveries, listEventPrepQueue } from "@/server/actions/deliveries";
 import { SalesBoard } from "@/components/ik/dashboard/SalesBoard";
 import { StoreBoard } from "@/components/ik/dashboard/StoreBoard";
 import { ManagerApprovalsBoard } from "@/components/ik/dashboard/ManagerApprovalsBoard";
@@ -345,7 +345,8 @@ export default async function DashboardPage() {
   // assigned to them. None of the order-map, AR, or procurement panels
   // apply to their work.
   if (isDriver) {
-    const [pickups, myDeliveries] = await Promise.all([
+    const [eventPrep, pickups, myDeliveries] = await Promise.all([
+      listEventPrepQueue(),
       listReadyForDispatch(),
       listMyActiveDeliveries(),
     ]);
@@ -353,11 +354,12 @@ export default async function DashboardPage() {
       <>
         <LauncherGreeting
           firstName={firstName}
-          subtitle="Your whole run in three tabs — take a cooked order, dispatch it, then mark it delivered. Every action is on the card."
+          subtitle="Your whole run in tabs — ready the event cutlery, take a cooked order, dispatch it, then mark it delivered. Every action is on the card."
         />
         <div className="grid gap-5">
           <MyTasksPanel />
           <DriverWorkScreen
+            eventPrep={eventPrep}
             pickups={pickups.map((o) => ({
               id: o.id,
               code: o.code,

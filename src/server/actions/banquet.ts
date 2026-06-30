@@ -20,9 +20,15 @@ import {
 //   FNB_SERVICE  — drives the module (raises requisitions, records
 //                  receipts + issues against day-of-event consumption).
 //   ADMIN / MGR  — full read+write for oversight + reports.
+//   DELIVERY     — reads the store and issues cutlery/disposables to an
+//                  off-site event (banquet / ODC / packed), since the
+//                  delivery team prepares those arrangements. They can't
+//                  manage items, record vendor receipts or adjust stock.
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE];
-const READ_ROLES: Role[] = [...WRITE_ROLES];
+// Issuing to an event is also the delivery team's job (event prep).
+const ISSUE_ROLES = [...WRITE_ROLES, Role.DELIVERY];
+const READ_ROLES: Role[] = [...ISSUE_ROLES];
 
 // ─── Items ────────────────────────────────────────────────────────────
 
@@ -224,7 +230,7 @@ export async function listBanquetReceipts(opts: { limit?: number } = {}) {
 // ─── Issues (to service area / event) ─────────────────────────────────
 
 export async function recordBanquetIssue(raw: unknown) {
-  const session = await requireRole(WRITE_ROLES);
+  const session = await requireRole(ISSUE_ROLES);
   const input = BanquetIssueInput.parse(raw);
 
   const lines = input.lines.map((l) => ({

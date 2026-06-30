@@ -32,7 +32,7 @@ interface Item {
   active: boolean;
 }
 
-export function ItemsTable({ items }: { items: Item[] }) {
+export function ItemsTable({ items, canManage = true }: { items: Item[]; canManage?: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState<Partial<Item> | null>(null);
@@ -145,7 +145,7 @@ export function ItemsTable({ items }: { items: Item[] }) {
 
   return (
     <div className="grid gap-4">
-      {editing ? (
+      {!canManage ? null : editing ? (
         <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
           <div className="text-[12px] font-medium text-ik-ink-2">
             {editing.id ? "Edit item" : "Add item"}
@@ -206,7 +206,7 @@ export function ItemsTable({ items }: { items: Item[] }) {
               <TableHead className="text-right">In stock</TableHead>
               <TableHead className="text-right">Min</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              {canManage && <TableHead className="text-right">Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -229,19 +229,21 @@ export function ItemsTable({ items }: { items: Item[] }) {
                       {it.active ? "Active" : "Inactive"}
                     </span>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      {it.active ? (
-                        <>
-                          <Button size="sm" variant="outline" onClick={() => startEdit(it)} disabled={pending}>Edit</Button>
-                          <Button size="sm" variant="outline" onClick={() => deactivate(it.id)} disabled={pending}>Deactivate</Button>
-                        </>
-                      ) : (
-                        <Button size="sm" variant="outline" onClick={() => reactivate(it)} disabled={pending}>Reactivate</Button>
-                      )}
-                      <Button size="sm" variant="destructive" onClick={() => hardDelete(it)} disabled={pending}>Delete</Button>
-                    </div>
-                  </TableCell>
+                  {canManage && (
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        {it.active ? (
+                          <>
+                            <Button size="sm" variant="outline" onClick={() => startEdit(it)} disabled={pending}>Edit</Button>
+                            <Button size="sm" variant="outline" onClick={() => deactivate(it.id)} disabled={pending}>Deactivate</Button>
+                          </>
+                        ) : (
+                          <Button size="sm" variant="outline" onClick={() => reactivate(it)} disabled={pending}>Reactivate</Button>
+                        )}
+                        <Button size="sm" variant="destructive" onClick={() => hardDelete(it)} disabled={pending}>Delete</Button>
+                      </div>
+                    </TableCell>
+                  )}
                 </TableRow>
               );
             })}

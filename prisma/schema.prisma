@@ -374,6 +374,7 @@ model User {
   ordersChefReviewed              Order[]                  @relation("OrderChefReviewedBy")
   ordersManagerChangeReviewed     Order[]                  @relation("OrderManagerChangeReviewedBy")
   ordersAdminReviewed             Order[]                  @relation("OrderAdminReviewedBy")
+  ordersEventPrepReady            Order[]                  @relation("OrderEventPrepReadyBy")
   chefRequisitionsCreated         ChefRequisition[]        @relation("ChefRequisitionCreatedBy")
   chefRequisitionsFulfilled       ChefRequisition[]        @relation("ChefRequisitionFulfilledBy")
   prRequested                     PurchaseRequisition[]    @relation("PRRequester")
@@ -861,6 +862,13 @@ model Order {
   // actually scheduled; this just lets the kitchen card show "Delivery
   // informed" instead of the action button after they've intimated.
   handedToDeliveryAt     DateTime?
+
+  // Off-site catering (banquet / ODC / packed): the delivery team prepares
+  // cutlery, crockery and event arrangements ahead of the event and marks
+  // them ready here. Null until they tap "Mark event prep ready".
+  eventPrepReadyAt       DateTime?
+  eventPrepReadyById     String?
+  eventPrepReadyBy       User?     @relation("OrderEventPrepReadyBy", fields: [eventPrepReadyById], references: [id])
 
   status                 OrderStatus @default(DRAFT)
   contractValue          Decimal     @db.Decimal(14, 2)

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
-import { DeliveryStatus, OrderStatus, PaymentMethod, Role } from "@prisma/client";
+import { DeliveryStatus, OrderChannel, OrderStatus, PaymentMethod, Role } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { toDecimal } from "@/lib/money";
@@ -19,8 +19,21 @@ import {
 } from "@/lib/validators";
 import { nextDeliveryNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
-import { channelWantsFeedback } from "@/lib/order-channels";
+import { channelWantsFeedback, isEventDeliveryChannel } from "@/lib/order-channels";
 import { notifyRoles } from "@/server/actions/notifications";
+
+// Off-site catering orders (banquet / ODC / packed) move through these
+// statuses once they're confirmed and in the kitchen, up to the moment
+// they're dispatched. The delivery team prepares cutlery + arrangements
+// across this whole window — so this is the set the prep queue watches.
+const EVENT_PREP_STATUSES: OrderStatus[] = [
+  OrderStatus.CHEF_REQUISITION_PENDING,
+  OrderStatus.ISSUING,
+  OrderStatus.READY_FOR_PRODUCTION,
+  OrderStatus.IN_PREP,
+  OrderStatus.READY,
+  OrderStatus.OUT_FOR_DELIVERY,
+];
 
 /**
  * 24-byte random token, base64url-encoded — used for the public
@@ -114,6 +127,101 @@ export async function handToDelivery(orderId: string) {
   revalidatePath("/dashboard");
   revalidatePath("/kitchen");
   revalidatePath("/deliveries");
+}
+
+/**
+ * Confirmed off-site catering orders (banquet / ODC / packed) the delivery
+ * team has to prep cutlery + arrangements for. Spans the whole confirmed →
+ * dispatched window so they can ready things well ahead of the event; each
+ * row carries whether prep is already marked ready and by whom. Soonest
+ * events first. Powers the driver work-screen's "Event prep" tab.
+ */
+export async function listEventPrepQueue() {
+  await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
+  const rows = await db.order.findMany({
+    where: {
+      channel: { in: [OrderChannel.BANQUET, OrderChannel.ODC, OrderChannel.PACKET] },
+      status: { in: EVENT_PREP_STATUSES },
+    },
+    select: {
+      id: true,
+      code: true,
+      channel: true,
+      headcount: true,
+      eventDate: true,
+      deliveryAddress: true,
+      eventPrepReadyAt: true,
+      eventPrepReadyBy: { select: { name: true } },
+      customer: { select: { name: true } },
+    },
+    orderBy: { eventDate: "asc" },
+    take: 100,
+  });
+  return rows.map((o) => ({
+    id: o.id,
+    code: o.code,
+    channel: o.channel,
+    headcount: o.headcount,
+    eventDate: o.eventDate.toISOString(),
+    deliveryAddress: o.deliveryAddress,
+    customerName: o.customer.name,
+    prepReadyAt: o.eventPrepReadyAt ? o.eventPrepReadyAt.toISOString() : null,
+    prepReadyBy: o.eventPrepReadyBy?.name ?? null,
+  }));
+}
+
+/**
+ * The delivery team taps "Mark event prep ready" once the cutlery, crockery
+ * and event arrangements for an off-site catering order are packed and ready.
+ * Tracked on the order (eventPrepReadyAt + who), audit-logged, and chimed to
+ * the kitchen + management so everyone knows the front-of-house side is set.
+ * Idempotent: a second tap (or a stale card) is a harmless no-op.
+ */
+export async function markEventPrepReady(orderId: string) {
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
+  const order = await db.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      code: true,
+      channel: true,
+      eventPrepReadyAt: true,
+      customer: { select: { name: true } },
+    },
+  });
+  if (!order) throw new Error("Order not found");
+  if (!isEventDeliveryChannel(order.channel)) {
+    throw new AuthorizationError(
+      `Event prep only applies to off-site catering (banquet / ODC / packed) — order ${order.code} is ${order.channel}.`,
+    );
+  }
+  // Already marked ready — no-op so a double-tap doesn't error.
+  if (order.eventPrepReadyAt) {
+    revalidatePath("/dashboard");
+    return;
+  }
+  await db.order.update({
+    where: { id: orderId },
+    data: { eventPrepReadyAt: new Date(), eventPrepReadyById: session.user.id },
+  });
+  await db.auditLog.create({
+    data: {
+      userId: session.user.id,
+      action: "ORDER_EVENT_PREP_READY",
+      entity: "Order",
+      entityId: orderId,
+    },
+  });
+  await notifyRoles([Role.KITCHEN_HEAD, Role.ADMIN, Role.MANAGER], {
+    kind: "GENERIC",
+    title: `Event prep ready — ${order.code}`,
+    body: `${order.customer.name} · ${order.channel}. Cutlery + arrangements packed and ready by the delivery team.`,
+    link: `/orders/${orderId}`,
+    dedupeKey: `event-prep-ready:${orderId}`,
+  });
+  revalidatePath("/dashboard");
+  revalidatePath("/deliveries");
+  revalidatePath(`/orders/${orderId}`);
 }
 
 /**

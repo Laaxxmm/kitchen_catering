@@ -43,7 +43,8 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
     "dashboard", "tasks", "kitchen", "requisitions",
   ]),
   DELIVERY: new Set([
-    "dashboard", "tasks", "deliveries",
+    // Banquet store: prep event cutlery/arrangements (read + issue to event).
+    "dashboard", "tasks", "deliveries", "banquet",
   ]),
   // Accounts: strictly the books-side workspace. They see invoices,
   // pay vendors, record incoming stock, and run dashboards. They do NOT

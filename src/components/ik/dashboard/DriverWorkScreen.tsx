@@ -15,7 +15,20 @@ import {
   dispatchDelivery,
   confirmDeliveryOTP,
   failDelivery,
+  markEventPrepReady,
 } from "@/server/actions/deliveries";
+
+export interface EventPrepOrder {
+  id: string;
+  code: string;
+  channel: OrderChannel;
+  headcount: number;
+  eventDate: string;
+  deliveryAddress: string;
+  customerName: string;
+  prepReadyAt: string | null;
+  prepReadyBy: string | null;
+}
 
 export interface PickupOrder {
   id: string;
@@ -40,6 +53,7 @@ export interface DriverDelivery {
 }
 
 interface Props {
+  eventPrep: EventPrepOrder[];
   pickups: PickupOrder[];
   deliveries: DriverDelivery[];
 }
@@ -53,24 +67,32 @@ const CHANNEL_LABEL: Record<OrderChannel, string> = {
   MANAGEMENT: "Management",
 };
 
-type TabKey = "pickup" | "dispatch" | "out";
+type TabKey = "prep" | "pickup" | "dispatch" | "out";
 
 /**
- * The driver's whole job in three big tabs — Pickup → To dispatch → Out
- * for delivery — mirroring the chef board. Every card carries its one
- * action inline (Take delivery, Dispatch, Mark delivered), so the driver
- * never opens a detail page. Built for non-technical staff.
+ * The driver's whole job in big tabs — Event prep → Pickup → To dispatch →
+ * Out for delivery — mirroring the chef board. Every card carries its one
+ * action inline (Mark prep ready, Take delivery, Dispatch, Mark delivered),
+ * so the driver never opens a detail page. Built for non-technical staff.
+ *
+ * "Event prep" covers off-site catering (banquet / ODC / packed) — the
+ * delivery team readies cutlery + arrangements ahead of the event, and the
+ * tab's urgency dot flags how many are still outstanding.
  */
-export function DriverWorkScreen({ pickups, deliveries }: Props) {
+export function DriverWorkScreen({ eventPrep, pickups, deliveries }: Props) {
   const groups = useMemo(() => {
     const dispatch = deliveries.filter((d) => d.status === DeliveryStatus.SCHEDULED);
     const out = deliveries.filter(
       (d) => d.status === DeliveryStatus.DISPATCHED || d.status === DeliveryStatus.IN_TRANSIT,
     );
-    return { pickup: pickups, dispatch, out };
-  }, [pickups, deliveries]);
+    return { prep: eventPrep, pickup: pickups, dispatch, out };
+  }, [eventPrep, pickups, deliveries]);
 
-  const TABS: { key: TabKey; label: string; hint: string; count: number }[] = [
+  // Outstanding prep (not yet marked ready) drives the tab badge + urgency.
+  const prepOutstanding = groups.prep.filter((o) => !o.prepReadyAt).length;
+
+  const TABS: { key: TabKey; label: string; hint: string; count: number; urgent?: boolean }[] = [
+    { key: "prep", label: "Event prep", hint: "Ready cutlery", count: prepOutstanding, urgent: prepOutstanding > 0 },
     { key: "pickup", label: "Pickup", hint: "Take cooked orders", count: groups.pickup.length },
     { key: "dispatch", label: "To dispatch", hint: "Start the run", count: groups.dispatch.length },
     { key: "out", label: "Out for delivery", hint: "Mark delivered", count: groups.out.length },
@@ -82,7 +104,7 @@ export function DriverWorkScreen({ pickups, deliveries }: Props) {
 
   return (
     <section>
-      <div className="mb-3 grid grid-cols-3 gap-2">
+      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {TABS.map((t) => {
           const on = active === t.key;
           return (
@@ -98,11 +120,14 @@ export function DriverWorkScreen({ pickups, deliveries }: Props) {
               }
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[13px] font-semibold text-ik-ink">{t.label}</span>
+                <span className="flex items-center gap-1.5 text-[13px] font-semibold text-ik-ink">
+                  {t.label}
+                  {t.urgent && <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-alert" aria-label="urgent" />}
+                </span>
                 <span
                   className={
                     "grid min-h-[20px] min-w-[20px] place-items-center rounded-full px-1.5 font-mono text-[11px] font-bold leading-none " +
-                    (t.count > 0 ? "bg-brand-500 text-white" : "bg-ik-paper-alt text-ik-ink-3")
+                    (t.count > 0 ? (t.urgent ? "bg-alert text-white" : "bg-brand-500 text-white") : "bg-ik-paper-alt text-ik-ink-3")
                   }
                 >
                   {t.count}
@@ -114,7 +139,17 @@ export function DriverWorkScreen({ pickups, deliveries }: Props) {
         })}
       </div>
 
-      {active === "pickup" ? (
+      {active === "prep" ? (
+        groups.prep.length === 0 ? (
+          <Empty label={activeTab.label} />
+        ) : (
+          <ul className="grid gap-2.5">
+            {groups.prep.map((o, i) => (
+              <EventPrepCard key={o.id} order={o} highlight={!o.prepReadyAt && i === 0} />
+            ))}
+          </ul>
+        )
+      ) : active === "pickup" ? (
         groups.pickup.length === 0 ? (
           <Empty label={activeTab.label} />
         ) : (
@@ -138,6 +173,58 @@ export function DriverWorkScreen({ pickups, deliveries }: Props) {
         })()
       )}
     </section>
+  );
+}
+
+function EventPrepCard({ order, highlight }: { order: EventPrepOrder; highlight: boolean }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const ready = order.prepReadyAt != null;
+
+  function markReady() {
+    startTransition(async () => {
+      try {
+        await markEventPrepReady(order.id);
+        toast.success("Marked ready — kitchen + management notified");
+        router.refresh();
+      } catch (err) {
+        if (isNextNavigationError(err)) throw err;
+        toast.error(err instanceof Error ? err.message : "Could not mark ready");
+      }
+    });
+  }
+
+  return (
+    <li
+      className={
+        (ready ? "rounded-md border border-positive/40 bg-positive/5 p-3" : "rounded-md border border-amber bg-amber-wash p-3") +
+        (highlight ? " ring-2 ring-brand-500" : "")
+      }
+    >
+      <CardHeader
+        code={order.code}
+        channel={order.channel}
+        roomNumber={null}
+        timeLabel={formatIST(new Date(order.eventDate), "EEE d MMM HH:mm")}
+        target={order.eventDate}
+        highlight={highlight}
+      />
+      <div className="mt-1 text-[13px] text-ik-ink">
+        <strong>{order.customerName}</strong>
+        <span className="text-ik-ink-3"> · {order.headcount} pax</span>
+      </div>
+      <div className="mt-0.5 text-[12.5px] text-ik-ink-2">{order.deliveryAddress}</div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        {ready ? (
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-positive/10 px-2.5 py-1 text-[12px] font-medium text-positive">
+            ✓ Cutlery + arrangements ready{order.prepReadyBy ? ` · ${order.prepReadyBy}` : ""}
+          </span>
+        ) : (
+          <Button size="sm" disabled={pending} onClick={markReady}>Mark cutlery &amp; arrangements ready</Button>
+        )}
+        <Link href={`/orders/${order.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open</Link>
+      </div>
+    </li>
   );
 }
 

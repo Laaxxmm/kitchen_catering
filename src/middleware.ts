@@ -101,8 +101,11 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Maintenance — electrical/mechanical work + spares inventory.
   { pattern: /^\/maintenance(\/|$)/, allow: ["ADMIN", "MANAGER", "MAINTENANCE_MANAGER"] },
 
-  // Banquet — F&B service-side packaging store.
-  { pattern: /^\/banquet(\/|$)/, allow: ["ADMIN", "MANAGER", "FNB_SERVICE"] },
+  // Banquet — F&B service-side packaging store. Delivery also reaches it to
+  // ready event cutlery/arrangements: read the store + catalog and issue to
+  // an event. Recording vendor receipts and adjusting stock stay FNB-only.
+  { pattern: /^\/banquet\/(receipts|adjust)(\/|$)/, allow: ["ADMIN", "MANAGER", "FNB_SERVICE"] },
+  { pattern: /^\/banquet(\/|$)/, allow: ["ADMIN", "MANAGER", "FNB_SERVICE", "DELIVERY"] },
 
   // Finance — invoices are accounts/management. The in-house (room service)
   // billing screen + viewing a generated bill are also open to F&B service

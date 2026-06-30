@@ -34,3 +34,20 @@ const FEEDBACK_CHANNELS: ReadonlySet<OrderChannel> = new Set([
 export function channelWantsFeedback(channel: OrderChannel): boolean {
   return FEEDBACK_CHANNELS.has(channel);
 }
+
+/**
+ * Off-site catering channels where the delivery team has to prepare cutlery,
+ * crockery and event arrangements ahead of the event — banquet, outdoor
+ * catering (ODC) and packed/take-away batches. In-house channels (room
+ * service / à la carte / management) are served on the premises and need no
+ * such delivery prep, so they're excluded.
+ */
+const EVENT_DELIVERY_CHANNELS: ReadonlySet<OrderChannel> = new Set([
+  OrderChannel.BANQUET,
+  OrderChannel.ODC,
+  OrderChannel.PACKET,
+]);
+
+export function isEventDeliveryChannel(channel: OrderChannel): boolean {
+  return EVENT_DELIVERY_CHANNELS.has(channel);
+}
