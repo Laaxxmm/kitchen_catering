@@ -27,6 +27,7 @@ import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
 import { indefineStateCode } from "@/lib/org";
 import { isImmediateChannel, channelWantsFeedback } from "@/lib/order-channels";
+import { getOrCreateHouseCustomerId } from "@/lib/house-customer";
 import { notifyRoles } from "@/server/actions/notifications";
 import { formatIST } from "@/lib/time";
 
@@ -205,10 +206,17 @@ export async function createOrder(raw: unknown) {
     const windowEndVal = input.deliveryWindowEnd ? new Date(input.deliveryWindowEnd) : eventDateVal;
     const placeOfSupplyVal = input.placeOfSupplyStateCode || indefineStateCode();
 
+    // In-house orders may not name a guest — book them against the built-in
+    // "House / Walk-in" customer (created on first use). Catering always has
+    // a real customer (enforced by the validator).
+    const customerId = input.customerId?.trim()
+      ? input.customerId
+      : await getOrCreateHouseCustomerId(tx);
+
     const created = await tx.order.create({
       data: {
         code,
-        customerId: input.customerId,
+        customerId,
         channel: input.channel,
         eventDate: eventDateVal,
         headcount: input.headcount,

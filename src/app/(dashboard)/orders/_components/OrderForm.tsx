@@ -162,7 +162,9 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!customerId) return toast.error("Choose a customer");
+    // In-house orders are tracked by room/table — no named customer needed
+    // (the server books them against the "House / Walk-in" customer).
+    if (!immediate && !customerId) return toast.error("Choose a customer");
     // Event date + delivery address only matter for pre-booked catering.
     if (!immediate && !eventDate) return toast.error("Event date is required");
     if (!immediate && !deliveryAddress.trim()) return toast.error("Delivery address is required");
@@ -194,7 +196,9 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
     }
 
     const payload: OrderCreateInputT = {
-      customerId,
+      // In-house orders are tracked by room/table — omit the customer so the
+      // server books them against "House / Walk-in".
+      customerId: immediate ? undefined : customerId,
       channel,
       headcount: Number(headcount),
       mealType,
@@ -233,27 +237,38 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
       <section className="grid gap-4 rounded-[14px] border border-ik-rule bg-ik-card p-4 max-w-3xl sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Customer &amp; event</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="grid gap-1">
-            <Label htmlFor="customerId">Customer<span className="text-gold" aria-hidden> *</span></Label>
-            <select
-              id="customerId"
-              value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-              className="h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
-            >
-              {customerOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            {onQuickAddCustomer && (
-              <QuickAddCustomer
-                onCreate={onQuickAddCustomer}
-                onCreated={(c) => {
-                  setCustomerOptions((prev) => [c, ...prev]);
-                  setCustomerId(c.id);
-                  setPlaceOfSupplyStateCode(c.stateCode);
-                }}
-              />
-            )}
-          </div>
+          {immediate ? (
+            // In-house: tracked by room/table, no named customer needed.
+            <div className="grid gap-1 sm:col-span-2">
+              <Label>Guest</Label>
+              <div className="rounded-md border border-ik-rule bg-ik-paper-alt px-3 py-2 text-[12.5px] text-ik-ink-2">
+                Tracked by room / table — no named customer needed. Billed to the room on the
+                room-billing screen.
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-1">
+              <Label htmlFor="customerId">Customer<span className="text-gold" aria-hidden> *</span></Label>
+              <select
+                id="customerId"
+                value={customerId}
+                onChange={(e) => setCustomerId(e.target.value)}
+                className="h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
+              >
+                {customerOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              {onQuickAddCustomer && (
+                <QuickAddCustomer
+                  onCreate={onQuickAddCustomer}
+                  onCreated={(c) => {
+                    setCustomerOptions((prev) => [c, ...prev]);
+                    setCustomerId(c.id);
+                    setPlaceOfSupplyStateCode(c.stateCode);
+                  }}
+                />
+              )}
+            </div>
+          )}
           {!immediate && (
             <div className="grid gap-1">
               <Label htmlFor="placeOfSupplyStateCode">Place of supply (state code)</Label>

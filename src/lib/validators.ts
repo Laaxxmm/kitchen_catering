@@ -264,7 +264,11 @@ export type OrderItemInputT = z.infer<typeof OrderItemInput>;
 // fields are present); updates re-check via the same logic inside the
 // server action when channel changes.
 const orderCreateBase = z.object({
-  customerId: z.string(),
+  // Optional — the immediate in-house channels (room service / à la carte /
+  // management) are tracked by room/table, so a named customer isn't needed;
+  // the server attaches the built-in "House / Walk-in" customer. Required for
+  // pre-booked catering, enforced in the superRefine below.
+  customerId: z.string().optional().nullable(),
   // Channel defaults to BANQUET to preserve old semantics for legacy
   // clients that don't send the field yet.
   channel: z.nativeEnum(OrderChannel).default(OrderChannel.BANQUET),
@@ -317,6 +321,9 @@ export const OrderCreateInput = orderCreateBase.superRefine((v, ctx) => {
   // Pre-booked catering needs an event date, delivery address and place of
   // supply. The immediate channels don't — the server defaults those.
   if (!IMMEDIATE_CHANNELS.includes(v.channel)) {
+    if (!v.customerId || v.customerId.trim().length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["customerId"], message: "Customer is required" });
+    }
     if (!v.eventDate) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["eventDate"], message: "Event date is required" });
     }
