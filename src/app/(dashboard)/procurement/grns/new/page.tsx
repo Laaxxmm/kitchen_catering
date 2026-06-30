@@ -13,8 +13,8 @@ export default async function NewGRNPage({
 }: {
   searchParams: Promise<{ poId?: string }>;
 }) {
-  // Goods receipt references the PO + vendor — manager / admin / accounts only.
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
+  // The store keeper records goods receipt against their PO (+ manager / admin / accounts).
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.STORE_KEEPER]);
   const { poId } = await searchParams;
   if (!poId) return <p className="p-4 text-[13px] text-ik-ink-3">Pass <code>?poId=&lt;id&gt;</code>.</p>;
   const po = await getVendorPO(poId);

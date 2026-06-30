@@ -16,7 +16,7 @@ export default async function VendorPOsPage() {
       <PageHeader
         eyebrow="Procurement"
         title="Vendor POs"
-        description="Tier 1 (≤₹1L) auto-approves; Tier 2 needs MANAGER; Tier 3 (>₹10L) needs ADMIN."
+        description="Approval by value: under ₹5,000 the Manager signs off; ₹5,000 and above needs Admin."
         actions={<Link href="/procurement/purchase-orders/new"><Button>New PO</Button></Link>}
       />
       {pos.length === 0 ? (

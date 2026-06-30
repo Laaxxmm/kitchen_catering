@@ -77,7 +77,8 @@ export const NAV_GROUPS: NavGroup[] = [
     collapsible: true,
     badgeKey: "buy",
     items: [
-      { key: "requests", label: "Requests", icon: "report", href: "/procurement/purchase-requisitions" },
+      // Purchase requisitions removed — the store now raises a PO directly
+      // from a chef-requisition shortfall (no separate request document).
       { key: "purchaseorders", label: "Purchase orders", icon: "invoice", href: "/procurement/purchase-orders" },
       { key: "vendors", label: "Vendors", icon: "building", href: "/procurement/vendors" },
       { key: "supplierbills", label: "Supplier bills", icon: "invoice", href: "/procurement/vendor-bills" },

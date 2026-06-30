@@ -20,11 +20,10 @@ import {
   ChefRequisitionLineInput,
   ChefRequisitionSendToProcurementInput,
 } from "@/lib/validators";
-import { nextChefRequisitionNumber, nextPRNumber } from "@/lib/sequences";
+import { nextChefRequisitionNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
 import { createProductionJobForOrder } from "./production-jobs";
-import { PurchaseRequisitionStatus } from "@prisma/client";
 
 
 // =====================================================================
@@ -387,14 +386,11 @@ export async function issueChefRequisitionLine(raw: unknown) {
 }
 
 /**
- * Phase 2: mark a line as awaiting procurement AND auto-create (or append to)
- * a DRAFT PurchaseRequisition for the shortfall. One PR per chef requisition;
- * if a DRAFT/PENDING PR already exists for this chef requisition, we append
- * the line to it rather than spawn a new one.
- *
- * The storekeeper can then submit the PR; manager approves; vendor PO →
- * GRN → stock is back; storekeeper returns to this requisition and clicks
- * Issue on the previously-AWAITING_PROCUREMENT line.
+ * Flag a short chef-requisition line as awaiting a purchase. There's no
+ * separate purchase-requisition document any more — the store raises a PO
+ * for the shortfall directly (see /procurement/purchase-orders/new?reqId=).
+ * Once the vendor delivers and the store records the GRN, stock comes back
+ * in and the line becomes issuable again ("stock has arrived — issue now").
  */
 export async function sendChefRequisitionLineToProcurement(raw: unknown) {
   const session = await requireRole(REQUISITION_FULFIL_ROLES);
@@ -403,10 +399,7 @@ export async function sendChefRequisitionLineToProcurement(raw: unknown) {
   await db.$transaction(async (tx) => {
     const line = await tx.chefRequisitionLine.findUnique({
       where: { id: input.lineId },
-      include: {
-        ingredient: { select: { id: true, avgUnitCost: true } },
-        requisition: { select: { id: true, orderId: true, requisitionNo: true } },
-      },
+      select: { id: true, status: true, requestedQty: true, issuedQty: true },
     });
     if (!line) throw new Error("Line not found");
     if (line.status === ChefRequisitionLineStatus.ISSUED) {
@@ -415,39 +408,6 @@ export async function sendChefRequisitionLineToProcurement(raw: unknown) {
     const shortfall = toDecimal(line.requestedQty).minus(toDecimal(line.issuedQty));
     if (shortfall.lte(0)) throw new Error("No shortfall to procure");
 
-    // Find or create a DRAFT/PENDING PR for this chef requisition.
-    let pr = await tx.purchaseRequisition.findFirst({
-      where: {
-        chefRequisitionId: line.requisition.id,
-        status: { in: [PurchaseRequisitionStatus.DRAFT, PurchaseRequisitionStatus.PENDING_APPROVAL] },
-      },
-    });
-    if (!pr) {
-      const prNo = await nextPRNumber(tx);
-      pr = await tx.purchaseRequisition.create({
-        data: {
-          prNo,
-          orderId: line.requisition.orderId,
-          chefRequisitionId: line.requisition.id,
-          requestedById: session.user.id,
-          status: PurchaseRequisitionStatus.DRAFT,
-          notes: `Auto-created from chef requisition ${line.requisition.requisitionNo}`,
-        },
-      });
-    }
-
-    // Append a PR line for the shortfall.
-    await tx.purchaseRequisitionLine.create({
-      data: {
-        prId: pr.id,
-        ingredientId: line.ingredientId,
-        requestedQty: shortfall.toString(),
-        unitCostSnapshot: line.ingredient.avgUnitCost.toString(),
-        notes: `Shortfall on chef requisition line ${line.id}: ${input.reason}`,
-      },
-    });
-
-    // Mark the chef line awaiting procurement.
     await tx.chefRequisitionLine.update({
       where: { id: line.id },
       data: { status: ChefRequisitionLineStatus.AWAITING_PROCUREMENT, notes: input.reason },
@@ -456,17 +416,16 @@ export async function sendChefRequisitionLineToProcurement(raw: unknown) {
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
-        action: "CHEF_REQUISITION_LINE_SENT_TO_PROCUREMENT",
+        action: "CHEF_REQUISITION_LINE_AWAITING_PURCHASE",
         entity: "ChefRequisitionLine",
         entityId: line.id,
-        payloadHash: sha256Json({ reason: input.reason, prId: pr.id, shortfall: shortfall.toString() }),
+        payloadHash: sha256Json({ reason: input.reason, shortfall: shortfall.toString() }),
       },
     });
   });
 
   revalidatePath("/requisitions");
   revalidatePath("/queue/issuing");
-  revalidatePath("/procurement/purchase-requisitions");
 }
 
 // =====================================================================

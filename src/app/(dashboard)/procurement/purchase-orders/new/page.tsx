@@ -1,12 +1,12 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Role } from "@prisma/client";
+import { ChefRequisitionLineStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { listVendors } from "@/server/actions/vendors";
 import { listIngredients } from "@/server/actions/inventory";
 import { createVendorPO } from "@/server/actions/procurement";
-import { getPurchaseRequisition } from "@/server/actions/purchase-requisitions";
+import { getChefRequisition } from "@/server/actions/chef-requisitions";
 import { gateRolePage } from "@/server/rbac";
+import { toDecimal } from "@/lib/money";
 import { VendorPOForm } from "./_components/VendorPOForm";
 
 export const dynamic = "force-dynamic";
@@ -14,31 +14,35 @@ export const dynamic = "force-dynamic";
 export default async function NewVendorPOPage({
   searchParams,
 }: {
-  searchParams: Promise<{ prId?: string }>;
+  searchParams: Promise<{ reqId?: string }>;
 }) {
-  // Vendor selection + pricing is a manager/admin job, not the store's.
-  await gateRolePage([Role.ADMIN, Role.MANAGER]);
-  const { prId } = await searchParams;
+  // The store keeper raises the PO for a shortfall; manager/admin approve it.
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER]);
+  const { reqId } = await searchParams;
 
-  const [vendors, ingredients, pr] = await Promise.all([
+  const [vendors, ingredients, chefReq] = await Promise.all([
     listVendors({ active: true }),
     listIngredients({ active: true }),
-    prId ? getPurchaseRequisition(prId) : Promise.resolve(null),
+    reqId ? getChefRequisition(reqId) : Promise.resolve(null),
   ]);
 
-  // If we're spawning from a PR, pre-fill the form with that PR's lines
-  // and pick the most common preferred vendor across those ingredients
-  // (so the user doesn't have to retype anything).
-  const prefillLines = pr
-    ? pr.lines.map((l) => {
+  // Raised from a chef-requisition shortfall: pre-fill the short items with
+  // their quantity and the unit price = each ingredient's average cost (an
+  // approximate; the store/manager edits it before/at approval).
+  const reqLines = chefReq
+    ? chefReq.lines.filter((l) => l.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT)
+    : [];
+  const prefillLines = chefReq
+    ? reqLines.map((l) => {
         const ing = ingredients.find((i) => i.id === l.ingredientId);
+        const shortfall = toDecimal(l.requestedQty).minus(toDecimal(l.issuedQty));
         return {
           ingredientId: l.ingredientId,
-          sku: ing?.sku ?? "",
-          description: ing?.name ?? "",
-          unit: ing?.unit ?? "kg",
-          quantity: l.requestedQty.toString(),
-          unitPrice: l.unitCostSnapshot.toString(),
+          sku: l.ingredient.sku,
+          description: l.ingredient.name,
+          unit: l.ingredient.unit,
+          quantity: shortfall.toString(),
+          unitPrice: l.ingredient.avgUnitCost.toString(),
           gstRatePct: ing?.gstRatePct?.toString() ?? "5",
         };
       })
@@ -58,7 +62,7 @@ export default async function NewVendorPOPage({
     lines: Array<{ ingredientId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
   }) {
     "use server";
-    const r = await createVendorPO({ ...input, prId: prId ?? null });
+    const r = await createVendorPO({ ...input, prId: null });
     redirect(`/procurement/purchase-orders/${r.id}`);
   }
 
@@ -68,21 +72,19 @@ export default async function NewVendorPOPage({
         eyebrow="Procurement"
         title="New purchase order"
         description={
-          pr
-            ? `Filled in from request ${pr.prNo}. Confirm the supplier, set prices, then create the draft PO.`
+          chefReq
+            ? `Filled in from kitchen requisition ${chefReq.requisitionNo}. Confirm the supplier, adjust prices, then create the PO.`
             : "Pick a vendor, add line items, submit. The total auto-determines the approval tier."
         }
       />
 
-      {pr && (
+      {chefReq && (
         <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">
-          <strong>From request:</strong>{" "}
-          <Link href={`/procurement/purchase-requisitions/${pr.id}`} className="font-mono text-brand hover:underline">
-            {pr.prNo}
-          </Link>{" "}
-          · {pr.lines.length} line{pr.lines.length === 1 ? "" : "s"} requested by{" "}
-          {pr.requestedBy?.name ?? "—"}. The lines below are pre-filled — fill in <em>Unit ₹</em> for
-          each item based on your supplier&apos;s quote.
+          <strong>From kitchen requisition {chefReq.requisitionNo}</strong> ·{" "}
+          {reqLines.length} short item{reqLines.length === 1 ? "" : "s"}. Prices are pre-filled from
+          each item&apos;s average cost — <strong>edit them</strong> to match the supplier&apos;s
+          quote. The total decides the approval: under ₹5,000 the manager signs off; ₹5,000 and above
+          needs admin.
         </div>
       )}
 

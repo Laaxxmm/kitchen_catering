@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChefRequisitionStatus, Role } from "@prisma/client";
+import { ChefRequisitionLineStatus, ChefRequisitionStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -44,6 +44,10 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
     isStore &&
     (requisition.status === ChefRequisitionStatus.SUBMITTED ||
       requisition.status === ChefRequisitionStatus.PARTIALLY_ISSUED);
+  // Short lines the store has flagged as out-of-stock → ready to put on a PO.
+  const hasAwaiting = requisition.lines.some(
+    (l) => l.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT,
+  );
 
   return (
     <>
@@ -59,9 +63,22 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
                 <Button type="submit">Submit to store</Button>
               </form>
             )}
+            {isStore && hasAwaiting && (
+              <Link href={`/procurement/purchase-orders/new?reqId=${requisition.id}`}>
+                <Button>Raise purchase order</Button>
+              </Link>
+            )}
           </div>
         }
       />
+
+      {isStore && hasAwaiting && (
+        <div className="mb-4 rounded-md border border-amber bg-amber-wash p-3 text-[13px] text-ik-ink-2">
+          <strong>Some items are short.</strong> Hit <em>Raise purchase order</em> to buy them — the
+          PO opens pre-filled with the shortfall and approximate prices. Once the vendor delivers and
+          you record the GRN, come back here and issue those lines to the chef.
+        </div>
+      )}
 
       <div className="mb-4 flex items-center gap-3 text-[13px]">
         <StatusBadge status={requisition.status} />

@@ -78,10 +78,10 @@ function needsAdminApproval(total: Decimal, tiers: PoApprovalTiers): boolean {
 // =====================================================================
 
 export async function createVendorPO(raw: unknown) {
-  // Storekeepers only intimate shortages (the PR). Picking a vendor,
-  // setting prices and raising the PO is the manager's / admin's job —
-  // they still keep the GRN (goods receipt) step on the store side.
-  const session = await requireRole([Role.ADMIN, Role.MANAGER]);
+  // The store keeper raises the PO for a kitchen shortfall (vendor + goods,
+  // prices pre-filled); the manager/admin then approves it by value. Admin
+  // and manager can also raise one directly.
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER]);
   const input = VendorPOCreateInput.parse(raw);
 
   const supplierState = indefineStateCode();
@@ -452,10 +452,9 @@ export async function cancelVendorPO(id: string, reason: string) {
  *   7. Write AuditLog
  */
 export async function createGRN(raw: unknown) {
-  // Goods receipt is recorded by manager / admin / accounts — it references
-  // the PO + vendor, which the store keeper deliberately doesn't see. The
-  // store records non-PO stock-in through /inventory/receipts instead.
-  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
+  // The store keeper records the goods receipt when the vendor delivers
+  // against their PO. Manager / admin / accounts can too.
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.STORE_KEEPER]);
   const input = GRNCreateInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {

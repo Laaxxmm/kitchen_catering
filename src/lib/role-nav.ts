@@ -12,26 +12,28 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   ADMIN: new Set([
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
     "kitchen", "requisitions", "deliveries", "inventory",
-    "requests", "purchaseorders", "vendors", "supplierbills",
+    "purchaseorders", "vendors", "supplierbills",
     "roomservicebills", "invoices", "payments", "pettycash", "salary", "reports",
     "housekeeping", "maintenance", "banquet", "admin",
   ]),
   MANAGER: new Set([
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
     "kitchen", "requisitions", "deliveries", "inventory",
-    "requests", "purchaseorders", "vendors", "supplierbills",
+    "purchaseorders", "vendors", "supplierbills",
     "roomservicebills", "invoices", "payments", "pettycash", "salary", "reports",
     "housekeeping", "maintenance", "banquet",
   ]),
   SALES: new Set([
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
   ]),
-  // Storekeeper: stock + requisitions + raising shortage requests. They do
-  // NOT see vendors, purchase orders or supplier bills — picking suppliers,
-  // pricing and paying are the manager's / admin's / accounts' job. The
-  // store just says "we're short on X" (a request) and issues/receives stock.
+  // Storekeeper: owns the buy cycle for kitchen shortfalls — when a chef
+  // requisition is short, the store raises a PO (vendor + goods, prices
+  // pre-filled), the manager/admin approves it (tiered by value), then the
+  // store coordinates with the vendor, records the GRN and issues to the
+  // chef. So they get Purchase orders + Vendors (but not supplier bills /
+  // payments, which stay with finance).
   STORE_KEEPER: new Set([
-    "dashboard", "tasks", "requisitions", "inventory", "requests",
+    "dashboard", "tasks", "requisitions", "inventory", "purchaseorders", "vendors",
   ]),
   // Kitchen head: cooking-side work only. No Sales section — they drive
   // everything from the tabbed kitchen dashboard + Kitchen + Requisitions.

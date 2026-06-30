@@ -84,18 +84,11 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // own-scope for DELIVERY role.
   { pattern: /^\/m(\/|$)/, allow: ["ADMIN", "MANAGER", "DELIVERY", "KITCHEN_HEAD", "STORE_KEEPER", "SALES", "ACCOUNTS"] },
 
-  // Procurement — the store keeper ONLY raises requests (purchase
-  // requisitions). Vendor choice, purchase orders, supplier bills and goods
-  // receipts (GRNs) are manager / admin / accounts, so the store never sees
-  // vendor or payment data. These specific rules sit ABOVE the general one;
-  // a path must satisfy EVERY rule it matches (see the header note), so a
-  // store keeper is blocked from these sub-paths while still allowed on
-  // /procurement/purchase-requisitions via the general rule below.
-  { pattern: /^\/procurement\/?$/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
-  { pattern: /^\/procurement\/purchase-orders(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
-  { pattern: /^\/procurement\/vendors(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  // Procurement — the store keeper owns the buy cycle for kitchen shortfalls:
+  // raise the PO, coordinate with the vendor, record the GRN. So they get
+  // purchase orders, vendors and GRNs. Supplier bills + payment stay with
+  // finance (admin / manager / accounts).
   { pattern: /^\/procurement\/vendor-bills(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
-  { pattern: /^\/procurement\/grns(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   { pattern: /^\/procurement(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "ACCOUNTS"] },
 
   // Housekeeping — hotel-side stockroom. Open to admin / manager (oversight)

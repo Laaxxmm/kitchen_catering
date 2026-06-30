@@ -131,7 +131,7 @@ export function LineFulfilControls({ lineId, requestedQty, issuedQty, onHand, st
             )}
             {onHandDec.lte(0) && (
               <span className="text-[10.5px] text-ik-ink-3">
-                Nothing in stock — send to procurement instead
+                Nothing in stock — flag it for a purchase order instead
               </span>
             )}
           </span>
@@ -143,11 +143,11 @@ export function LineFulfilControls({ lineId, requestedQty, issuedQty, onHand, st
             variant="outline"
             disabled={pending}
             onClick={() => {
-              const reason = prompt("Reason for sending to procurement?");
+              const reason = prompt("Why does this need buying? (e.g. not enough in stock)");
               if (reason && reason.trim()) call(() => onSendToProcurement(lineId, reason.trim()));
             }}
           >
-            Send to procurement
+            Out of stock — needs PO
           </Button>
         )}
       </div>
