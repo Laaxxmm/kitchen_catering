@@ -223,8 +223,17 @@ export async function createVendorPO(raw: unknown) {
 
 export async function submitVendorPO(id: string) {
   const session = await requireRole(WRITE_ROLES);
-  await db.$transaction(async (tx) => {
-    const po = await tx.vendorPO.findUnique({ where: { id }, select: { status: true, approvalTier: true } });
+  const result = await db.$transaction(async (tx) => {
+    const po = await tx.vendorPO.findUnique({
+      where: { id },
+      select: {
+        status: true,
+        approvalTier: true,
+        poNo: true,
+        grandTotal: true,
+        vendor: { select: { name: true } },
+      },
+    });
     if (!po) throw new Error("PO not found");
     if (po.status !== VendorPOStatus.DRAFT) {
       throw new AuthorizationError("Only DRAFT POs can be submitted");
@@ -246,7 +255,27 @@ export async function submitVendorPO(id: string) {
         entityId: id,
       },
     });
+    return { status: nextStatus, poNo: po.poNo, grandTotal: po.grandTotal, vendorName: po.vendor.name };
   });
+
+  // Ping the approvers — the notification spells out it's a Purchase Order
+  // and who needs to sign off, so the manager/admin knows what it's for.
+  if (result.status === VendorPOStatus.PENDING_APPROVAL) {
+    const tiers = await loadApprovalTiers();
+    const adminRequired = needsAdminApproval(toDecimal(result.grandTotal), tiers);
+    await notifyRoles([Role.MANAGER, Role.ADMIN], {
+      kind: "PO_AWAITING_ADMIN",
+      title: `Purchase order ${result.poNo} needs approval`,
+      body: `${result.vendorName} · ₹${toDecimal(result.grandTotal).toFixed(2)}. ${
+        adminRequired
+          ? "Over ₹5,000 — Admin sign-off required."
+          : "Under ₹5,000 — Manager can approve."
+      } Open Purchase orders to approve.`,
+      link: `/procurement/purchase-orders/${id}`,
+      dedupeKey: `po-awaiting:${id}`,
+    });
+  }
+
   revalidatePath(`/procurement/purchase-orders/${id}`);
 }
 
