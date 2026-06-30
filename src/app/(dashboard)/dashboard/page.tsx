@@ -22,7 +22,6 @@ import { ManagerApprovalsBoard } from "@/components/ik/dashboard/ManagerApproval
 import { AccountsBoard } from "@/components/ik/dashboard/AccountsBoard";
 import { listOrders } from "@/server/actions/orders";
 import { listChefRequisitions } from "@/server/actions/chef-requisitions";
-import { listPurchaseRequisitions } from "@/server/actions/purchase-requisitions";
 import { listVendorPOs, listVendorBills } from "@/server/actions/procurement";
 import { listCustomerInvoices } from "@/server/actions/customer-invoices";
 import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
@@ -31,7 +30,7 @@ import { listMaintenanceActivities } from "@/server/actions/maintenance";
 import { toDecimal, formatINRWhole } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import {
-  ChefRequisitionStatus, PurchaseRequisitionStatus, VendorPOStatus, OrderStatus,
+  ChefRequisitionStatus, VendorPOStatus, OrderStatus,
   CustomerInvoiceStatus, VendorBillStatus,
 } from "@prisma/client";
 import { Button } from "@/components/ui/button";
@@ -47,16 +46,11 @@ function logBucket(date: Date): LogBucket {
 }
 
 /**
- * Visual dashboard — three layered blocks:
- *
- *   1. ActionFeed       — role-aware "what needs you right now" list.
- *   2. OrderJourneyStrip — the live order map, every active order parked
- *                          on its current stage of the chain.
- *   3. Money + Today    — AR donut + today's orders plotted on a timeline.
- *
- * For admin/manager we also surface the buy-side ProcurementStrip below
- * the order map. Everything is clickable; clicking a stop drills into
- * the matching filtered list.
+ * Role-aware launcher dashboard. Each role gets a focused screen (chef work
+ * board, sales pipeline, store fulfilment, accounts, driver run, etc.);
+ * admin/manager fall through to the operational launcher — an attention
+ * banner, the inline approvals board (chef-change + PO sign-off), task
+ * tiles, and a money-this-month strip. Everything is clickable.
  */
 export default async function DashboardPage() {
   const session = await auth();
@@ -343,7 +337,6 @@ export default async function DashboardPage() {
   const approvals = isManagerScope
     ? await Promise.all([
         listOrders({ status: [OrderStatus.CHANGES_PROPOSED_BY_CHEF] }),
-        listPurchaseRequisitions({ status: [PurchaseRequisitionStatus.PENDING_APPROVAL] }),
         listVendorPOs({ status: [VendorPOStatus.PENDING_APPROVAL] }),
       ])
     : null;
@@ -396,14 +389,14 @@ export default async function DashboardPage() {
   // Orders waiting on the manager's commercial sign-off — the most urgent
   // thing, since nothing moves to the kitchen until it's approved.
   const needApproval = summary.kitchen?.awaitingAdminApproval ?? 0;
-  const needPO = proc?.prApprovedNoPO ?? 0;
+  const needPOApproval = proc?.poPendingApproval ?? 0;
   const needMatch = proc?.billsPendingMatch ?? 0;
   const needPay = proc?.billsPendingPayment ?? 0;
   const needReorder = summary.lowStockCount;
-  const attnCount = needApproval + needPO + needMatch + needPay + needReorder;
+  const attnCount = needApproval + needPOApproval + needMatch + needPay + needReorder;
   const attnBreakdown = [
     needApproval ? `${needApproval} order${needApproval === 1 ? "" : "s"} to approve` : null,
-    needPO ? `${needPO} PO` : null,
+    needPOApproval ? `${needPOApproval} PO${needPOApproval === 1 ? "" : "s"} to approve` : null,
     needMatch ? `${needMatch} ${needMatch === 1 ? "bill" : "bills"} to match` : null,
     needPay ? `${needPay} to pay` : null,
     needReorder ? `${needReorder} to reorder` : null,
@@ -427,7 +420,7 @@ export default async function DashboardPage() {
     { label: "Draft quote", href: "/quotes/new" },
     { label: "Add customer", href: "/customers/new" },
     { label: "Schedule delivery", href: "/deliveries/new" },
-    { label: "Raise stock request", href: "/procurement/purchase-requisitions/new" },
+    { label: "Raise purchase order", href: "/procurement/purchase-orders/new" },
     { label: "Record supplier bill", href: "/procurement/vendor-bills/new" },
     { label: "Add stock receipt", href: "/inventory/receipts/new" },
     { label: "Assign task", href: "/tasks/admin" },
@@ -452,8 +445,8 @@ export default async function DashboardPage() {
         <MoreActionsMenu items={moreActions} />
       </div>
 
-      {/* 3a ─ Approvals: chef-proposed order changes, stock requests, POs —
-          approve/reject inline. Self-hides when nothing is waiting. */}
+      {/* 3a ─ Approvals: chef-proposed order changes + POs — approve/reject
+          inline. Self-hides when nothing is waiting. */}
       {approvals && (
           <ManagerApprovalsBoard
             orderChanges={approvals[0].map((o) => ({
@@ -463,14 +456,7 @@ export default async function DashboardPage() {
               eventDate: o.eventDate.toISOString(),
               note: o.chefSuggestionNotes ?? null,
             }))}
-            stockRequests={approvals[1].map((p) => ({
-              id: p.id,
-              prNo: p.prNo,
-              requestedBy: p.requestedBy?.name ?? "—",
-              orderCode: p.order?.code ?? null,
-              lines: p._count.lines,
-            }))}
-            purchaseOrders={approvals[2].map((po) => ({
+            purchaseOrders={approvals[1].map((po) => ({
               id: po.id,
               poNo: po.poNo,
               vendor: po.vendor.name,

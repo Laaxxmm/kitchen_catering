@@ -14,16 +14,18 @@ export const dynamic = "force-dynamic";
 export default async function NewVendorPOPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reqId?: string }>;
+  searchParams: Promise<{ reqId?: string; lowstock?: string }>;
 }) {
   // The store keeper raises the PO for a shortfall; manager/admin approve it.
   await gateRolePage([Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER]);
-  const { reqId } = await searchParams;
+  const { reqId, lowstock } = await searchParams;
+  const fromLowStock = lowstock === "1";
 
-  const [vendors, ingredients, chefReq] = await Promise.all([
+  const [vendors, ingredients, chefReq, lowStockItems] = await Promise.all([
     listVendors({ active: true }),
     listIngredients({ active: true }),
     reqId ? getChefRequisition(reqId) : Promise.resolve(null),
+    fromLowStock ? listIngredients({ active: true, lowStock: true }) : Promise.resolve([]),
   ]);
 
   // Raised from a chef-requisition shortfall: pre-fill the short items with
@@ -32,7 +34,7 @@ export default async function NewVendorPOPage({
   const reqLines = chefReq
     ? chefReq.lines.filter((l) => l.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT)
     : [];
-  const prefillLines = chefReq
+  let prefillLines = chefReq
     ? reqLines.map((l) => {
         const ing = ingredients.find((i) => i.id === l.ingredientId);
         const shortfall = toDecimal(l.requestedQty).minus(toDecimal(l.issuedQty));
@@ -48,6 +50,21 @@ export default async function NewVendorPOPage({
       })
     : null;
 
+  // Reorder all low-stock ingredients in one PO. Quantity defaults to the
+  // reorder level (top-up target) and the unit price to the average cost —
+  // both editable before the PO is created.
+  if (fromLowStock) {
+    prefillLines = lowStockItems.map((i) => ({
+      ingredientId: i.id,
+      sku: i.sku,
+      description: i.name,
+      unit: i.unit,
+      quantity: (toDecimal(i.reorderLevel).gt(0) ? toDecimal(i.reorderLevel) : toDecimal("1")).toString(),
+      unitPrice: toDecimal(i.avgUnitCost).toString(),
+      gstRatePct: i.gstRatePct.toString(),
+    }));
+  }
+
   // Suggested vendor — left null for now; future work: read each
   // ingredient's preferredVendorId and pick the most common one. For now
   // the form falls back to the first vendor in the dropdown so the user
@@ -62,7 +79,7 @@ export default async function NewVendorPOPage({
     lines: Array<{ ingredientId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
   }) {
     "use server";
-    const r = await createVendorPO({ ...input, prId: null });
+    const r = await createVendorPO(input);
     redirect(`/procurement/purchase-orders/${r.id}`);
   }
 
@@ -74,7 +91,9 @@ export default async function NewVendorPOPage({
         description={
           chefReq
             ? `Filled in from kitchen requisition ${chefReq.requisitionNo}. Confirm the supplier, adjust prices, then create the PO.`
-            : "Pick a vendor, add line items, submit. The total auto-determines the approval tier."
+            : fromLowStock
+              ? "Reordering low-stock items. Confirm the supplier, edit quantities/prices, then create the PO."
+              : "Pick a vendor, add line items, submit. The total auto-determines the approval tier."
         }
       />
 
@@ -85,6 +104,14 @@ export default async function NewVendorPOPage({
           each item&apos;s average cost — <strong>edit them</strong> to match the supplier&apos;s
           quote. The total decides the approval: under ₹5,000 the manager signs off; ₹5,000 and above
           needs admin.
+        </div>
+      )}
+
+      {fromLowStock && (
+        <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">
+          <strong>Reordering {lowStockItems.length} low-stock item{lowStockItems.length === 1 ? "" : "s"}.</strong>{" "}
+          Quantities and prices are pre-filled — <strong>edit them</strong>, pick the vendor, then
+          create the PO. Under ₹5,000 the manager approves; ₹5,000 and above needs admin.
         </div>
       )}
 

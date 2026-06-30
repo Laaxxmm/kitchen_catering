@@ -503,22 +503,6 @@ export const VendorInput = z.object({
 });
 export type VendorInputT = z.infer<typeof VendorInput>;
 
-export const PRLineInput = z.object({
-  id: z.string().optional(),
-  ingredientId: z.string(),
-  requestedQty: decimalString,
-  notes: z.string().max(500).nullable().optional(),
-});
-export type PRLineInputT = z.infer<typeof PRLineInput>;
-
-export const PurchaseRequisitionInput = z.object({
-  orderId: z.string().nullable().optional(),
-  chefRequisitionId: z.string().nullable().optional(),
-  notes: z.string().max(2000).nullable().optional(),
-  lines: z.array(PRLineInput).optional(),
-});
-export type PurchaseRequisitionInputT = z.infer<typeof PurchaseRequisitionInput>;
-
 export const VendorPOLineInput = z.object({
   id: z.string().optional(),
   ingredientId: z.string().nullable().optional(),
@@ -534,10 +518,6 @@ export type VendorPOLineInputT = z.infer<typeof VendorPOLineInput>;
 export const VendorPOCreateInput = z.object({
   vendorId: z.string(),
   orderId: z.string().nullable().optional(),
-  // When the PO is being created from an approved purchase requisition,
-  // pass the PR id so the action can mark the PR ISSUED in the same
-  // transaction and prevent it from being re-issued accidentally.
-  prId: z.string().nullable().optional(),
   placeOfSupplyStateCode: stateCode,
   expectedDate: isoDate.optional(),
   notes: z.string().max(2000).nullable().optional(),

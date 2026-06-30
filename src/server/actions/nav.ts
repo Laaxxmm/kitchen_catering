@@ -4,7 +4,6 @@ import {
   CustomerInvoiceStatus,
   ChefRequisitionStatus,
   OrderStatus,
-  PurchaseRequisitionStatus,
   Role,
   VendorBillStatus,
   VendorPOStatus,
@@ -25,7 +24,7 @@ export async function getNavBadges(): Promise<NavBadges> {
   if (!hasRole(session, [Role.ADMIN, Role.MANAGER])) return {};
   const now = new Date();
 
-  const [pendingOrders, openReqs, ingredients, prPending, poPending, billsMatch, billsPay, openInvoices] =
+  const [pendingOrders, openReqs, ingredients, poPending, billsMatch, billsPay, openInvoices] =
     await Promise.all([
       db.order.count({
         where: {
@@ -42,7 +41,6 @@ export async function getNavBadges(): Promise<NavBadges> {
         where: { status: { in: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED] } },
       }),
       db.ingredient.findMany({ where: { active: true }, select: { onHandQty: true, reorderLevel: true } }),
-      db.purchaseRequisition.count({ where: { status: PurchaseRequisitionStatus.PENDING_APPROVAL } }),
       db.vendorPO.count({ where: { status: VendorPOStatus.PENDING_APPROVAL } }),
       db.vendorBill.count({
         where: { status: { in: [VendorBillStatus.DRAFT, VendorBillStatus.PENDING_MATCH, VendorBillStatus.DISCREPANCY] } },
@@ -57,7 +55,7 @@ export async function getNavBadges(): Promise<NavBadges> {
     ]);
 
   const lowStock = ingredients.filter((i) => toDecimal(i.onHandQty).lte(toDecimal(i.reorderLevel))).length;
-  const buy = prPending + poPending + billsMatch + billsPay;
+  const buy = poPending + billsMatch + billsPay;
   const overdueInvoices = openInvoices.filter((i) => i.dueAt && i.dueAt < now).length;
 
   const badges: NavBadges = {};

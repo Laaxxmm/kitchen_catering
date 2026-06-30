@@ -7,7 +7,6 @@ import {
   GRNStatus,
   OrderStatus,
   ProductionJobStatus,
-  PurchaseRequisitionStatus,
   Role,
   VendorBillStatus,
   VendorPOStatus,
@@ -321,11 +320,9 @@ export async function getDashboardSummary() {
   }
 
   // ─── Procurement queue (admin/manager) ───────────────────────────────
-  // Four groupBys (one per buy-side table) instead of seven separate
-  // counts; sums folded in code.
+  // Three groupBys (one per buy-side table) instead of separate counts;
+  // sums folded in code.
   let procurement: {
-    prPendingApproval: number;
-    prApprovedNoPO: number;
     poPendingApproval: number;
     poSentNotReceived: number;
     grnPendingBill: number;
@@ -333,19 +330,15 @@ export async function getDashboardSummary() {
     billsPendingPayment: number;
   } | null = null;
   if (hasRole(session, [Role.ADMIN, Role.MANAGER])) {
-    const [prRows, poRows, grnRows, billRows] = await Promise.all([
-      db.purchaseRequisition.groupBy({ by: ["status"], _count: { _all: true } }),
+    const [poRows, grnRows, billRows] = await Promise.all([
       db.vendorPO.groupBy({ by: ["status"], _count: { _all: true } }),
       db.gRN.groupBy({ by: ["status"], _count: { _all: true } }),
       db.vendorBill.groupBy({ by: ["status"], _count: { _all: true } }),
     ]);
-    const pr = Object.fromEntries(prRows.map((r) => [r.status, r._count._all]));
     const po = Object.fromEntries(poRows.map((r) => [r.status, r._count._all]));
     const grn = Object.fromEntries(grnRows.map((r) => [r.status, r._count._all]));
     const bill = Object.fromEntries(billRows.map((r) => [r.status, r._count._all]));
     procurement = {
-      prPendingApproval: pr[PurchaseRequisitionStatus.PENDING_APPROVAL] ?? 0,
-      prApprovedNoPO: pr[PurchaseRequisitionStatus.APPROVED] ?? 0,
       poPendingApproval: po[VendorPOStatus.PENDING_APPROVAL] ?? 0,
       poSentNotReceived:
         (po[VendorPOStatus.APPROVED] ?? 0) +
@@ -436,107 +429,6 @@ export async function getDashboardSummary() {
     };
   }
 
-  // ─── Stock-request feed ──────────────────────────────────────────────
-  // Two flavours, both backed by the same query path:
-  //   - storekeeper view: their own recent PRs with current status, so
-  //     they can track requests they raised without digging into the
-  //     procurement section.
-  //   - admin/manager view: PRs awaiting approval, with vendor/lines
-  //     summary, so they can act without a click-through.
-  let storekeeperPRs: Array<{
-    id: string;
-    prNo: string;
-    status: PurchaseRequisitionStatus;
-    createdAt: string;
-    submittedAt: string | null;
-    lineCount: number;
-    grandTotal: string;
-  }> | null = null;
-  if (hasRole(session, [Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER])) {
-    const filter = hasRole(session, [Role.STORE_KEEPER]) ? { requestedById: userId } : {};
-    const rows = await db.purchaseRequisition.findMany({
-      where: {
-        ...filter,
-        status: {
-          in: [
-            PurchaseRequisitionStatus.DRAFT,
-            PurchaseRequisitionStatus.PENDING_APPROVAL,
-            PurchaseRequisitionStatus.APPROVED,
-            PurchaseRequisitionStatus.ISSUED,
-            PurchaseRequisitionStatus.PARTIALLY_ISSUED,
-            PurchaseRequisitionStatus.REJECTED,
-          ],
-        },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 8,
-      select: {
-        id: true,
-        prNo: true,
-        status: true,
-        createdAt: true,
-        submittedAt: true,
-        lines: { select: { requestedQty: true, unitCostSnapshot: true } },
-      },
-    });
-    storekeeperPRs = rows.map((r) => ({
-      id: r.id,
-      prNo: r.prNo,
-      status: r.status,
-      createdAt: r.createdAt.toISOString(),
-      submittedAt: r.submittedAt?.toISOString() ?? null,
-      lineCount: r.lines.length,
-      grandTotal: r.lines
-        .reduce(
-          (s, l) => s.plus(toDecimal(l.requestedQty).times(toDecimal(l.unitCostSnapshot))),
-          new Decimal(0),
-        )
-        .toDecimalPlaces(2)
-        .toString(),
-    }));
-  }
-
-  // Admin / manager: PRs sitting in their approval queue, with extra
-  // context (raised-by, line count, value) for in-line decisioning.
-  let adminPendingPRs: Array<{
-    id: string;
-    prNo: string;
-    raisedBy: string;
-    submittedAt: string;
-    lineCount: number;
-    grandTotal: string;
-  }> | null = null;
-  if (hasRole(session, [Role.ADMIN, Role.MANAGER])) {
-    const rows = await db.purchaseRequisition.findMany({
-      where: { status: PurchaseRequisitionStatus.PENDING_APPROVAL },
-      orderBy: { submittedAt: "asc" },
-      take: 8,
-      select: {
-        id: true,
-        prNo: true,
-        submittedAt: true,
-        requestedBy: { select: { name: true } },
-        lines: { select: { requestedQty: true, unitCostSnapshot: true } },
-      },
-    });
-    adminPendingPRs = rows
-      .filter((r) => r.submittedAt)
-      .map((r) => ({
-        id: r.id,
-        prNo: r.prNo,
-        raisedBy: r.requestedBy?.name ?? "—",
-        submittedAt: r.submittedAt!.toISOString(),
-        lineCount: r.lines.length,
-        grandTotal: r.lines
-          .reduce(
-            (s, l) => s.plus(toDecimal(l.requestedQty).times(toDecimal(l.unitCostSnapshot))),
-            new Decimal(0),
-          )
-          .toDecimalPlaces(2)
-          .toString(),
-      }));
-  }
-
   // ─── Storekeeper queue ───────────────────────────────────────────────
   // The storekeeper's daily worklist:
   //   - openChefRequisitions: chef raised a requisition, still SUBMITTED
@@ -604,8 +496,6 @@ export async function getDashboardSummary() {
     stageStuck,
     procurement,
     storeKeeper,
-    storekeeperPRs,
-    adminPendingPRs,
     driver,
     kitchen,
     production,

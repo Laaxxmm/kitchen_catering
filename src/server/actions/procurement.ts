@@ -5,7 +5,6 @@ import { Decimal } from "decimal.js";
 import {
   GRNStatus,
   PaymentMethod,
-  PurchaseRequisitionStatus,
   Role,
   VendorBillStatus,
   VendorPOStatus,
@@ -95,47 +94,19 @@ export async function createVendorPO(raw: unknown) {
     supplierStateCode: supplierState,
     placeOfSupplyStateCode: input.placeOfSupplyStateCode,
   });
-  // A PO spun out of an approved purchase requisition is already signed
-  // off — the spend was approved at the request stage by the right
-  // authority (Manager < ₹5k, Admin ≥ ₹5k). So it becomes a *direct* PO:
-  // born APPROVED, no second approval gate. A PO created from scratch
-  // (no PR) still runs the tiered approval engine.
-  const fromPR = !!input.prId;
-  const tier = fromPR ? "auto" : "tiered";
-  const now = new Date();
+  // Every PO runs the tiered approval engine: born DRAFT, then on submit it
+  // routes to Manager (< ₹5k) or Admin (≥ ₹5k) for sign-off. The store keeper
+  // raises it for a kitchen shortfall or low-stock reorder; management approves.
+  const tier = "tiered";
 
   const po = await db.$transaction(async (tx) => {
-    // If we're spinning the PO out of an approved PR, validate first so
-    // the same request can't be turned into two parallel POs. We also
-    // grab the PR's approver so the direct PO is attributed to whoever
-    // actually signed off the spend — not the store keeper converting it.
-    let prApprover: { id: string; at: Date } | null = null;
-    if (input.prId) {
-      const pr = await tx.purchaseRequisition.findUnique({
-        where: { id: input.prId },
-        select: { id: true, status: true, prNo: true, approvedById: true, approvedAt: true },
-      });
-      if (!pr) throw new Error("Linked purchase requisition not found");
-      if (pr.status !== PurchaseRequisitionStatus.APPROVED) {
-        throw new AuthorizationError(
-          `Only APPROVED requests can be turned into a PO (request ${pr.prNo} is ${pr.status})`,
-        );
-      }
-      prApprover = { id: pr.approvedById ?? session.user.id, at: pr.approvedAt ?? now };
-    }
-
     const poNo = await nextVendorPONumber(tx);
-    const linkedPRNote = input.prId
-      ? (input.notes ? input.notes + "\n\n" : "") + `Created from purchase requisition ${input.prId}`
-      : input.notes ?? null;
     const created = await tx.vendorPO.create({
       data: {
         poNo,
         vendorId: input.vendorId,
         orderId: input.orderId ?? null,
-        // From an approved request → born APPROVED (direct PO). From
-        // scratch → DRAFT, to run the tiered approval engine.
-        status: fromPR ? VendorPOStatus.APPROVED : VendorPOStatus.DRAFT,
+        status: VendorPOStatus.DRAFT,
         issueDate: new Date(),
         expectedDate: input.expectedDate ? new Date(input.expectedDate) : null,
         placeOfSupplyStateCode: input.placeOfSupplyStateCode,
@@ -143,15 +114,7 @@ export async function createVendorPO(raw: unknown) {
         taxTotal: summary.taxTotal.toString(),
         grandTotal: summary.grandTotal.toString(),
         approvalTier: tier,
-        ...(fromPR && prApprover
-          ? {
-              approvedByUserId: prApprover.id,
-              approvedAt: prApprover.at,
-              managerApprovedById: prApprover.id,
-              managerApprovedAt: prApprover.at,
-            }
-          : {}),
-        notes: linkedPRNote,
+        notes: input.notes ?? null,
         lines: {
           create: input.lines.map((l, idx) => {
             const q = toDecimal(l.quantity);
@@ -182,40 +145,12 @@ export async function createVendorPO(raw: unknown) {
         action: "VENDOR_PO_CREATED",
         entity: "VendorPO",
         entityId: created.id,
-        payloadHash: sha256Json({ poNo, vendorId: input.vendorId, total: summary.grandTotal.toString(), tier, prId: input.prId ?? null }),
+        payloadHash: sha256Json({ poNo, vendorId: input.vendorId, total: summary.grandTotal.toString(), tier }),
       },
     });
 
-    if (input.prId) {
-      await tx.purchaseRequisition.update({
-        where: { id: input.prId },
-        data: { status: PurchaseRequisitionStatus.ISSUED },
-      });
-      await tx.auditLog.create({
-        data: {
-          userId: session.user.id,
-          action: "PR_ISSUED_AS_PO",
-          entity: "PurchaseRequisition",
-          entityId: input.prId,
-          payloadHash: sha256Json({ poId: created.id, poNo }),
-        },
-      });
-    }
-
     return created;
   });
-
-  // Direct PO (from an approved request) is already APPROVED — tell the
-  // store team it's ready to send to the vendor, same as the approval path.
-  if (fromPR) {
-    await notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
-      kind: "PO_APPROVED",
-      title: `PO ${po.poNo} ready to send`,
-      body: "Approved request converted to a purchase order — send to vendor + record GRN when goods arrive.",
-      link: `/procurement/purchase-orders/${po.id}`,
-      dedupeKey: `po-approved:${po.id}`,
-    });
-  }
 
   revalidatePath("/procurement/purchase-orders");
   return { id: po.id, poNo: po.poNo };

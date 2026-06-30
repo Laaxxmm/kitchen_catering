@@ -81,15 +81,6 @@ export async function nextProductionJobNo(tx: Tx): Promise<string> {
 
 // ─── Procurement (Phase 2) ───────────────────────────────────────────────
 
-export async function nextPRNumber(tx: Tx): Promise<string> {
-  const fy = getFyForDate(new Date());
-  const seq = (tx as unknown as { requisitionNumberSequence?: typeof tx.orderCodeSequence })
-    .requisitionNumberSequence;
-  if (!seq) throw new Error("requisitionNumberSequence not present in Prisma client");
-  const n = await nextSequenceValue(tx, seq, fy.storageYear);
-  return `PR-${fy.label}-${String(n).padStart(4, "0")}`;
-}
-
 export async function nextVendorPONumber(tx: Tx): Promise<string> {
   const fy = getFyForDate(new Date());
   const seq = (tx as unknown as { vendorPONumberSequence?: typeof tx.orderCodeSequence })

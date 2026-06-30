@@ -1,21 +1,15 @@
 "use client";
 
-import { useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { FileText, CheckCheck, Wallet, Package, CheckCircle2 } from "lucide-react";
+import { CheckCheck, Wallet, Package, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ik/StatusPill";
 import { MarkPaidModal } from "@/components/ik/finance/MarkPaidModal";
 import { formatINRWhole } from "@/lib/money";
 import { formatIST } from "@/lib/time";
-import { isNextNavigationError } from "@/lib/next-error";
 import { markVendorBillPaid } from "@/server/actions/procurement";
-import { createLowStockRequisition } from "@/server/actions/review";
 
 export interface Worklist {
-  issuePOs: { id: string; prNo: string; lineCount: number; estValue: string }[];
   billsToMatch: { id: string; billNo: string; vendor: string; amount: string }[];
   billsToPay: { id: string; billNo: string; vendor: string; amount: string; due: string | null; overdue: boolean }[];
   lowStock: { id: string; name: string; unit: string; onHand: string; reorderLevel: string; out: boolean }[];
@@ -34,22 +28,6 @@ export function ReviewWorklist({ data }: { data: Worklist }) {
 
   return (
     <div className="grid gap-4">
-      {data.issuePOs.length > 0 && (
-        <GroupCard icon={<FileText size={16} />} label="Issue a purchase order" count={data.issuePOs.length}>
-          {data.issuePOs.map((pr) => (
-            <Row key={pr.id}>
-              <div>
-                <span className="font-mono text-[12.5px] text-brand-700">{pr.prNo}</span>
-                <span className="ml-2 text-[12.5px] text-ik-ink-2">{pr.lineCount} {pr.lineCount === 1 ? "item" : "items"} · est {formatINRWhole(pr.estValue)}</span>
-              </div>
-              <Link href={`/procurement/purchase-orders/new?prId=${pr.id}`} className="ml-auto">
-                <Button size="sm" variant="outline">Issue PO</Button>
-              </Link>
-            </Row>
-          ))}
-        </GroupCard>
-      )}
-
       {data.billsToMatch.length > 0 && (
         <GroupCard icon={<CheckCheck size={16} />} label="3-way match" count={data.billsToMatch.length}>
           {data.billsToMatch.map((b) => (
@@ -123,23 +101,8 @@ function Row({ children }: { children: React.ReactNode }) {
 }
 
 function ReorderCard({ items }: { items: Worklist["lowStock"] }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
   const shown = items.slice(0, 8);
   const extra = items.length - shown.length;
-
-  function createAll() {
-    startTransition(async () => {
-      try {
-        const { id } = await createLowStockRequisition();
-        toast.success("Stock request created");
-        router.push(`/procurement/purchase-requisitions/${id}`);
-      } catch (err) {
-        if (isNextNavigationError(err)) throw err;
-        toast.error(err instanceof Error ? err.message : "Could not create request");
-      }
-    });
-  }
 
   return (
     <section className="rounded-md border border-ik-rule bg-ik-card">
@@ -158,9 +121,9 @@ function ReorderCard({ items }: { items: Worklist["lowStock"] }) {
           {extra > 0 && <span className="self-center text-[11.5px] text-ik-ink-3">+{extra} more</span>}
         </div>
         <div className="mt-3">
-          <Button size="sm" disabled={pending} onClick={createAll}>
-            Create one stock request for all {items.length}
-          </Button>
+          <Link href="/procurement/purchase-orders/new?lowstock=1">
+            <Button size="sm">Raise purchase order for all {items.length}</Button>
+          </Link>
         </div>
       </div>
     </section>

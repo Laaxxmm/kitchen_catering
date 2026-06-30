@@ -25,9 +25,9 @@ type Role =
 // Path-pattern → allowed roles. A request must be allowed by EVERY rule it
 // matches (the loop below redirects on the first matching rule that denies).
 // This lets a specific sub-path rule *further restrict* a broader one — e.g.
-// /procurement allows the store keeper, but the /procurement/purchase-orders
-// rule above it does not, so the store keeper is blocked there while still
-// reaching /procurement/purchase-requisitions. Order specific-before-general.
+// /procurement allows the store keeper, but the /procurement/vendor-bills
+// rule above it does not, so the store keeper is blocked from bills while
+// still reaching /procurement/purchase-orders. Order specific-before-general.
 // ADMIN is implicitly allowed everywhere — the runtime adds it.
 //
 // Anything that isn't matched by any pattern is allowed for any

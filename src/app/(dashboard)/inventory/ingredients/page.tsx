@@ -8,7 +8,6 @@ import { listIngredients } from "@/server/actions/inventory";
 import { toDecimal } from "@/lib/money";
 import { SummaryStrip } from "@/components/ik/StatChips";
 import { StatusPill } from "@/components/ik/StatusPill";
-import { AddAllToStockRequest } from "@/components/ik/AddAllToStockRequest";
 import { InventoryNav } from "../_components/InventoryNav";
 import { ReorderCell } from "./_components/ReorderCell";
 
@@ -97,7 +96,11 @@ export default async function IngredientsPage({
       <section className="mb-5">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Needs reordering</h2>
-          {needs.length > 0 && <AddAllToStockRequest count={needs.length} />}
+          {needs.length > 0 && (
+            <Link href="/procurement/purchase-orders/new?lowstock=1">
+              <Button size="sm">Raise PO for all {needs.length}</Button>
+            </Link>
+          )}
         </div>
         {needs.length === 0 ? (
           <p className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px] text-ik-ink-2">
