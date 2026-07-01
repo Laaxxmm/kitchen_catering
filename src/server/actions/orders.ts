@@ -11,6 +11,8 @@ import {
   OrderStatus,
   ProductionJobStatus,
   Role,
+  TaskPriority,
+  TaskStatus,
 } from "@prisma/client";
 import { db } from "@/server/db";
 import {
@@ -36,7 +38,7 @@ import { toDecimal } from "@/lib/money";
 import { indefineStateCode } from "@/lib/org";
 import { isImmediateChannel, channelWantsFeedback, isEventDeliveryChannel } from "@/lib/order-channels";
 import { getOrCreateHouseCustomerId } from "@/lib/house-customer";
-import { notifyRoles } from "@/server/actions/notifications";
+import { createNotification, notifyRoles } from "@/server/actions/notifications";
 import { formatIST } from "@/lib/time";
 
 const READ_ROLES = [
@@ -904,6 +906,80 @@ export async function cancelOrder(id: string, reason: string) {
 }
 
 /**
+ * Allocate a staff member to collect the customer's feedback for an order.
+ * The manager picks who's responsible; that person gets a tracked task + a
+ * notification, and the assignment is stamped on the order so it's visible.
+ * Only makes sense once the order has been delivered/served.
+ */
+export async function allocateOrderFeedback(orderId: string, assigneeId: string) {
+  const session = await requireRole(ORDER_MANAGER_ROLES);
+  if (!assigneeId) throw new Error("Pick a person to collect the feedback.");
+
+  const [order, assignee] = await Promise.all([
+    db.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, code: true, status: true, customer: { select: { name: true } } },
+    }),
+    db.user.findUnique({ where: { id: assigneeId }, select: { id: true, active: true, name: true } }),
+  ]);
+  if (!order) throw new Error("Order not found");
+  if (!assignee || !assignee.active) throw new Error("Pick an active staff member.");
+  const eligible: OrderStatus[] = [
+    OrderStatus.DELIVERED,
+    OrderStatus.INVOICED,
+    OrderStatus.PAID,
+    OrderStatus.COMPLETED,
+  ];
+  if (!eligible.includes(order.status)) {
+    throw new AuthorizationError("Feedback can be allocated once the order has been delivered/served.");
+  }
+
+  const task = await db.$transaction(async (tx) => {
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        feedbackAssigneeId: assigneeId,
+        feedbackAssignedAt: new Date(),
+        feedbackAssignedById: session.user.id,
+      },
+    });
+    const t = await tx.task.create({
+      data: {
+        title: `Collect feedback — order ${order.code}`,
+        description: `Reach out to ${order.customer.name} and record their feedback on order ${order.code}.`,
+        priority: TaskPriority.NORMAL,
+        status: TaskStatus.ASSIGNED,
+        assignedToId: assigneeId,
+        assignedById: session.user.id,
+        targetDate: new Date(Date.now() + 3 * 24 * 3600 * 1000),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "ORDER_FEEDBACK_ALLOCATED",
+        entity: "Order",
+        entityId: orderId,
+        payloadHash: sha256Json({ assigneeId }),
+      },
+    });
+    return t;
+  });
+
+  await createNotification({
+    userId: assigneeId,
+    kind: "TASK_ASSIGNED",
+    title: `Collect feedback — order ${order.code}`,
+    body: `Get ${order.customer.name}'s feedback and record it.`,
+    link: `/orders/${orderId}`,
+    dedupeKey: `order-feedback:${task.id}`,
+  });
+
+  revalidatePath(`/orders/${orderId}`);
+  return { taskId: task.id };
+}
+
+/**
  * One-tap "Served" for in-house channels (room service / à la carte /
  * management). These aren't driver-delivered — the plate is carried to the
  * room/table — so they skip the whole delivery-scheduling flow. Marking
@@ -1162,6 +1238,7 @@ export async function getOrder(id: string) {
       chefReviewedBy: { select: { name: true } },
       managerChangeReviewedBy: { select: { name: true } },
       kitchenSupervisor: { select: { name: true } },
+      feedbackAssignee: { select: { name: true } },
       chefRequisitions: { select: { id: true, requisitionNo: true, status: true } },
     },
   });

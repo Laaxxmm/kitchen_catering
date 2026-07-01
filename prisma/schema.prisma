@@ -384,6 +384,7 @@ model User {
   ordersManagerChangeReviewed     Order[]                  @relation("OrderManagerChangeReviewedBy")
   ordersAdminReviewed             Order[]                  @relation("OrderAdminReviewedBy")
   ordersEventPrepReady            Order[]                  @relation("OrderEventPrepReadyBy")
+  ordersFeedbackAssigned          Order[]                  @relation("OrderFeedbackAssignee")
   chefRequisitionsCreated         ChefRequisition[]        @relation("ChefRequisitionCreatedBy")
   chefRequisitionsFulfilled       ChefRequisition[]        @relation("ChefRequisitionFulfilledBy")
   prRequested                     PurchaseRequisition[]    @relation("PRRequester")
@@ -867,6 +868,13 @@ model Order {
   feedbackRating    Int?
   feedbackComment   String?
   feedbackSubmittedAt DateTime?
+
+  // Feedback collection allocation — a manager assigns a staff member to
+  // chase the customer's feedback for this order. Null until allocated.
+  feedbackAssigneeId   String?
+  feedbackAssignee     User?     @relation("OrderFeedbackAssignee", fields: [feedbackAssigneeId], references: [id])
+  feedbackAssignedAt   DateTime?
+  feedbackAssignedById String?
 
   // Set when the kitchen taps "Hand to delivery" / "Send to dispatch" — the
   // delivery team has been pinged. The order stays READY until a delivery is

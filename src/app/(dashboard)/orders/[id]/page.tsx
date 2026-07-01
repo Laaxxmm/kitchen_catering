@@ -18,6 +18,7 @@ import {
 } from "@/server/actions/orders";
 import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoices";
 import { listDishes } from "@/server/actions/dishes";
+import { listUsers } from "@/server/actions/users";
 import { isImmediateChannel } from "@/lib/order-channels";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
@@ -25,6 +26,7 @@ import { AdminApprovalBlock } from "./_components/AdminApprovalBlock";
 import { ChefApprovalBlock } from "./_components/ChefApprovalBlock";
 import { ManagerChangeBlock } from "./_components/ManagerChangeBlock";
 import { OrderCostSummary } from "./_components/OrderCostSummary";
+import { FeedbackAllocation } from "./_components/FeedbackAllocation";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +48,15 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const isManager = role === Role.MANAGER || isAdmin;
   const isChef = role === Role.KITCHEN_HEAD || isAdmin;
   const isSales = role === Role.SALES || isAdmin || role === Role.MANAGER;
+
+  // Feedback collection can be allocated once the order has been delivered.
+  const feedbackEligible = (
+    [OrderStatus.DELIVERED, OrderStatus.INVOICED, OrderStatus.PAID, OrderStatus.COMPLETED] as OrderStatus[]
+  ).includes(order.status);
+  const isAssignedForFeedback = order.feedbackAssigneeId === session?.user?.id;
+  const showFeedback = feedbackEligible && (isManager || isAssignedForFeedback);
+  // Only managers get the picker; load the staff list just for them.
+  const feedbackUsers = showFeedback && isManager ? await listUsers({ active: true }) : [];
 
   // Pull any proforma invoice for this order so we can link it.
   const proforma = await db.customerInvoice.findFirst({
@@ -349,6 +360,17 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               and driver are intentionally kept out of the financial view. */}
           {(isAdmin || isManager || role === Role.ACCOUNTS) && (
             <OrderCostSummary orderId={order.id} />
+          )}
+
+          {showFeedback && (
+            <FeedbackAllocation
+              orderId={order.id}
+              canAllocate={isManager}
+              assigneeName={order.feedbackAssignee?.name ?? null}
+              rating={order.feedbackRating}
+              comment={order.feedbackComment}
+              users={feedbackUsers.map((u) => ({ id: u.id, name: u.name }))}
+            />
           )}
 
           {/* Chef requisition block */}
