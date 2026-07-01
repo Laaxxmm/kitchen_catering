@@ -352,14 +352,22 @@ export async function updateOrderDraft(id: string, raw: unknown) {
  * Submit a DRAFT order. Workflow v2: goes straight to the CHEF for
  * feasibility approval (no separate store-approval step). The chef can
  * either confirm or propose changes (which then need manager OK).
+ *
+ * The commercial gate (PENDING_ADMIN_APPROVAL) is the MANAGER's call, so
+ * when a manager or admin takes the order themselves there's nobody left to
+ * approve it to — it skips the gate and goes straight to the chef, with the
+ * approval stamped on the record as the taker's own sign-off.
  */
 export async function submitOrder(id: string) {
   const session = await requireRole(ORDER_SALES_ROLES);
+  // A manager / admin taking the order self-approves the commercial gate.
+  const selfApproves = hasRole(session, [Role.ADMIN, Role.MANAGER]);
 
   // Immediate hotel-service channels (room service / à la carte /
   // management) skip the admin commercial gate and go straight to the
   // chef — these are walk-up / in-stay orders, not pre-booked catering.
   // They're also "now" orders, so we don't enforce a future event date.
+  let skippedGate = false;
   await db.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id },
@@ -378,13 +386,32 @@ export async function submitOrder(id: string) {
     }
     if (!order.deliveryAddress.trim()) throw new Error("Delivery address is required");
 
-    const nextStatus = immediateChannel
-      ? OrderStatus.PENDING_CHEF_APPROVAL // skip admin — straight to chef
-      : OrderStatus.PENDING_ADMIN_APPROVAL; // catering: admin signs off first
+    // Catering orders normally stop at the manager gate first; but if the
+    // taker IS a manager/admin, skip straight to the chef. Immediate channels
+    // always skip it.
+    const managerSelfApproved = selfApproves && !immediateChannel;
+    skippedGate = managerSelfApproved;
+    const nextStatus =
+      immediateChannel || managerSelfApproved
+        ? OrderStatus.PENDING_CHEF_APPROVAL // straight to chef
+        : OrderStatus.PENDING_ADMIN_APPROVAL; // catering: manager signs off first
 
     await tx.order.update({
       where: { id },
-      data: { status: nextStatus, submittedAt: new Date() },
+      data: {
+        status: nextStatus,
+        submittedAt: new Date(),
+        // Record the manager's own sign-off so the order shows as approved
+        // (by them) rather than mysteriously skipping the gate.
+        ...(managerSelfApproved
+          ? {
+              adminReviewedById: session.user.id,
+              adminReviewedAt: new Date(),
+              adminDecision: ApprovalDecision.APPROVED,
+              adminReviewNote: "Auto-approved — order taken by manager/admin",
+            }
+          : {}),
+      },
     });
     await tx.auditLog.create({
       data: {
@@ -395,6 +422,17 @@ export async function submitOrder(id: string) {
         payloadHash: sha256Json({ from: order.status, to: nextStatus }),
       },
     });
+    if (managerSelfApproved) {
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "ORDER_ADMIN_APPROVED",
+          entity: "Order",
+          entityId: id,
+          payloadHash: sha256Json({ auto: true, reason: "taken by manager/admin" }),
+        },
+      });
+    }
   });
 
   revalidatePath(`/orders/${id}`);
@@ -402,8 +440,15 @@ export async function submitOrder(id: string) {
   revalidatePath("/queue/admin-approvals");
   revalidatePath("/queue/chef-approvals");
 
-  // Chime the right desk that a new order just landed.
-  await notifyOrderSubmitted(id);
+  // Chime the right desk. A manager-taken catering order jumps the gate, so
+  // it lands in the chef's queue — send the same "approved, chef review"
+  // heads-up (which also loops in delivery for event channels) rather than
+  // the "awaiting approval" notice.
+  if (skippedGate) {
+    await notifyOrderToChef(id);
+  } else {
+    await notifyOrderSubmitted(id);
+  }
 }
 
 /**
