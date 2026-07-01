@@ -27,6 +27,8 @@ export default async function IngredientsPage({
   ]);
   const role = session?.user?.role as Role | undefined;
   const canEdit = role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER;
+  // Catalogue management (add an ingredient) also includes the chef.
+  const canAdd = canEdit || role === Role.KITCHEN_HEAD;
 
   const rows = ingredients.map((i) => {
     const onHand = toDecimal(i.onHandQty);
@@ -58,9 +60,11 @@ export default async function IngredientsPage({
         title="Ingredients"
         description="What's low and what needs reordering — at a glance. Set each item's reorder level so the alerts mean something."
         actions={
+          canAdd ? (
           <Link href="/inventory/ingredients/new">
             <Button variant="outline">New ingredient</Button>
           </Link>
+          ) : null
         }
       />
       <InventoryNav active="ingredients" role={role} />

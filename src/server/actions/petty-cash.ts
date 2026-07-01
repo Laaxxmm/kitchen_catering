@@ -14,14 +14,16 @@ import { nextPettyCashVoucherNo } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
 
-const ADMIN_OR_MANAGER = [Role.ADMIN, Role.MANAGER];
+// Petty cash is a finance-desk responsibility — the accounts team runs it
+// end to end (create floats, top up, reverse) alongside admin/manager.
+const PETTY_MANAGE = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
 const ANY_WRITE = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.ACCOUNTS];
 const TOPUP_APPROVAL_THRESHOLD = new Decimal(10000); // ₹10k — requires manager+ approval
 
 // ─── Float CRUD ──────────────────────────────────────────────────────────
 
 export async function createPettyCashFloat(raw: unknown) {
-  const session = await requireRole(ADMIN_OR_MANAGER);
+  const session = await requireRole(PETTY_MANAGE);
   const input = PettyCashFloatInput.parse(raw);
   const f = await db.$transaction(async (tx) => {
     const created = await tx.pettyCashFloat.create({
@@ -93,9 +95,10 @@ export async function createPettyCashVoucher(raw: unknown) {
     if (
       float.custodianId !== session.user.id &&
       session.user.role !== Role.ADMIN &&
-      session.user.role !== Role.MANAGER
+      session.user.role !== Role.MANAGER &&
+      session.user.role !== Role.ACCOUNTS
     ) {
-      throw new AuthorizationError("Only the float custodian (or admin/manager) can create vouchers");
+      throw new AuthorizationError("Only the float custodian (or admin/manager/accounts) can create vouchers");
     }
     const amount = toDecimal(input.amount);
     if (amount.lte(0)) throw new Error("Voucher amount must be positive");
@@ -142,7 +145,7 @@ export async function createPettyCashVoucher(raw: unknown) {
 }
 
 export async function reversePettyCashVoucher(id: string, reason: string) {
-  const session = await requireRole(ADMIN_OR_MANAGER);
+  const session = await requireRole(PETTY_MANAGE);
   if (!reason.trim()) throw new Error("Reason required");
   await db.$transaction(async (tx) => {
     const voucher = await tx.pettyCashVoucher.findUnique({
@@ -188,7 +191,7 @@ export async function reversePettyCashVoucher(id: string, reason: string) {
 // ─── Top-up ──────────────────────────────────────────────────────────────
 
 export async function topUpPettyCash(raw: unknown) {
-  const session = await requireRole(ADMIN_OR_MANAGER);
+  const session = await requireRole(PETTY_MANAGE);
   const input = PettyCashTopUpInput.parse(raw);
   const amount = toDecimal(input.amount);
   if (amount.lte(0)) throw new Error("Top-up amount must be positive");

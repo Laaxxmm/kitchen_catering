@@ -14,7 +14,12 @@ import { newMovingAverage } from "@/lib/inventory-cost";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
 
+// Stock movements (receipts / issues) — the store's job (+ management).
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
+// Managing the ingredient CATALOGUE (add / edit / deactivate / reorder level)
+// is broader: the chef (kitchen head) also curates the kitchen's item list,
+// so they can add ingredients — but not record receipts or issue stock.
+const CATALOG_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD];
 // Manual stock corrections (write-offs, opening fixes, post-count tweaks)
 // are admin/manager only. Storekeeper records new stock through receipts
 // — that path has a unit cost + supplier, this one is a free-form quantity
@@ -31,7 +36,7 @@ const READ_ROLES = [
  * actually means something. Accepts any non-negative quantity.
  */
 export async function setReorderLevel(id: string, value: string) {
-  const session = await requireRole(WRITE_ROLES);
+  const session = await requireRole(CATALOG_ROLES);
   const qty = toDecimal(value || "0");
   if (qty.lt(0)) throw new Error("Reorder level can't be negative");
   await db.$transaction(async (tx) => {
@@ -53,7 +58,7 @@ export async function setReorderLevel(id: string, value: string) {
 }
 
 export async function createIngredient(raw: unknown) {
-  const session = await requireRole(WRITE_ROLES);
+  const session = await requireRole(CATALOG_ROLES);
   const input = IngredientInput.parse(raw);
 
   const row = await db.$transaction(async (tx) => {
@@ -93,7 +98,7 @@ export async function createIngredient(raw: unknown) {
 }
 
 export async function updateIngredient(id: string, raw: unknown) {
-  const session = await requireRole(WRITE_ROLES);
+  const session = await requireRole(CATALOG_ROLES);
   const input = IngredientInput.parse(raw);
   await db.$transaction(async (tx) => {
     await tx.ingredient.update({
@@ -124,7 +129,7 @@ export async function updateIngredient(id: string, raw: unknown) {
 }
 
 export async function deactivateIngredient(id: string) {
-  const session = await requireRole(WRITE_ROLES);
+  const session = await requireRole(CATALOG_ROLES);
   await db.$transaction(async (tx) => {
     await tx.ingredient.update({ where: { id }, data: { active: false } });
     await tx.auditLog.create({

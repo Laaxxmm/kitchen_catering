@@ -40,7 +40,8 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   // (Order detail pages are still reachable via the dashboard "Open" links;
   // route access is enforced in middleware, not this nav allowlist.)
   KITCHEN_HEAD: new Set([
-    "dashboard", "tasks", "kitchen", "requisitions",
+    // Inventory: read stock + add ingredients to the kitchen catalogue.
+    "dashboard", "tasks", "kitchen", "requisitions", "inventory",
   ]),
   DELIVERY: new Set([
     // Banquet store: prep event cutlery/arrangements (read + issue to event).
@@ -53,7 +54,7 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   // (see customer-invoices.markCustomerInvoicePaid).
   ACCOUNTS: new Set([
     "dashboard", "tasks", "roomservicebills", "invoices", "payments", "inventory",
-    "purchaseorders", "vendors", "supplierbills",
+    "purchaseorders", "vendors", "supplierbills", "pettycash",
   ]),
   // Housekeeping manager: laser-focused on the hotel-side stockroom.
   // Personal task list + housekeeping module only.

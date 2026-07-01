@@ -12,7 +12,7 @@ import { roleLabel } from "@/lib/role-labels";
 export const dynamic = "force-dynamic";
 
 export default async function NewPettyCashFloatPage() {
-  await gateRolePage([Role.ADMIN, Role.MANAGER]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
   const users = await listUsers({ active: true });
 
   async function create(formData: FormData) {

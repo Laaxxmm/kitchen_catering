@@ -118,9 +118,9 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   { pattern: /^\/invoices\/room-service(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "FNB_SERVICE"] },
   { pattern: /^\/invoices(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "FNB_SERVICE"] },
   { pattern: /^\/payments(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
-  // Petty cash / salary / reports are admin/manager territory. Accounts
-  // is scoped to invoices + vendor bills + stock receipts.
-  { pattern: /^\/petty-cash(\/|$)/, allow: ["ADMIN", "MANAGER"] },
+  // Petty cash is a finance-desk job — admin / manager / accounts. Salary +
+  // reports stay admin/manager.
+  { pattern: /^\/petty-cash(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   { pattern: /^\/salary(\/|$)/, allow: ["ADMIN", "MANAGER"] },
   { pattern: /^\/reports(\/|$)/, allow: ["ADMIN", "MANAGER"] },
 ];
