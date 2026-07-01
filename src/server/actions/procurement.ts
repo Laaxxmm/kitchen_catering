@@ -5,6 +5,7 @@ import { Decimal } from "decimal.js";
 import {
   GRNStatus,
   PaymentMethod,
+  ProcurementType,
   Role,
   VendorBillStatus,
   VendorPOStatus,
@@ -72,6 +73,14 @@ function needsAdminApproval(total: Decimal, tiers: PoApprovalTiers): boolean {
   return total.gte(tiers.adminMin);
 }
 
+/**
+ * Local / online store procurement always needs BOTH manager and admin
+ * sign-off, whatever the value. Standard POs fall back to the value tier.
+ */
+function typeForcesAdmin(type: ProcurementType): boolean {
+  return type === ProcurementType.LOCAL || type === ProcurementType.ONLINE;
+}
+
 // =====================================================================
 // VENDOR PO
 // =====================================================================
@@ -106,6 +115,7 @@ export async function createVendorPO(raw: unknown) {
         poNo,
         vendorId: input.vendorId,
         orderId: input.orderId ?? null,
+        procurementType: (input.procurementType as ProcurementType) ?? ProcurementType.STANDARD,
         status: VendorPOStatus.DRAFT,
         issueDate: new Date(),
         expectedDate: input.expectedDate ? new Date(input.expectedDate) : null,
@@ -164,6 +174,7 @@ export async function submitVendorPO(id: string) {
       select: {
         status: true,
         approvalTier: true,
+        procurementType: true,
         poNo: true,
         grandTotal: true,
         vendor: { select: { name: true } },
@@ -190,22 +201,30 @@ export async function submitVendorPO(id: string) {
         entityId: id,
       },
     });
-    return { status: nextStatus, poNo: po.poNo, grandTotal: po.grandTotal, vendorName: po.vendor.name };
+    return {
+      status: nextStatus,
+      poNo: po.poNo,
+      grandTotal: po.grandTotal,
+      vendorName: po.vendor.name,
+      procurementType: po.procurementType,
+    };
   });
 
   // Ping the approvers — the notification spells out it's a Purchase Order
   // and who needs to sign off, so the manager/admin knows what it's for.
   if (result.status === VendorPOStatus.PENDING_APPROVAL) {
     const tiers = await loadApprovalTiers();
-    const adminRequired = needsAdminApproval(toDecimal(result.grandTotal), tiers);
+    const forcedByType = typeForcesAdmin(result.procurementType);
+    const adminRequired = needsAdminApproval(toDecimal(result.grandTotal), tiers) || forcedByType;
+    const reason = forcedByType
+      ? `${result.procurementType === ProcurementType.LOCAL ? "Local" : "Online"} procurement — Manager + Admin sign-off required.`
+      : adminRequired
+        ? "Over ₹5,000 — Admin sign-off required."
+        : "Under ₹5,000 — Manager can approve.";
     await notifyRoles([Role.MANAGER, Role.ADMIN], {
       kind: "PO_AWAITING_ADMIN",
       title: `Purchase order ${result.poNo} needs approval`,
-      body: `${result.vendorName} · ₹${toDecimal(result.grandTotal).toFixed(2)}. ${
-        adminRequired
-          ? "Over ₹5,000 — Admin sign-off required."
-          : "Under ₹5,000 — Manager can approve."
-      } Open Purchase orders to approve.`,
+      body: `${result.vendorName} · ₹${toDecimal(result.grandTotal).toFixed(2)}. ${reason} Open Purchase orders to approve.`,
       link: `/procurement/purchase-orders/${id}`,
       dedupeKey: `po-awaiting:${id}`,
     });
@@ -240,6 +259,7 @@ export async function approveVendorPO(id: string) {
       select: {
         status: true,
         approvalTier: true,
+        procurementType: true,
         grandTotal: true,
         managerApprovedAt: true,
         managerApprovedById: true,
@@ -251,7 +271,9 @@ export async function approveVendorPO(id: string) {
     }
 
     const tiers = await loadApprovalTiers();
-    const adminRequired = needsAdminApproval(toDecimal(po.grandTotal), tiers);
+    // Local / online procurement always needs admin on top of manager.
+    const adminRequired =
+      needsAdminApproval(toDecimal(po.grandTotal), tiers) || typeForcesAdmin(po.procurementType);
     const now = new Date();
     const role = session.user.role;
 

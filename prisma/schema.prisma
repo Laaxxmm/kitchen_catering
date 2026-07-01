@@ -90,6 +90,15 @@ enum OrderChannel {
   MANAGEMENT
 }
 
+// How a purchase order is being procured. LOCAL + ONLINE always need both
+// Manager AND Admin sign-off (regardless of value); STANDARD uses the value
+// tier (Manager < ₹5k, Admin ≥ ₹5k).
+enum ProcurementType {
+  STANDARD
+  LOCAL
+  ONLINE
+}
+
 // ---------- Order ----------
 
 enum OrderStatus {
@@ -1315,6 +1324,10 @@ model VendorPO {
   //   Legacy values "manager" / "admin" from earlier rollouts are treated
   //   as "tiered" by the engine.
   approvalTier           String         @default("tiered")
+  // How the store is procuring this. LOCAL (buy from a local shop) and ONLINE
+  // (order online) always require BOTH manager AND admin sign-off, regardless
+  // of value. STANDARD keeps the value-tier rule (Manager < ₹5k, Admin ≥ ₹5k).
+  procurementType        ProcurementType @default(STANDARD)
   // Final approver — the person who clicked "Approve" on the LAST step
   // (manager-alone for <threshold POs, admin for ≥threshold).
   approvedByUserId       String?

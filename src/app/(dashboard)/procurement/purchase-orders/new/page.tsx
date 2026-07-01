@@ -73,6 +73,7 @@ export default async function NewVendorPOPage({
 
   async function create(input: {
     vendorId: string;
+    procurementType: "STANDARD" | "LOCAL" | "ONLINE";
     placeOfSupplyStateCode: string;
     expectedDate: string | undefined;
     notes: string | null;

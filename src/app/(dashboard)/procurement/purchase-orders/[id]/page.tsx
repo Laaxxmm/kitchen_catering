@@ -64,6 +64,11 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
       />
       <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
         <StatusBadge status={po.status} />
+        {po.procurementType !== "STANDARD" && (
+          <span className="rounded-full bg-amber-wash px-2 py-0.5 text-[11px] font-medium text-amber-700">
+            {po.procurementType === "LOCAL" ? "Local purchase" : "Online order"} · needs Manager + Admin
+          </span>
+        )}
         {po.status === VendorPOStatus.PENDING_APPROVAL && managerStepDone && (
           <span className="text-[11.5px] font-medium uppercase tracking-wide text-amber-700">
             Manager approved · awaiting Admin

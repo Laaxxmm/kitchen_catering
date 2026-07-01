@@ -28,6 +28,7 @@ interface Props {
   ingredients: Ingredient[];
   onSubmit: (input: {
     vendorId: string;
+    procurementType: "STANDARD" | "LOCAL" | "ONLINE";
     placeOfSupplyStateCode: string;
     expectedDate: string | undefined;
     notes: string | null;
@@ -47,6 +48,7 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [vendorId, setVendorId] = useState(initialVendorId || vendors[0]?.id || "");
+  const [procurementType, setProcurementType] = useState<"STANDARD" | "LOCAL" | "ONLINE">("STANDARD");
   const [placeOfSupplyStateCode, setPos] = useState("29");
   const [expectedDate, setExpectedDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -93,6 +95,7 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
       try {
         await onSubmit({
           vendorId,
+          procurementType,
           placeOfSupplyStateCode,
           expectedDate: expectedDate || undefined,
           notes: notes || null,
@@ -131,6 +134,24 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
             {vendors.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
           </select>
           <p className="text-[11.5px] text-ik-ink-3">Who you&apos;re buying from. Pick the supplier, then set their prices below.</p>
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="procurementType">Procurement type</Label>
+          <select
+            id="procurementType"
+            value={procurementType}
+            onChange={(e) => setProcurementType(e.target.value as "STANDARD" | "LOCAL" | "ONLINE")}
+            className="h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
+          >
+            <option value="STANDARD">Standard (vendor PO)</option>
+            <option value="LOCAL">Local purchase</option>
+            <option value="ONLINE">Online order</option>
+          </select>
+          <p className="text-[11.5px] text-ik-ink-3">
+            {procurementType === "STANDARD"
+              ? "Approval by value: under ₹5,000 the manager signs off; ₹5,000 and above needs admin."
+              : "Local and online purchases always need both manager and admin sign-off."}
+          </p>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="grid gap-1">

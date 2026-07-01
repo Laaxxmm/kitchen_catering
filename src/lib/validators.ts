@@ -518,6 +518,8 @@ export type VendorPOLineInputT = z.infer<typeof VendorPOLineInput>;
 export const VendorPOCreateInput = z.object({
   vendorId: z.string(),
   orderId: z.string().nullable().optional(),
+  // LOCAL / ONLINE procurement always needs both manager + admin sign-off.
+  procurementType: z.enum(["STANDARD", "LOCAL", "ONLINE"]).optional(),
   placeOfSupplyStateCode: stateCode,
   expectedDate: isoDate.optional(),
   notes: z.string().max(2000).nullable().optional(),
