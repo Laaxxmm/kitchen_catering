@@ -15,7 +15,6 @@ import {
   dispatchDelivery,
   confirmDeliveryOTP,
   failDelivery,
-  markEventPrepReady,
 } from "@/server/actions/deliveries";
 
 export interface EventPrepOrder {
@@ -186,22 +185,7 @@ export function DriverWorkScreen({ eventPrep, pickups, deliveries }: Props) {
 }
 
 function EventPrepCard({ order, highlight }: { order: EventPrepOrder; highlight: boolean }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
   const ready = order.prepReadyAt != null;
-
-  function markReady() {
-    startTransition(async () => {
-      try {
-        await markEventPrepReady(order.id);
-        toast.success("Marked ready — kitchen + management notified");
-        router.refresh();
-      } catch (err) {
-        if (isNextNavigationError(err)) throw err;
-        toast.error(err instanceof Error ? err.message : "Could not mark ready");
-      }
-    });
-  }
 
   return (
     <li
@@ -229,9 +213,15 @@ function EventPrepCard({ order, highlight }: { order: EventPrepOrder; highlight:
             ✓ Cutlery + arrangements ready{order.prepReadyBy ? ` · ${order.prepReadyBy}` : ""}
           </span>
         ) : (
-          <Button size="sm" disabled={pending} onClick={markReady}>Mark cutlery &amp; arrangements ready</Button>
+          // Opens the prep page — choose cutlery, issue what's in stock,
+          // request the rest, then mark ready. No longer a one-tap flag.
+          <Link href={`/deliveries/event-prep/${order.id}`}>
+            <Button size="sm">Prepare cutlery &amp; arrangements</Button>
+          </Link>
         )}
-        <Link href={`/orders/${order.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open</Link>
+        <Link href={ready ? `/deliveries/event-prep/${order.id}` : `/orders/${order.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">
+          {ready ? "Issue more" : "Open"}
+        </Link>
       </div>
     </li>
   );

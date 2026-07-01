@@ -259,6 +259,40 @@ export async function listReadyForDispatch() {
 }
 
 /**
+ * Load one event's context for the cutlery-prep page (the F&B team picks the
+ * items, issues what's in stock, requests the rest, then marks ready).
+ */
+export async function getEventPrepOrder(orderId: string) {
+  await requireRole([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
+  const o = await db.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      code: true,
+      channel: true,
+      headcount: true,
+      eventDate: true,
+      deliveryAddress: true,
+      eventPrepReadyAt: true,
+      eventPrepReadyBy: { select: { name: true } },
+      customer: { select: { name: true } },
+    },
+  });
+  if (!o) return null;
+  return {
+    id: o.id,
+    code: o.code,
+    channel: o.channel,
+    headcount: o.headcount,
+    eventDate: o.eventDate.toISOString(),
+    deliveryAddress: o.deliveryAddress,
+    customerName: o.customer.name,
+    prepReadyAt: o.eventPrepReadyAt ? o.eventPrepReadyAt.toISOString() : null,
+    prepReadyBy: o.eventPrepReadyBy?.name ?? null,
+  };
+}
+
+/**
  * The driver's active deliveries (SCHEDULED / DISPATCHED / IN_TRANSIT),
  * with the order context the dashboard board needs. Drivers see only their
  * own; admin/manager see all. Powers the tabbed driver work-screen.
