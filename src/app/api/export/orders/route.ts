@@ -1,10 +1,14 @@
+import { Role } from "@prisma/client";
 import { buildWorkbook, xlsxResponse } from "@/lib/exports/excel";
+import { gateExport } from "@/lib/exports/report-util";
 import { listOrders } from "@/server/actions/orders";
 import { formatIST } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const denied = await gateExport([Role.ADMIN, Role.MANAGER, Role.SALES]);
+  if (denied) return denied;
   const orders = await listOrders({});
   const rows = orders.map((o) => [
     o.code,

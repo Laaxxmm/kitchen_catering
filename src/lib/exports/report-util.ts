@@ -9,9 +9,17 @@ const REPORT_ROLES: Role[] = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
  * null when the caller is allowed.
  */
 export async function gateReport(): Promise<Response | null> {
+  return gateExport(REPORT_ROLES);
+}
+
+/**
+ * Gate an export route to a specific set of roles (for operational lists that
+ * aren't finance-only). Returns a Response to short-circuit, or null when ok.
+ */
+export async function gateExport(roles: Role[]): Promise<Response | null> {
   const session = await auth();
   if (!session?.user) return new Response("Unauthorized", { status: 401 });
-  if (!REPORT_ROLES.includes(session.user.role)) return new Response("Forbidden", { status: 403 });
+  if (!roles.includes(session.user.role)) return new Response("Forbidden", { status: 403 });
   return null;
 }
 

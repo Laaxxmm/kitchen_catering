@@ -78,9 +78,10 @@ export default async function DeliveriesPage({
         }
         actions={
           canSchedule ? (
-            <Link href="/deliveries/new">
-              <Button>Schedule delivery</Button>
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <a href="/api/export/deliveries"><Button variant="outline">Download Excel</Button></a>
+              <Link href="/deliveries/new"><Button>Schedule delivery</Button></Link>
+            </div>
           ) : null
         }
       />

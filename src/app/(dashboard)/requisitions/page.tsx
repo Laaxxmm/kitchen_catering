@@ -80,7 +80,12 @@ export default async function RequisitionsPage({
         eyebrow="Make & deliver"
         title="Requisitions"
         description="Kitchen → store. What needs issuing — soonest events first — is up top."
-        actions={canRaise ? <Link href="/requisitions/new"><Button>New stock request</Button></Link> : null}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <a href="/api/export/requisitions"><Button variant="outline">Download Excel</Button></a>
+            {canRaise && <Link href="/requisitions/new"><Button>New stock request</Button></Link>}
+          </div>
+        }
       />
 
       {/* Clickable KPI tabs — switch the view by status group. The "Needs

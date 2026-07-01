@@ -17,7 +17,12 @@ export default async function VendorPOsPage() {
         eyebrow="Procurement"
         title="Vendor POs"
         description="Approval by value: under ₹5,000 the Manager signs off; ₹5,000 and above needs Admin."
-        actions={<Link href="/procurement/purchase-orders/new"><Button>New PO</Button></Link>}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <a href="/api/export/purchase-orders"><Button variant="outline">Download Excel</Button></a>
+            <Link href="/procurement/purchase-orders/new"><Button>New PO</Button></Link>
+          </div>
+        }
       />
       {pos.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">No POs yet.</p>

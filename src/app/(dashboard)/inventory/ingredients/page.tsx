@@ -60,11 +60,16 @@ export default async function IngredientsPage({
         title="Ingredients"
         description="What's low and what needs reordering — at a glance. Set each item's reorder level so the alerts mean something."
         actions={
-          canAdd ? (
-          <Link href="/inventory/ingredients/new">
-            <Button variant="outline">New ingredient</Button>
-          </Link>
-          ) : null
+          <div className="flex flex-wrap gap-2">
+            {(role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS) && (
+              <a href="/api/export/stock"><Button variant="outline">Download Excel</Button></a>
+            )}
+            {canAdd && (
+              <Link href="/inventory/ingredients/new">
+                <Button variant="outline">New ingredient</Button>
+              </Link>
+            )}
+          </div>
         }
       />
       <InventoryNav active="ingredients" role={role} />

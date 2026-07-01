@@ -156,7 +156,14 @@ export default async function OrdersPage({
         eyebrow="Operations"
         title="Orders"
         description="What needs you is on top; running and finished orders are grouped below."
-        actions={canCreate ? <Link href="/orders/new"><Button>New order</Button></Link> : null}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {(role === Role.ADMIN || role === Role.MANAGER || role === Role.SALES) && (
+              <a href="/api/export/orders"><Button variant="outline">Download Excel</Button></a>
+            )}
+            {canCreate && <Link href="/orders/new"><Button>New order</Button></Link>}
+          </div>
+        }
       />
 
       {/* Clickable KPI tabs — switch the view by status group. Counts are
