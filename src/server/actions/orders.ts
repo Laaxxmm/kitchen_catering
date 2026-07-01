@@ -3,7 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { randomBytes } from "node:crypto";
 import { Decimal } from "decimal.js";
-import { ApprovalDecision, OrderStatus, Role } from "@prisma/client";
+import {
+  ApprovalDecision,
+  ChefRequisitionLineStatus,
+  ChefRequisitionStatus,
+  DeliveryStatus,
+  OrderStatus,
+  ProductionJobStatus,
+  Role,
+} from "@prisma/client";
 import { db } from "@/server/db";
 import {
   AuthorizationError,
@@ -811,19 +819,88 @@ export async function cancelOrder(id: string, reason: string) {
       where: { id },
       data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancellationReason: reason },
     });
+
+    // Close any open downstream work so it drops off the store / kitchen /
+    // delivery queues — otherwise a cancelled order still shows a "hand over
+    // ingredients" request, a production job to cook, or a live delivery.
+    // (Already-issued stock isn't auto-reversed — that's a manual stock
+    // adjustment decision, separate from clearing the work queue.)
+    const openReqs = await tx.chefRequisition.findMany({
+      where: {
+        orderId: id,
+        status: {
+          in: [
+            ChefRequisitionStatus.DRAFT,
+            ChefRequisitionStatus.SUBMITTED,
+            ChefRequisitionStatus.PARTIALLY_ISSUED,
+          ],
+        },
+      },
+      select: { id: true },
+    });
+    if (openReqs.length > 0) {
+      const reqIds = openReqs.map((r) => r.id);
+      await tx.chefRequisitionLine.updateMany({
+        where: {
+          requisitionId: { in: reqIds },
+          status: {
+            in: [
+              ChefRequisitionLineStatus.PENDING,
+              ChefRequisitionLineStatus.PARTIALLY_ISSUED,
+              ChefRequisitionLineStatus.AWAITING_PROCUREMENT,
+            ],
+          },
+        },
+        data: { status: ChefRequisitionLineStatus.CANCELLED },
+      });
+      await tx.chefRequisition.updateMany({
+        where: { id: { in: reqIds } },
+        data: { status: ChefRequisitionStatus.CANCELLED },
+      });
+    }
+
+    await tx.productionJob.updateMany({
+      where: {
+        orderId: id,
+        status: {
+          in: [
+            ProductionJobStatus.QUEUED,
+            ProductionJobStatus.PREP,
+            ProductionJobStatus.COOKING,
+            ProductionJobStatus.READY,
+          ],
+        },
+      },
+      data: { status: ProductionJobStatus.CANCELLED },
+    });
+
+    await tx.delivery.updateMany({
+      where: {
+        orderId: id,
+        status: {
+          in: [DeliveryStatus.SCHEDULED, DeliveryStatus.DISPATCHED, DeliveryStatus.IN_TRANSIT],
+        },
+      },
+      data: { status: DeliveryStatus.CANCELLED },
+    });
+
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
         action: "ORDER_CANCELLED",
         entity: "Order",
         entityId: id,
-        payloadHash: sha256Json({ reason }),
+        payloadHash: sha256Json({ reason, closedRequisitions: openReqs.length }),
       },
     });
   });
 
   revalidatePath(`/orders/${id}`);
   revalidatePath("/orders");
+  revalidatePath("/dashboard");
+  revalidatePath("/requisitions");
+  revalidatePath("/kitchen");
+  revalidatePath("/deliveries");
 }
 
 /**
