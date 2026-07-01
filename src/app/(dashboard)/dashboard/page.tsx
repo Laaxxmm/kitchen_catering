@@ -330,23 +330,11 @@ export default async function DashboardPage() {
     );
   }
 
-  // Other roles fall through to the operational dashboard. Loaded here so
-  // the housekeeping branch above doesn't pay the cost of the heavy query.
-  const summary = await getDashboardSummary();
-
-  // Admin / manager: pull the three approval queues for the inline
-  // approvals board at the top of the operational dashboard.
-  const approvals = isManagerScope
-    ? await Promise.all([
-        listOrders({ status: [OrderStatus.PENDING_ADMIN_APPROVAL] }),
-        listOrders({ status: [OrderStatus.CHANGES_PROPOSED_BY_CHEF] }),
-        listVendorPOs({ status: [VendorPOStatus.PENDING_APPROVAL] }),
-      ])
-    : null;
-
   // F&B Service (merged role): their delivery run + event-cutlery prep in the
   // work-screen, the banquet store below, and quick actions to take an in-house
-  // order or issue to an event. One team, one screen.
+  // order or issue to an event. One team, one screen. Handled BEFORE the heavy
+  // getDashboardSummary() below — they don't use it, and it shouldn't be able
+  // to blank their dashboard if it hiccups.
   if (isDriver) {
     const [eventPrep, pickups, myDeliveries] = await Promise.all([
       listEventPrepQueue(),
@@ -379,7 +367,7 @@ export default async function DashboardPage() {
               roomNumber: o.roomNumber,
               deliveryAddress: o.deliveryAddress,
               customerName: o.customer.name,
-              items: o.items.map((it) => ({ label: it.dish.name, portions: it.portions.toString() })),
+              items: (o.items ?? []).map((it) => ({ label: it.dish?.name ?? "—", portions: it.portions.toString() })),
             }))}
             deliveries={myDeliveries.map((d) => ({
               id: d.id,
@@ -392,7 +380,7 @@ export default async function DashboardPage() {
               roomNumber: d.order.roomNumber,
               deliveryAddress: d.order.deliveryAddress,
               customerName: d.order.customer.name,
-              items: d.order.items.map((it) => ({ label: it.dish.name, portions: it.portions.toString() })),
+              items: (d.order.items ?? []).map((it) => ({ label: it.dish?.name ?? "—", portions: it.portions.toString() })),
             }))}
           />
           <BanquetPanel />
@@ -400,6 +388,20 @@ export default async function DashboardPage() {
       </>
     );
   }
+
+  // Other roles fall through to the operational dashboard. Loaded here so
+  // the housekeeping / F&B branches above don't pay the cost of the heavy query.
+  const summary = await getDashboardSummary();
+
+  // Admin / manager: pull the three approval queues for the inline
+  // approvals board at the top of the operational dashboard.
+  const approvals = isManagerScope
+    ? await Promise.all([
+        listOrders({ status: [OrderStatus.PENDING_ADMIN_APPROVAL] }),
+        listOrders({ status: [OrderStatus.CHANGES_PROPOSED_BY_CHEF] }),
+        listVendorPOs({ status: [VendorPOStatus.PENDING_APPROVAL] }),
+      ])
+    : null;
 
   // ─── Admin / Manager launcher ─────────────────────────────────────────
   const proc = summary.procurement;
