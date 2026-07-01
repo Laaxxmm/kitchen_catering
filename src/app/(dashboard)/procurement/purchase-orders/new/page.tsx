@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { ChefRequisitionLineStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
-import { listVendors } from "@/server/actions/vendors";
+import { createVendor, listVendors } from "@/server/actions/vendors";
 import { listIngredients } from "@/server/actions/inventory";
 import { createVendorPO } from "@/server/actions/procurement";
 import { getChefRequisition } from "@/server/actions/chef-requisitions";
@@ -84,6 +84,24 @@ export default async function NewVendorPOPage({
     redirect(`/procurement/purchase-orders/${r.id}`);
   }
 
+  // Inline vendor creator — add a brand-new supplier from the PO form (e.g.
+  // for a one-off online order) without leaving the page.
+  async function quickAddVendor(v: { name: string; stateCode: string }) {
+    "use server";
+    const created = await createVendor({
+      name: v.name,
+      stateCode: v.stateCode,
+      gstin: null,
+      pan: null,
+      contactName: null,
+      phone: null,
+      email: null,
+      address: null,
+      notes: null,
+    });
+    return { id: created.id, name: v.name, code: created.code, stateCode: v.stateCode };
+  }
+
   return (
     <>
       <PageHeader
@@ -120,6 +138,7 @@ export default async function NewVendorPOPage({
         vendors={vendors.map((v) => ({ id: v.id, name: v.name, code: v.code, stateCode: v.stateCode }))}
         ingredients={ingredients.map((i) => ({ id: i.id, sku: i.sku, name: i.name, unit: i.unit, gstRatePct: i.gstRatePct.toString() }))}
         onSubmit={create}
+        onQuickAddVendor={quickAddVendor}
         initialVendorId={suggestedVendorId}
         initialLines={prefillLines}
       />

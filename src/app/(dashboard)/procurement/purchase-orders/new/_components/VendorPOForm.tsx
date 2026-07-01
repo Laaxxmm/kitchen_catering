@@ -38,17 +38,44 @@ interface Props {
   // come straight from the request so the user only has to fill in prices.
   initialVendorId?: string | null;
   initialLines?: DraftLine[] | null;
+  // Inline vendor creator — lets the store add a brand-new supplier (e.g. for
+  // a one-off online order) without leaving the PO form.
+  onQuickAddVendor?: (input: { name: string; stateCode: string }) => Promise<{ id: string; name: string; code: string; stateCode: string }>;
 }
 
 function emptyLine(): DraftLine {
   return { ingredientId: "", sku: "", description: "", unit: "kg", quantity: "1", unitPrice: "0", gstRatePct: "5" };
 }
 
-export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, initialLines }: Props) {
+export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, initialLines, onQuickAddVendor }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+  const [vendorOptions, setVendorOptions] = useState(vendors);
   const [vendorId, setVendorId] = useState(initialVendorId || vendors[0]?.id || "");
   const [procurementType, setProcurementType] = useState<"STANDARD" | "LOCAL" | "ONLINE">("STANDARD");
+  // Inline "add vendor" toggle.
+  const [addingVendor, setAddingVendor] = useState(false);
+  const [newVendorName, setNewVendorName] = useState("");
+  const [newVendorState, setNewVendorState] = useState("29");
+  const [addingVendorBusy, setAddingVendorBusy] = useState(false);
+
+  async function saveNewVendor() {
+    if (!onQuickAddVendor) return;
+    if (newVendorName.trim().length < 2) return toast.error("Enter the vendor name");
+    setAddingVendorBusy(true);
+    try {
+      const v = await onQuickAddVendor({ name: newVendorName.trim(), stateCode: newVendorState.trim() || "29" });
+      setVendorOptions((prev) => [{ id: v.id, name: v.name, code: v.code, stateCode: v.stateCode }, ...prev]);
+      setVendorId(v.id);
+      setAddingVendor(false);
+      setNewVendorName("");
+      toast.success(`Vendor ${v.name} added`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not add vendor");
+    } finally {
+      setAddingVendorBusy(false);
+    }
+  }
   const [placeOfSupplyStateCode, setPos] = useState("29");
   const [expectedDate, setExpectedDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -131,9 +158,32 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
             onChange={(e) => setVendorId(e.target.value)}
             className="h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
           >
-            {vendors.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
+            {vendorOptions.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
           </select>
-          <p className="text-[11.5px] text-ik-ink-3">Who you&apos;re buying from. Pick the supplier, then set their prices below.</p>
+          <div className="flex items-center justify-between">
+            <p className="text-[11.5px] text-ik-ink-3">Who you&apos;re buying from. Pick the supplier, then set their prices below.</p>
+            {onQuickAddVendor && !addingVendor && (
+              <button type="button" className="text-[11.5px] text-brand hover:underline" onClick={() => setAddingVendor(true)}>
+                + Add new vendor
+              </button>
+            )}
+          </div>
+          {onQuickAddVendor && addingVendor && (
+            <div className="grid gap-2 rounded-md border border-brand-200 bg-brand-50 p-3 sm:grid-cols-[1fr,120px,auto]">
+              <div className="grid gap-1">
+                <Label htmlFor="newVendorName">New vendor name</Label>
+                <Input id="newVendorName" value={newVendorName} onChange={(e) => setNewVendorName(e.target.value)} placeholder="e.g. Amazon Business" />
+              </div>
+              <div className="grid gap-1">
+                <Label htmlFor="newVendorState">State code</Label>
+                <Input id="newVendorState" maxLength={2} value={newVendorState} onChange={(e) => setNewVendorState(e.target.value)} />
+              </div>
+              <div className="flex items-end gap-2">
+                <Button type="button" size="sm" disabled={addingVendorBusy} onClick={saveNewVendor}>{addingVendorBusy ? "Adding…" : "Add"}</Button>
+                <Button type="button" size="sm" variant="ghost" disabled={addingVendorBusy} onClick={() => setAddingVendor(false)}>Cancel</Button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="grid gap-1">
           <Label htmlFor="procurementType">Procurement type</Label>
