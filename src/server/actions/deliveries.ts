@@ -242,10 +242,15 @@ export async function listReadyForDispatch() {
       id: true,
       code: true,
       channel: true,
+      headcount: true,
       eventDate: true,
       roomNumber: true,
       deliveryAddress: true,
       customer: { select: { name: true } },
+      items: {
+        orderBy: { sortOrder: "asc" },
+        select: { portions: true, dish: { select: { name: true } } },
+      },
     },
     orderBy: { eventDate: "asc" },
     take: 50,
@@ -275,10 +280,15 @@ export async function listMyActiveDeliveries() {
         select: {
           code: true,
           channel: true,
+          headcount: true,
           roomNumber: true,
           eventDate: true,
           deliveryAddress: true,
           customer: { select: { name: true } },
+          items: {
+            orderBy: { sortOrder: "asc" },
+            select: { portions: true, dish: { select: { name: true } } },
+          },
         },
       },
     },
@@ -697,7 +707,14 @@ export async function getDelivery(id: string) {
       order: {
         select: {
           id: true, code: true, deliveryAddress: true, eventDate: true,
+          channel: true, mealType: true, headcount: true, notes: true,
+          roomNumber: true, tableNumber: true,
+          deliveryWindowStart: true, deliveryWindowEnd: true,
           customer: { select: { name: true, phone: true, contactName: true } },
+          items: {
+            orderBy: { sortOrder: "asc" },
+            select: { portions: true, dish: { select: { name: true, unit: true } } },
+          },
         },
       },
       driver: { select: { id: true, name: true } },

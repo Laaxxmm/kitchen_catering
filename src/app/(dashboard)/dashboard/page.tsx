@@ -372,10 +372,12 @@ export default async function DashboardPage() {
               id: o.id,
               code: o.code,
               channel: o.channel,
+              headcount: o.headcount,
               eventDate: o.eventDate.toISOString(),
               roomNumber: o.roomNumber,
               deliveryAddress: o.deliveryAddress,
               customerName: o.customer.name,
+              items: o.items.map((it) => ({ label: it.dish.name, portions: it.portions.toString() })),
             }))}
             deliveries={myDeliveries.map((d) => ({
               id: d.id,
@@ -384,9 +386,11 @@ export default async function DashboardPage() {
               scheduledAt: d.scheduledAt.toISOString(),
               orderCode: d.order.code,
               channel: d.order.channel,
+              headcount: d.order.headcount,
               roomNumber: d.order.roomNumber,
               deliveryAddress: d.order.deliveryAddress,
               customerName: d.order.customer.name,
+              items: d.order.items.map((it) => ({ label: it.dish.name, portions: it.portions.toString() })),
             }))}
           />
           <BanquetPanel />

@@ -95,6 +95,51 @@ export default async function DeliveryDetailPage({ params }: { params: Promise<{
             </div>
           )}
 
+          {/* Full order details — what's being delivered, for how many, when. */}
+          <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-medium text-[14px] text-ik-ink">Order {delivery.order.code}</h3>
+              <span className="text-[12px] text-ik-ink-2">
+                {delivery.order.channel} · {delivery.order.mealType} · {delivery.order.headcount} pax
+              </span>
+            </div>
+            <div className="mb-3 grid gap-1 text-[12.5px] text-ik-ink-2">
+              <div>
+                <span className="text-ik-ink-3">Event:</span>{" "}
+                <span className="font-mono">{formatIST(delivery.order.eventDate, "EEE d MMM yyyy")}</span>
+                {" · "}
+                <span className="font-mono">
+                  {formatIST(delivery.order.deliveryWindowStart, "HH:mm")}–{formatIST(delivery.order.deliveryWindowEnd, "HH:mm")}
+                </span>
+              </div>
+              {(delivery.order.roomNumber || delivery.order.tableNumber) && (
+                <div>
+                  {delivery.order.roomNumber && <>Room {delivery.order.roomNumber} </>}
+                  {delivery.order.tableNumber && <>Table {delivery.order.tableNumber}</>}
+                </div>
+              )}
+              {delivery.order.notes && <div className="text-ik-ink-2">Note: {delivery.order.notes}</div>}
+            </div>
+            <table className="w-full text-[12.5px]">
+              <thead>
+                <tr className="border-b border-ik-rule text-left text-ik-ink-3">
+                  <th className="py-1 font-medium">Item</th>
+                  <th className="py-1 text-right font-medium">Portions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {delivery.order.items.map((it, i) => (
+                  <tr key={i} className="border-b border-ik-rule last:border-b-0">
+                    <td className="py-1.5">{it.dish.name}</td>
+                    <td className="py-1.5 text-right font-mono">
+                      {it.portions.toString()} <span className="text-ik-ink-3">{it.dish.unit}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
           {delivery.attempts.length > 0 && (
             <div className="rounded-md border border-ik-rule bg-ik-card p-4">
               <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Attempts</h3>

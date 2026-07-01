@@ -30,14 +30,21 @@ export interface EventPrepOrder {
   prepReadyBy: string | null;
 }
 
+export interface OrderLine {
+  label: string;
+  portions: string;
+}
+
 export interface PickupOrder {
   id: string;
   code: string;
   channel: OrderChannel;
+  headcount: number;
   eventDate: string;
   roomNumber: string | null;
   deliveryAddress: string;
   customerName: string;
+  items: OrderLine[];
 }
 
 export interface DriverDelivery {
@@ -47,9 +54,11 @@ export interface DriverDelivery {
   scheduledAt: string;
   orderCode: string;
   channel: OrderChannel;
+  headcount: number;
   roomNumber: string | null;
   deliveryAddress: string;
   customerName: string;
+  items: OrderLine[];
 }
 
 interface Props {
@@ -228,6 +237,26 @@ function EventPrepCard({ order, highlight }: { order: EventPrepOrder; highlight:
   );
 }
 
+/** Compact "what's in this order" list shown on the driver cards. */
+function OrderItems({ items, headcount }: { items: OrderLine[]; headcount: number }) {
+  if (items.length === 0) return null;
+  return (
+    <details className="mt-2 rounded-md bg-ik-paper-alt px-2.5 py-1.5 text-[12px]">
+      <summary className="cursor-pointer text-ik-ink-2">
+        {items.length} item{items.length === 1 ? "" : "s"} · {headcount} pax
+      </summary>
+      <ul className="mt-1.5 grid gap-0.5">
+        {items.map((it, i) => (
+          <li key={i} className="flex justify-between gap-2">
+            <span className="text-ik-ink">{it.label}</span>
+            <span className="font-mono text-ik-ink-2">{it.portions}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 function Empty({ label }: { label: string }) {
   return (
     <div className="rounded-md border border-ik-rule bg-ik-card p-5 text-[13px] text-ik-ink-2">
@@ -302,6 +331,7 @@ function PickupCard({ order, highlight }: { order: PickupOrder; highlight: boole
       />
       <div className="mt-1 text-[13px] text-ik-ink"><strong>{order.customerName}</strong></div>
       <div className="mt-0.5 text-[12.5px] text-ik-ink-2">{order.deliveryAddress}</div>
+      <OrderItems items={order.items} headcount={order.headcount} />
       <div className="mt-2.5 flex items-center gap-2">
         <Button size="sm" disabled={pending} onClick={take}>Take delivery</Button>
         <Link href={`/orders/${order.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open</Link>
@@ -347,6 +377,7 @@ function DeliveryCard({ delivery, highlight }: { delivery: DriverDelivery; highl
         <span className="text-ik-ink-3"> · {delivery.deliveryNo}</span>
       </div>
       <div className="mt-0.5 text-[12.5px] text-ik-ink-2">{delivery.deliveryAddress}</div>
+      <OrderItems items={delivery.items} headcount={delivery.headcount} />
 
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         {isScheduled ? (
