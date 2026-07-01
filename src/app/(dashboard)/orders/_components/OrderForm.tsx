@@ -93,6 +93,10 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
   // skip event date, delivery address/window and place of supply — the
   // server defaults them (now / the room / hotel's own state).
   const immediate = isImmediateChannel(channel);
+  // Package channels (ODC / packet / take-away) are priced as one lump sum,
+  // so the per-dish rate columns (unit price, discount, GST, line total) are
+  // hidden — the dishes are just sub-heads and the "Package total" is the value.
+  const isPackage = channel === OrderChannel.ODC || channel === OrderChannel.PACKET;
   const [lines, setLines] = useState<DraftLine[]>(() => {
     if (defaults?.items && defaults.items.length > 0) {
       return defaults.items.map((it) => ({
@@ -189,8 +193,6 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
     ) {
       return toast.error("Room service and à la carte orders need a room number");
     }
-    const isPackage =
-      channel === OrderChannel.ODC || channel === OrderChannel.PACKET;
     if (isPackage && (!packageTotal.trim() || Number(packageTotal) <= 0)) {
       return toast.error("Enter the package total for this bulk order");
     }
@@ -409,10 +411,14 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
               <tr>
                 <th className="py-1 pr-2">Dish</th>
                 <th className="w-20 py-1 pr-2 text-right">Portions</th>
-                <th className="w-24 py-1 pr-2 text-right">Unit ₹</th>
-                <th className="w-16 py-1 pr-2 text-right">Disc %</th>
-                <th className="w-16 py-1 pr-2 text-right">GST %</th>
-                <th className="w-32 py-1 pr-2 text-right">Total ₹</th>
+                {!isPackage && (
+                  <>
+                    <th className="w-24 py-1 pr-2 text-right">Unit ₹</th>
+                    <th className="w-16 py-1 pr-2 text-right">Disc %</th>
+                    <th className="w-16 py-1 pr-2 text-right">GST %</th>
+                    <th className="w-32 py-1 pr-2 text-right">Total ₹</th>
+                  </>
+                )}
                 <th className="w-10"></th>
               </tr>
             </thead>
@@ -449,37 +455,41 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
                         }}
                       />
                     </td>
-                    <td className="py-1 pr-2">
-                      <input
-                        className={
-                          "h-8 w-full rounded border bg-ik-card px-1 text-right font-mono " +
-                          (l.dishId && Number(l.unitPrice || "0") <= 0 ? "border-amber" : "border-ik-rule")
-                        }
-                        type="number" step="0.01" min="0"
-                        value={l.unitPrice}
-                        onChange={(e) => setLine(idx, { unitPrice: e.target.value })}
-                      />
-                      {l.dishId && Number(l.unitPrice || "0") <= 0 && (
-                        <div className="mt-0.5 text-[10px] text-amber-700">no price set</div>
-                      )}
-                    </td>
-                    <td className="py-1 pr-2">
-                      <input
-                        className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono"
-                        type="number" step="0.01" min="0"
-                        value={l.discountPct}
-                        onChange={(e) => setLine(idx, { discountPct: e.target.value })}
-                      />
-                    </td>
-                    <td className="py-1 pr-2">
-                      <input
-                        className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono"
-                        type="number" step="0.01" min="0"
-                        value={l.gstRatePct}
-                        onChange={(e) => setLine(idx, { gstRatePct: e.target.value })}
-                      />
-                    </td>
-                    <td className="py-1 pr-2 text-right font-mono">{total.toString()}</td>
+                    {!isPackage && (
+                      <>
+                        <td className="py-1 pr-2">
+                          <input
+                            className={
+                              "h-8 w-full rounded border bg-ik-card px-1 text-right font-mono " +
+                              (l.dishId && Number(l.unitPrice || "0") <= 0 ? "border-amber" : "border-ik-rule")
+                            }
+                            type="number" step="0.01" min="0"
+                            value={l.unitPrice}
+                            onChange={(e) => setLine(idx, { unitPrice: e.target.value })}
+                          />
+                          {l.dishId && Number(l.unitPrice || "0") <= 0 && (
+                            <div className="mt-0.5 text-[10px] text-amber-700">no price set</div>
+                          )}
+                        </td>
+                        <td className="py-1 pr-2">
+                          <input
+                            className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono"
+                            type="number" step="0.01" min="0"
+                            value={l.discountPct}
+                            onChange={(e) => setLine(idx, { discountPct: e.target.value })}
+                          />
+                        </td>
+                        <td className="py-1 pr-2">
+                          <input
+                            className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono"
+                            type="number" step="0.01" min="0"
+                            value={l.gstRatePct}
+                            onChange={(e) => setLine(idx, { gstRatePct: e.target.value })}
+                          />
+                        </td>
+                        <td className="py-1 pr-2 text-right font-mono">{total.toString()}</td>
+                      </>
+                    )}
                     <td className="py-1 text-right">
                       <button type="button" onClick={() => removeLine(idx)} className="text-alert">×</button>
                     </td>
@@ -488,14 +498,13 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
               })}
             </tbody>
             <tfoot className="font-mono text-ik-ink">
-              {channel === OrderChannel.ODC || channel === OrderChannel.PACKET ? (
+              {isPackage ? (
                 // Bulk package — the lump-sum entered above is the contract
-                // value; per-dish rates aren't summed.
+                // value; per-dish rates aren't summed. Columns here are just
+                // Dish · Portions · (remove), so the label sits under Dish.
                 <tr className="font-medium">
-                  <td colSpan={5} className="py-1 pr-2 text-right">
-                    Package total
-                  </td>
-                  <td className="py-1 pr-2 text-right">
+                  <td className="py-1 pr-2 text-right text-ik-ink-3">Package total</td>
+                  <td className="py-1 pr-2 text-right font-mono">
                     ₹{packageTotal ? Number(packageTotal).toFixed(2) : "0.00"}
                   </td>
                   <td></td>
