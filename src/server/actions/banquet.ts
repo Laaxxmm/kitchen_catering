@@ -1,12 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Prisma, Role, TaskPriority, TaskStatus } from "@prisma/client";
+import { OrderChannel, Prisma, Role, TaskPriority, TaskStatus } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { istToUtc } from "@/lib/time";
 import { sha256Json } from "@/lib/audit";
+import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import { notifyRoles } from "@/server/actions/notifications";
 import {
   BanquetItemInput,
@@ -406,6 +407,30 @@ export async function banquetSummary() {
     issuesLastWeek: recentIssues,
     topItemsThisWeek: topConsumed.slice(0, 5),
   };
+}
+
+// ─── Events (for the issue-to-event dropdown) ────────────────────────────
+// Off-site catering orders (banquet / ODC / packed) still in flight — the F&B
+// team picks one when issuing cutlery/disposables so the consumption links to
+// the event's order (and its P&L).
+export async function listBanquetEvents() {
+  await requireRole(READ_ROLES);
+  const rows = await db.order.findMany({
+    where: {
+      channel: { in: [OrderChannel.BANQUET, OrderChannel.ODC, OrderChannel.PACKET] },
+      status: { notIn: INACTIVE_ORDER_STATUSES },
+    },
+    select: { id: true, code: true, channel: true, eventDate: true, customer: { select: { name: true } } },
+    orderBy: { eventDate: "asc" },
+    take: 100,
+  });
+  return rows.map((o) => ({
+    id: o.id,
+    code: o.code,
+    channel: o.channel,
+    eventDate: o.eventDate.toISOString(),
+    customerName: o.customer.name,
+  }));
 }
 
 // ─── Request goods from the store ────────────────────────────────────────

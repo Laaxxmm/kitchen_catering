@@ -3,14 +3,17 @@ import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { gateRolePage } from "@/server/rbac";
-import { listBanquetItems } from "@/server/actions/banquet";
+import { listBanquetItems, listBanquetEvents } from "@/server/actions/banquet";
 import { IssueForm } from "./_components/IssueForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewBanquetIssuePage() {
   await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
-  const items = await listBanquetItems({ activeOnly: true });
+  const [items, events] = await Promise.all([
+    listBanquetItems({ activeOnly: true }),
+    listBanquetEvents(),
+  ]);
 
   return (
     <>
@@ -34,6 +37,7 @@ export default async function NewBanquetIssuePage() {
             category: i.category,
             currentStock: i.currentStock.toString(),
           }))}
+          events={events}
         />
       )}
     </>
