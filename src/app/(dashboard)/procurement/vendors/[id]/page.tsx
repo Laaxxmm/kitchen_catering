@@ -3,15 +3,17 @@ import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { deactivateVendor, getVendor, updateVendor } from "@/server/actions/vendors";
+import { listVendorPOs } from "@/server/actions/procurement";
 import { VendorForm } from "../_components/VendorForm";
 import { VendorHistoryPanel } from "./_components/VendorHistoryPanel";
+import { VendorOrders } from "./_components/VendorOrders";
 import type { VendorInputT } from "@/lib/validators";
 
 export const dynamic = "force-dynamic";
 
 export default async function VendorDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const vendor = await getVendor(id);
+  const [vendor, pos] = await Promise.all([getVendor(id), listVendorPOs({ vendorId: id })]);
   if (!vendor) notFound();
 
   async function update(input: VendorInputT) {
@@ -48,6 +50,16 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
         }}
         onSubmit={update}
         submitLabel="Save changes"
+      />
+      <VendorOrders
+        pos={pos.map((p) => ({
+          id: p.id,
+          poNo: p.poNo,
+          issueDate: p.issueDate.toISOString(),
+          status: p.status,
+          grandTotal: p.grandTotal.toString(),
+          orderCode: p.order?.code ?? null,
+        }))}
       />
       <VendorHistoryPanel vendorId={id} />
     </>
