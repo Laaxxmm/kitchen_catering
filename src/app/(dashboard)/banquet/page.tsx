@@ -22,6 +22,7 @@ export default async function BanquetLandingPage() {
           <Link href="/banquet/issues/new"><Button>Issue to event</Button></Link>
           <Link href="/banquet/receipts/new"><Button variant="outline">Record receipt</Button></Link>
           <Link href="/banquet/adjust"><Button variant="outline">Adjust stock</Button></Link>
+          <Link href="/banquet/request"><Button variant="outline">Request from store</Button></Link>
         </div>
       }
       tabs={[

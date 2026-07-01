@@ -361,6 +361,7 @@ export default async function DashboardPage() {
             <div className="flex flex-wrap gap-2">
               <Link href="/orders/new"><Button>Take order</Button></Link>
               <Link href="/banquet/issues/new"><Button variant="outline">Issue to event</Button></Link>
+              <Link href="/banquet/request"><Button variant="outline">Request from store</Button></Link>
             </div>
           }
         />

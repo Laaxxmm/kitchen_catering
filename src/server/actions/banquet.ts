@@ -1,11 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Prisma, Role } from "@prisma/client";
+import { Prisma, Role, TaskPriority, TaskStatus } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { istToUtc } from "@/lib/time";
+import { sha256Json } from "@/lib/audit";
+import { notifyRoles } from "@/server/actions/notifications";
 import {
   BanquetItemInput,
   BanquetIssueInput,
@@ -404,4 +406,76 @@ export async function banquetSummary() {
     issuesLastWeek: recentIssues,
     topItemsThisWeek: topConsumed.slice(0, 5),
   };
+}
+
+// ─── Request goods from the store ────────────────────────────────────────
+// The F&B Service team doesn't buy from vendors themselves — when they need
+// something the banquet store doesn't stock, they ask the STORE KEEPER to
+// raise the PO (and GRN on receipt). This routes that ask as a tracked task
+// assigned to the store keeper, plus a notification with a "raise a PO" link.
+export async function requestGoodsFromStore(input: { summary: string; note?: string }) {
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
+  const summary = input.summary?.trim();
+  if (!summary || summary.length < 3) throw new Error("Describe what you need (min 3 characters).");
+
+  // Route to an active store keeper; fall back to a manager/admin if the site
+  // hasn't set one up, so the request is never dropped.
+  const storeKeeper = await db.user.findFirst({
+    where: { active: true, role: Role.STORE_KEEPER },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  const fallback = storeKeeper
+    ? null
+    : await db.user.findFirst({
+        where: { active: true, role: { in: [Role.MANAGER, Role.ADMIN] } },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+  const assigneeId = storeKeeper?.id ?? fallback?.id;
+  if (!assigneeId) throw new Error("No store keeper or manager is set up to receive the request.");
+
+  const task = await db.$transaction(async (tx) => {
+    const t = await tx.task.create({
+      data: {
+        title: `Procure for F&B: ${summary.slice(0, 80)}`,
+        description: [
+          `Requested by ${session.user.name ?? "F&B Service"}.`,
+          input.note?.trim() ? input.note.trim() : null,
+          "Raise a purchase order for these goods (and record the GRN when they arrive).",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        priority: TaskPriority.HIGH,
+        status: TaskStatus.ASSIGNED,
+        assignedToId: assigneeId,
+        assignedById: session.user.id,
+        // No explicit due date on a supply request — default to 2 days out so
+        // it surfaces with a sensible target the store keeper can adjust.
+        targetDate: new Date(Date.now() + 2 * 24 * 3600 * 1000),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "FNB_STORE_REQUEST_RAISED",
+        entity: "Task",
+        entityId: t.id,
+        payloadHash: sha256Json({ summary }),
+      },
+    });
+    return t;
+  });
+
+  await notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+    kind: "TASK_ASSIGNED",
+    title: "F&B needs goods procured",
+    body: `${summary}. Raise a purchase order (and GRN on receipt).`,
+    link: "/procurement/purchase-orders/new",
+    dedupeKey: `fnb-store-request:${task.id}`,
+  });
+
+  revalidatePath("/banquet");
+  revalidatePath("/tasks");
+  return { id: task.id };
 }
