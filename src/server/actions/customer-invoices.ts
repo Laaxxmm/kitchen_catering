@@ -67,10 +67,16 @@ export async function createCustomerInvoiceFromOrder(orderId: string) {
     if (order.status !== OrderStatus.DELIVERED) {
       throw new AuthorizationError(`Cannot invoice order in status ${order.status}`);
     }
-    // Guardrail: one non-cancelled invoice per order. A cancelled one
-    // doesn't block re-invoicing. (Seen live: ORD → two invoices.)
+    // Guardrail: one non-cancelled TAX invoice per order. The auto-generated
+    // PROFORMA (kind PROFORMA) is informational and must NOT block creating
+    // the real tax invoice — only an existing ORDER-kind invoice does. A
+    // cancelled one doesn't block re-invoicing. (Seen live: ORD → two invoices.)
     const existing = await tx.customerInvoice.findFirst({
-      where: { orderId, status: { not: CustomerInvoiceStatus.CANCELLED } },
+      where: {
+        orderId,
+        kind: CustomerInvoiceKind.ORDER,
+        status: { not: CustomerInvoiceStatus.CANCELLED },
+      },
     });
     if (existing) {
       throw new Error(`${order.code} already has invoice ${existing.invoiceNo} — cancel it first to re-invoice.`);
