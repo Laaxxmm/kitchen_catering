@@ -58,7 +58,7 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Orders — kitchen sees the cooking brief, sales/F&B raise them. Accounts
   // works billing from /invoices (the Generate-invoice screen), not here.
   { pattern: /^\/orders\/[^/]+\/requisition(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD"] },
-  { pattern: /^\/orders(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "STORE_KEEPER", "KITCHEN_HEAD", "FNB_SERVICE"] },
+  { pattern: /^\/orders(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "STORE_KEEPER", "KITCHEN_HEAD", "FNB_SERVICE", "DELIVERY"] },
 
   // Operations
   // Kitchen production board is the chef's (+ management oversight) only.
@@ -101,10 +101,9 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Maintenance — electrical/mechanical work + spares inventory.
   { pattern: /^\/maintenance(\/|$)/, allow: ["ADMIN", "MANAGER", "MAINTENANCE_MANAGER"] },
 
-  // Banquet — F&B service-side packaging store. Delivery also reaches it to
-  // ready event cutlery/arrangements: read the store + catalog and issue to
-  // an event. Recording vendor receipts and adjusting stock stay FNB-only.
-  { pattern: /^\/banquet\/(receipts|adjust)(\/|$)/, allow: ["ADMIN", "MANAGER", "FNB_SERVICE"] },
+  // Banquet — the F&B Service store (role DELIVERY, FNB_SERVICE its retired
+  // alias). The whole team runs it end to end: catalogue, receipts, issues,
+  // adjustments.
   { pattern: /^\/banquet(\/|$)/, allow: ["ADMIN", "MANAGER", "FNB_SERVICE", "DELIVERY"] },
 
   // Finance — invoices are accounts/management. The in-house (room service)
@@ -115,8 +114,8 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   { pattern: /^\/invoices\/new(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   { pattern: /^\/invoices\/generate(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   { pattern: /^\/invoices\/[^/]+\/edit(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
-  { pattern: /^\/invoices\/room-service(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "FNB_SERVICE"] },
-  { pattern: /^\/invoices(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "FNB_SERVICE"] },
+  { pattern: /^\/invoices\/room-service(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "FNB_SERVICE", "DELIVERY"] },
+  { pattern: /^\/invoices(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "FNB_SERVICE", "DELIVERY"] },
   { pattern: /^\/payments(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   // Petty cash is a finance-desk job — admin / manager / accounts. Salary +
   // reports stay admin/manager.

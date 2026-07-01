@@ -464,8 +464,8 @@ function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisi
   const isManager = role === Role.MANAGER || isAdmin;
   const isChef = role === Role.KITCHEN_HEAD || isAdmin;
   const isSales = role === Role.SALES || isManager;
-  // Who can mark an in-house order served: kitchen + F&B + management.
-  const canServe = isAdmin || isManager || isChef || role === Role.FNB_SERVICE;
+  // Who can mark an in-house order served: kitchen + F&B Service + management.
+  const canServe = isAdmin || isManager || isChef || role === Role.FNB_SERVICE || role === Role.DELIVERY;
 
   let title = "";
   let body: React.ReactNode = null;
@@ -606,7 +606,7 @@ function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisi
         title = "Next: mark it served";
         body = (
           <>
-            Cooked and ready to take to the {role === Role.FNB_SERVICE ? "guest" : "room / table"}. Tap{" "}
+            Cooked and ready to take to the {role === Role.FNB_SERVICE || role === Role.DELIVERY ? "guest" : "room / table"}. Tap{" "}
             <em>Served</em> once it&apos;s handed over — then raise the bill from{" "}
             <Link href="/invoices/room-service" className="text-brand hover:underline">Room billing</Link>.
             {!canServe && <span className="text-ik-ink-3"> (Serve action is for kitchen / F&amp;B / management.)</span>}

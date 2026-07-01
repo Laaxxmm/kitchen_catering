@@ -43,9 +43,11 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
     // Inventory: read stock + add ingredients to the kitchen catalogue.
     "dashboard", "tasks", "kitchen", "requisitions", "inventory",
   ]),
+  // F&B Service (internally DELIVERY; FNB_SERVICE is the retired alias). One
+  // team: takes room-service / à la carte / management orders, bills them,
+  // runs deliveries, and drives the banquet store.
   DELIVERY: new Set([
-    // Banquet store: prep event cutlery/arrangements (read + issue to event).
-    "dashboard", "tasks", "deliveries", "banquet",
+    "dashboard", "tasks", "orders", "deliveries", "roomservicebills", "banquet",
   ]),
   // Accounts: strictly the books-side workspace. They see invoices,
   // pay vendors, record incoming stock, and run dashboards. They do NOT

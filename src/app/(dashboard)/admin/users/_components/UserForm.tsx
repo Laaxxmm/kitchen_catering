@@ -67,11 +67,16 @@ export function UserForm({ defaults, requirePassword, onSubmit, submitLabel = "S
         <div className="grid gap-1">
           <Label htmlFor="role">Role</Label>
           <select id="role" value={role} onChange={(e) => setRole(e.target.value as Role)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
-            {Object.values(Role).map((r) => (
-              <option key={r} value={r}>
-                {roleLabel(r)}
-              </option>
-            ))}
+            {Object.values(Role)
+              // FNB_SERVICE is the retired alias of the merged F&B Service role
+              // (now DELIVERY) — hide it so it isn't a duplicate option. Existing
+              // users on it still render fine via roleLabel.
+              .filter((r) => r !== Role.FNB_SERVICE)
+              .map((r) => (
+                <option key={r} value={r}>
+                  {roleLabel(r)}
+                </option>
+              ))}
           </select>
         </div>
         <div className="grid gap-1">

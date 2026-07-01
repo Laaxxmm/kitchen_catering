@@ -21,8 +21,12 @@ export const ROLE_LABEL: Record<Role, string> = {
   STORE_KEEPER: "Store",
   HOUSEKEEPING_MANAGER: "HK",
   MAINTENANCE_MANAGER: "Engineer",
-  FNB_SERVICE: "F&B",
-  DELIVERY: "Delivery",
+  // DELIVERY is the merged F&B Service role — deliveries + room service +
+  // banquet. FNB_SERVICE is the retired predecessor (users migrated to
+  // DELIVERY); it keeps a label only so any stray historical row still reads
+  // cleanly.
+  FNB_SERVICE: "F&B Service",
+  DELIVERY: "F&B Service",
   ACCOUNTS: "Accounts",
 };
 

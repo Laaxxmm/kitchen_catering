@@ -56,10 +56,11 @@ export async function gateRolePage(roles: Role[]) {
 
 /** Order approval guards. State + role checks happen inside the action's
  *  transaction; these helpers cover the role-only common case. */
-// Order entry roles. SALES handles corporate catering; FNB_SERVICE
-// (added Phase 4) handles room service / alacarte / management orders.
-// Server actions still discriminate on channel for fine-grained gates.
-export const ORDER_SALES_ROLES = [Role.ADMIN, Role.MANAGER, Role.SALES, Role.FNB_SERVICE];
+// Order entry roles. SALES handles corporate catering; the F&B Service role
+// (internally DELIVERY, with FNB_SERVICE its retired alias) handles room
+// service / alacarte / management orders. Server actions still discriminate
+// on channel for fine-grained gates.
+export const ORDER_SALES_ROLES = [Role.ADMIN, Role.MANAGER, Role.SALES, Role.FNB_SERVICE, Role.DELIVERY];
 export const ORDER_STORE_ROLES = [Role.ADMIN, Role.STORE_KEEPER];
 export const ORDER_MANAGER_ROLES = [Role.ADMIN, Role.MANAGER];
 export const ORDER_KITCHEN_ROLES = [Role.ADMIN, Role.KITCHEN_HEAD];

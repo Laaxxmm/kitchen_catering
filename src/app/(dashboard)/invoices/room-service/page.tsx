@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 // the day, and raise one consolidated GST bill.
 
 export default async function RoomServiceBillingPage() {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.FNB_SERVICE]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.FNB_SERVICE, Role.DELIVERY]);
   const orders = await listBillableInHouseOrders();
   const todayIst = formatIST(new Date(), "yyyy-MM-dd");
 

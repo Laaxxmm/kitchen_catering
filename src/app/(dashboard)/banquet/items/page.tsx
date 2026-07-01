@@ -2,7 +2,6 @@ import Link from "next/link";
 import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
-import { auth } from "@/server/auth";
 import { gateRolePage } from "@/server/rbac";
 import { listBanquetItems } from "@/server/actions/banquet";
 import { ItemsTable } from "./_components/ItemsTable";
@@ -10,10 +9,9 @@ import { ItemsTable } from "./_components/ItemsTable";
 export const dynamic = "force-dynamic";
 
 export default async function BanquetItemsPage() {
+  // The whole F&B Service team manages the banquet catalogue.
   await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
-  const [session, items] = await Promise.all([auth(), listBanquetItems({ activeOnly: false })]);
-  // Delivery views the catalog to prep cutlery, but can't manage items.
-  const canManage = session?.user?.role !== Role.DELIVERY;
+  const items = await listBanquetItems({ activeOnly: false });
   const serialised = items.map((i) => ({
     id: i.id,
     name: i.name,
@@ -33,7 +31,7 @@ export default async function BanquetItemsPage() {
         description="F&B disposables catalog. Stock auto-updates from receipts and issues."
         actions={<Link href="/banquet"><Button variant="outline" size="sm">← Back</Button></Link>}
       />
-      <ItemsTable items={serialised} canManage={canManage} />
+      <ItemsTable items={serialised} />
     </>
   );
 }

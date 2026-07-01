@@ -10,10 +10,11 @@ import type { OrderCreateInputT } from "@/lib/validators";
 export const dynamic = "force-dynamic";
 
 export default async function NewOrderPage() {
-  // SALES (+ MANAGER + ADMIN) take catering orders; FNB_SERVICE takes
-  // room-service / à la carte / management orders. Other roles hitting
-  // this URL directly get redirected to /forbidden.
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.SALES, Role.FNB_SERVICE]);
+  // SALES (+ MANAGER + ADMIN) take catering orders; the F&B Service team
+  // (role DELIVERY, FNB_SERVICE its retired alias) takes room-service / à la
+  // carte / management orders. Other roles hitting this URL directly get
+  // redirected to /forbidden.
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.SALES, Role.FNB_SERVICE, Role.DELIVERY]);
   const [customers, dishes] = await Promise.all([
     listCustomers({ active: true }),
     listDishes({ active: true }),

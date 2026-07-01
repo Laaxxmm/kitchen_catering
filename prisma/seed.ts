@@ -39,11 +39,12 @@ async function main() {
     { email: "sales@indefine.in",    name: "Sales User",      role: Role.SALES },
     { email: "store@indefine.in",    name: "Store Keeper",    role: Role.STORE_KEEPER },
     { email: "chef@indefine.in",     name: "Head Chef",       role: Role.KITCHEN_HEAD },
-    { email: "delivery@indefine.in", name: "Delivery Driver", role: Role.DELIVERY },
+    // F&B Service is one merged role (internally DELIVERY). Two sample users.
+    { email: "delivery@indefine.in", name: "F&B Service (Delivery)", role: Role.DELIVERY },
     { email: "accounts@indefine.in", name: "Accounts User",   role: Role.ACCOUNTS },
     { email: "housekeeping@indefine.in", name: "Housekeeping Manager", role: Role.HOUSEKEEPING_MANAGER },
     { email: "maintenance@indefine.in", name: "Maintenance Manager", role: Role.MAINTENANCE_MANAGER },
-    { email: "fnb@indefine.in",         name: "F&B Service",          role: Role.FNB_SERVICE },
+    { email: "fnb@indefine.in",         name: "F&B Service",          role: Role.DELIVERY },
   ];
   for (const u of users) {
     await db.user.upsert({

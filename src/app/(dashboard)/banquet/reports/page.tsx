@@ -30,7 +30,7 @@ export default async function BanquetReportsPage({
 }: {
   searchParams: Promise<{ period?: string; from?: string; to?: string }>;
 }) {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
   const sp = await searchParams;
   const period: BanquetPeriod =
     (PERIODS.find((p) => p.key === sp.period)?.key as BanquetPeriod | undefined) ?? "WEEK";

@@ -343,9 +343,9 @@ export default async function DashboardPage() {
       ])
     : null;
 
-  // Drivers get a focused, single-purpose dashboard: just the deliveries
-  // assigned to them. None of the order-map, AR, or procurement panels
-  // apply to their work.
+  // F&B Service (merged role): their delivery run + event-cutlery prep in the
+  // work-screen, the banquet store below, and quick actions to take an in-house
+  // order or issue to an event. One team, one screen.
   if (isDriver) {
     const [eventPrep, pickups, myDeliveries] = await Promise.all([
       listEventPrepQueue(),
@@ -356,7 +356,13 @@ export default async function DashboardPage() {
       <>
         <LauncherGreeting
           firstName={firstName}
-          subtitle="Your whole run in tabs — ready the event cutlery, take a cooked order, dispatch it, then mark it delivered. Every action is on the card."
+          subtitle="Your run and the banquet store in one place — take an order, ready the event cutlery, dispatch, and mark delivered. Every action is on the card."
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Link href="/orders/new"><Button>Take order</Button></Link>
+              <Link href="/banquet/issues/new"><Button variant="outline">Issue to event</Button></Link>
+            </div>
+          }
         />
         <div className="grid gap-5">
           <MyTasksPanel />
@@ -383,6 +389,7 @@ export default async function DashboardPage() {
               customerName: d.order.customer.name,
             }))}
           />
+          <BanquetPanel />
         </div>
       </>
     );

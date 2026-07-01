@@ -28,9 +28,10 @@ const WRITE_ROLES = [
   Role.HOUSEKEEPING_MANAGER,
   Role.MAINTENANCE_MANAGER,
   Role.FNB_SERVICE,
+  Role.DELIVERY,
 ];
 
-const READ_ROLES: Role[] = [...WRITE_ROLES, Role.KITCHEN_HEAD, Role.DELIVERY];
+const READ_ROLES: Role[] = [...WRITE_ROLES, Role.KITCHEN_HEAD];
 
 interface UploadInput {
   entityType: DocumentEntityType;

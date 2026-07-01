@@ -25,10 +25,11 @@ import {
 //                  delivery team prepares those arrangements. They can't
 //                  manage items, record vendor receipts or adjust stock.
 
-const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE];
-// Issuing to an event is also the delivery team's job (event prep).
-const ISSUE_ROLES = [...WRITE_ROLES, Role.DELIVERY];
-const READ_ROLES: Role[] = [...ISSUE_ROLES];
+// F&B Service is one team now (role DELIVERY, FNB_SERVICE its retired alias):
+// they run the banquet store end to end — catalogue, receipts, issues.
+const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY];
+const ISSUE_ROLES = WRITE_ROLES;
+const READ_ROLES: Role[] = [...WRITE_ROLES];
 
 // ─── Items ────────────────────────────────────────────────────────────
 

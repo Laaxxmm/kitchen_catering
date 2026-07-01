@@ -17,7 +17,7 @@ import { formatIST } from "@/lib/time";
 export const dynamic = "force-dynamic";
 
 export default async function BanquetReceiptsListPage() {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
   const receipts = await listBanquetReceipts({ limit: 200 });
 
   return (

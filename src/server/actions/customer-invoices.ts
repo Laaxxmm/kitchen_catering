@@ -1111,7 +1111,7 @@ export async function listBillableOrders() {
 
 // Roles that can run the in-house (room service) billing screen — the front-
 // of-house F&B staff who take those orders, plus finance/management.
-const INHOUSE_BILL_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.FNB_SERVICE];
+const INHOUSE_BILL_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.FNB_SERVICE, Role.DELIVERY];
 
 /**
  * Served-but-unbilled in-house orders (room service / à la carte /

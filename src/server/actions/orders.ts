@@ -74,7 +74,7 @@ async function notifyOrderApproved(orderId: string) {
   const eventDelivery = isEventDeliveryChannel(order.channel);
   const roles = eventDelivery
     ? [Role.KITCHEN_HEAD, Role.DELIVERY, Role.FNB_SERVICE]
-    : [Role.KITCHEN_HEAD, Role.FNB_SERVICE];
+    : [Role.KITCHEN_HEAD, Role.FNB_SERVICE, Role.DELIVERY];
   const body = eventDelivery
     ? `${order.channel} · ${order.headcount} pax · event ${evt}. Kitchen: raise requisition. Delivery: prep cutlery + arrangements, then mark ready. Service: ready it for the guest.`
     : `${order.channel} · ${order.headcount} pax · event ${evt}. Kitchen: raise requisition. Service: ready it for the guest.`;
@@ -113,7 +113,7 @@ async function notifyOrderSubmitted(orderId: string) {
   if (order.status === OrderStatus.PENDING_CHEF_APPROVAL) {
     // In-house orders (room service / à la carte / management) go straight to
     // the chef — loop in F&B service too, since they take it to the guest.
-    await notifyRoles([Role.KITCHEN_HEAD, Role.FNB_SERVICE], {
+    await notifyRoles([Role.KITCHEN_HEAD, Role.FNB_SERVICE, Role.DELIVERY], {
       kind: "GENERIC",
       title: `New order ${order.code} — ${order.customer.name}`,
       body: `${order.channel}${where} · ${order.headcount ?? "?"} pax. Chef: accept or reject. Service: prepare to serve.`,
@@ -917,6 +917,7 @@ export async function markInHouseServed(orderId: string) {
     Role.MANAGER,
     Role.KITCHEN_HEAD,
     Role.FNB_SERVICE,
+    Role.DELIVERY,
   ]);
   await db.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
