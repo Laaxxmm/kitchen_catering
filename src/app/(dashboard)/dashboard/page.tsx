@@ -140,6 +140,7 @@ export default async function DashboardPage() {
     const [chefReqs, pos] = await Promise.all([
       listChefRequisitions({
         status: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED],
+        activeOrderOnly: true,
       }),
       // The store's open purchase orders — so they can submit drafts, watch
       // for the manager's approval, then send to the vendor + record the GRN.

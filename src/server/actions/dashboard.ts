@@ -15,6 +15,7 @@ import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { hasRole, requireSession } from "@/server/rbac";
 import { toDecimal } from "@/lib/money";
+import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 
 /**
  * Returns the 4 dashboard KPIs and a role-aware "my queue" count.
@@ -449,6 +450,8 @@ export async function getDashboardSummary() {
           status: {
             in: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED],
           },
+          // Don't count requisitions for cancelled / rejected / completed orders.
+          order: { status: { notIn: INACTIVE_ORDER_STATUSES } },
         },
       }),
       db.vendorPO.count({

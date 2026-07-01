@@ -1,6 +1,21 @@
 import { OrderStatus } from "@prisma/client";
 
 /**
+ * Orders in a terminal state — cancelled, rejected, or completed. A chef
+ * requisition / production job / delivery against one of these should never
+ * surface as live "to do" work, even if the child record was left open (e.g.
+ * an order cancelled before the cancel-cascade fix shipped). Shared so the
+ * store board, dashboard counts and nav badges all agree.
+ */
+export const INACTIVE_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.CANCELLED,
+  OrderStatus.COMPLETED,
+  OrderStatus.REJECTED_BY_ADMIN,
+  OrderStatus.REJECTED_BY_MANAGER,
+  OrderStatus.REJECTED_BY_STORE,
+];
+
+/**
  * Human-friendly labels for OrderStatus. The DB enum values are
  * code-friendly (PENDING_CHEF_APPROVAL); the UI should show plain English
  * (Awaiting chef approval). Single source of truth so admin / manager /

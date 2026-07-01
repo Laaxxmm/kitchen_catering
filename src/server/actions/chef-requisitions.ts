@@ -8,6 +8,7 @@ import {
   Role,
 } from "@prisma/client";
 import { db } from "@/server/db";
+import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import {
   AuthorizationError,
   requireRole,
@@ -436,12 +437,16 @@ const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD, Role.STORE_KEEPER, Role.SALES, Role.ACCOUNTS,
 ];
 
-export async function listChefRequisitions(opts: { status?: ChefRequisitionStatus[]; orderId?: string } = {}) {
+export async function listChefRequisitions(
+  opts: { status?: ChefRequisitionStatus[]; orderId?: string; activeOrderOnly?: boolean } = {},
+) {
   await requireRole(READ_ROLES);
   return db.chefRequisition.findMany({
     where: {
       ...(opts.status ? { status: { in: opts.status } } : {}),
       ...(opts.orderId ? { orderId: opts.orderId } : {}),
+      // Hide requisitions whose order was cancelled / rejected / completed.
+      ...(opts.activeOrderOnly ? { order: { status: { notIn: INACTIVE_ORDER_STATUSES } } } : {}),
     },
     include: {
       order: { select: { code: true, customer: { select: { name: true } }, eventDate: true } },

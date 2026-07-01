@@ -11,6 +11,7 @@ import {
 import { db } from "@/server/db";
 import { hasRole, requireSession } from "@/server/rbac";
 import { toDecimal } from "@/lib/money";
+import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import type { NavBadges } from "@/lib/nav-config";
 
 /**
@@ -38,7 +39,10 @@ export async function getNavBadges(): Promise<NavBadges> {
         },
       }),
       db.chefRequisition.count({
-        where: { status: { in: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED] } },
+        where: {
+          status: { in: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED] },
+          order: { status: { notIn: INACTIVE_ORDER_STATUSES } },
+        },
       }),
       db.ingredient.findMany({ where: { active: true }, select: { onHandQty: true, reorderLevel: true } }),
       db.vendorPO.count({ where: { status: VendorPOStatus.PENDING_APPROVAL } }),
