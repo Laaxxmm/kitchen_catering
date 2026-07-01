@@ -49,9 +49,9 @@ export function CustomerOrders({ orders }: { orders: CustomerOrderRow[] }) {
   }, [orders]);
 
   return (
-    <section className="mt-8">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Order history · {orders.length}</h2>
+    <section>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">All orders placed by this customer</h2>
         <div className="flex flex-wrap gap-1.5">
           {FILTERS.map((f) => (
             <button

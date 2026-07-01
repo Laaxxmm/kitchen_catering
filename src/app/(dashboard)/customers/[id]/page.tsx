@@ -7,6 +7,7 @@ import { deactivateCustomer, getCustomer, reactivateCustomer, updateCustomer } f
 import { listOrders } from "@/server/actions/orders";
 import { CustomerForm } from "../_components/CustomerForm";
 import { CustomerOrders } from "./_components/CustomerOrders";
+import { DetailTabs } from "@/components/ik/DetailTabs";
 import type { CustomerInputT } from "@/lib/validators";
 
 export const dynamic = "force-dynamic";
@@ -56,38 +57,54 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
         }
       />
 
-      <CustomerForm
-        defaults={{
-          name: customer.name,
-          gstin: customer.gstin,
-          pan: customer.pan,
-          billingAddress: customer.billingAddress,
-          shippingAddress: customer.shippingAddress,
-          stateCode: customer.stateCode,
-          contactName: customer.contactName,
-          email: customer.email,
-          phone: customer.phone ?? "",
-          notes: customer.notes,
-          groupId: customer.groupId,
-          billingCompanyName: customer.billingCompanyName,
-          creditLimit: customer.creditLimit.toString(),
-          creditDays: customer.creditDays,
-        }}
-        groups={groups.map((g) => ({ id: g.id, name: g.name }))}
-        onSubmit={update}
-        submitLabel="Save changes"
-      />
-
-      <CustomerOrders
-        orders={orders.map((o) => ({
-          id: o.id,
-          code: o.code,
-          eventDate: o.eventDate.toISOString(),
-          mealType: o.mealType,
-          headcount: o.headcount,
-          contractValue: o.contractValue.toString(),
-          status: o.status,
-        }))}
+      <DetailTabs
+        tabs={[
+          {
+            key: "details",
+            label: "Details",
+            content: (
+              <CustomerForm
+                defaults={{
+                  name: customer.name,
+                  gstin: customer.gstin,
+                  pan: customer.pan,
+                  billingAddress: customer.billingAddress,
+                  shippingAddress: customer.shippingAddress,
+                  stateCode: customer.stateCode,
+                  contactName: customer.contactName,
+                  email: customer.email,
+                  phone: customer.phone ?? "",
+                  notes: customer.notes,
+                  groupId: customer.groupId,
+                  billingCompanyName: customer.billingCompanyName,
+                  creditLimit: customer.creditLimit.toString(),
+                  creditDays: customer.creditDays,
+                }}
+                groups={groups.map((g) => ({ id: g.id, name: g.name }))}
+                onSubmit={update}
+                submitLabel="Save changes"
+              />
+            ),
+          },
+          {
+            key: "orders",
+            label: "Orders",
+            count: orders.length,
+            content: (
+              <CustomerOrders
+                orders={orders.map((o) => ({
+                  id: o.id,
+                  code: o.code,
+                  eventDate: o.eventDate.toISOString(),
+                  mealType: o.mealType,
+                  headcount: o.headcount,
+                  contractValue: o.contractValue.toString(),
+                  status: o.status,
+                }))}
+              />
+            ),
+          },
+        ]}
       />
     </>
   );

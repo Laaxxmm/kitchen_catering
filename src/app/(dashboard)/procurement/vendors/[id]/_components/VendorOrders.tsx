@@ -46,9 +46,9 @@ export function VendorOrders({ pos }: { pos: VendorPORow[] }) {
   }, [pos]);
 
   return (
-    <section className="mt-8">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-medium text-[14px] text-ik-ink">Purchase orders · {pos.length}</h3>
+    <section>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Purchase orders raised to this vendor</h3>
         <div className="flex flex-wrap gap-1.5">
           {FILTERS.map((f) => (
             <button

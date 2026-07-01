@@ -19,9 +19,9 @@ export async function VendorHistoryPanel({ vendorId }: { vendorId: string }) {
   const { timeline, totals } = await getVendorHistory(vendorId);
 
   return (
-    <section className="mt-6">
+    <section>
       <div className="mb-3 flex flex-wrap items-end gap-3">
-        <h3 className="font-medium text-[14px] text-ik-ink">History</h3>
+        <h3 className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Bills &amp; payments</h3>
         <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px]">
           <Summary label="Total billed" value={totals.billed} tone="neutral" />
           <Summary label="Total paid" value={totals.paid} tone="positive" />
