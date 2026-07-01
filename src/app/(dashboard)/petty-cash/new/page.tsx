@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { listUsers } from "@/server/actions/users";
+import { listAssignableUsers } from "@/server/actions/users";
 import { createPettyCashFloat } from "@/server/actions/petty-cash";
 import { gateRolePage } from "@/server/rbac";
 import { roleLabel } from "@/lib/role-labels";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 export default async function NewPettyCashFloatPage() {
   await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
-  const users = await listUsers({ active: true });
+  const users = await listAssignableUsers();
 
   async function create(formData: FormData) {
     "use server";

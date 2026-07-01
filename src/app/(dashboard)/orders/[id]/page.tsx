@@ -18,7 +18,7 @@ import {
 } from "@/server/actions/orders";
 import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoices";
 import { listDishes } from "@/server/actions/dishes";
-import { listUsers } from "@/server/actions/users";
+import { listAssignableUsers } from "@/server/actions/users";
 import { isImmediateChannel } from "@/lib/order-channels";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
@@ -56,7 +56,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const isAssignedForFeedback = order.feedbackAssigneeId === session?.user?.id;
   const showFeedback = feedbackEligible && (isManager || isAssignedForFeedback);
   // Only managers get the picker; load the staff list just for them.
-  const feedbackUsers = showFeedback && isManager ? await listUsers({ active: true }) : [];
+  const feedbackUsers = showFeedback && isManager ? await listAssignableUsers() : [];
 
   // Pull any proforma invoice for this order so we can link it.
   const proforma = await db.customerInvoice.findFirst({

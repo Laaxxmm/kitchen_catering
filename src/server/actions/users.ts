@@ -102,6 +102,20 @@ export async function listUsers(opts: { active?: boolean } = {}) {
   });
 }
 
+/**
+ * Lightweight active-user list for assignment pickers (task/feedback
+ * allocation, petty-cash custodian). Managers + accounts can read it — unlike
+ * the full admin listUsers, which is ADMIN-only and would crash those pages.
+ */
+export async function listAssignableUsers() {
+  await requireRole([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
+  return db.user.findMany({
+    where: { active: true },
+    select: { id: true, name: true, role: true },
+    orderBy: { name: "asc" },
+  });
+}
+
 export async function getUser(id: string) {
   await requireRole(ADMIN_ONLY);
   return db.user.findUnique({
