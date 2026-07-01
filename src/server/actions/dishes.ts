@@ -10,6 +10,9 @@ import { sha256Json } from "@/lib/audit";
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD];
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.SALES, Role.KITCHEN_HEAD, Role.STORE_KEEPER, Role.ACCOUNTS,
+  // F&B Service (role DELIVERY, FNB_SERVICE its retired alias) picks dishes
+  // when taking room-service / à la carte / management orders.
+  Role.DELIVERY, Role.FNB_SERVICE,
 ];
 
 export async function createDish(raw: unknown) {

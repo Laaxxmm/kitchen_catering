@@ -8,6 +8,7 @@ import {
   ChefRequisitionLineStatus,
   ChefRequisitionStatus,
   DeliveryStatus,
+  OrderChannel,
   OrderStatus,
   ProductionJobStatus,
   Role,
@@ -1165,8 +1166,17 @@ export interface OrderFilter {
 /** Count of orders per status across the whole table — drives the orders-page
  *  tab counts so they're accurate regardless of the active filter. */
 export async function getOrderStatusCounts(): Promise<Partial<Record<OrderStatus, number>>> {
-  await requireRole(READ_ROLES);
-  const rows = await db.order.groupBy({ by: ["status"], _count: { _all: true } });
+  const session = await requireRole(READ_ROLES);
+  // F&B Service only sees in-house room orders — scope their tab counts to match.
+  const fnbScoped =
+    session.user.role === Role.DELIVERY || session.user.role === Role.FNB_SERVICE;
+  const rows = await db.order.groupBy({
+    by: ["status"],
+    _count: { _all: true },
+    ...(fnbScoped
+      ? { where: { channel: { in: [OrderChannel.ROOM_SERVICE, OrderChannel.ALACARTE, OrderChannel.MANAGEMENT] } } }
+      : {}),
+  });
   const out: Partial<Record<OrderStatus, number>> = {};
   for (const r of rows) out[r.status] = r._count._all;
   return out;
@@ -1206,10 +1216,18 @@ export async function listOrders(filter: OrderFilter = {}) {
     statuses = Array.isArray(filter.status) ? filter.status : [filter.status];
   }
 
+  // F&B Service (role DELIVERY, FNB_SERVICE its retired alias) only handles
+  // in-house room orders — they see just those, not the whole catering book.
+  const fnbScoped =
+    session.user.role === Role.DELIVERY || session.user.role === Role.FNB_SERVICE;
+
   return db.order.findMany({
     where: {
       ...(statuses ? { status: { in: statuses } } : {}),
       ...(filter.customerId ? { customerId: filter.customerId } : {}),
+      ...(fnbScoped
+        ? { channel: { in: [OrderChannel.ROOM_SERVICE, OrderChannel.ALACARTE, OrderChannel.MANAGEMENT] } }
+        : {}),
       ...(filter.query
         ? {
             OR: [

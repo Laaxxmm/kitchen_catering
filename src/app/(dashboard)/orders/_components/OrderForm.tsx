@@ -46,6 +46,9 @@ interface Props {
   onSubmit: (input: OrderCreateInputT) => Promise<{ id: string; code: string }>;
   submitLabel?: string;
   redirectOnSuccess?: string;
+  /** F&B Service: only in-house room orders (room service / à la carte /
+   *  management). Hides catering channels + the customer picker. */
+  inHouseOnly?: boolean;
   /** Optional inline customer creator — when present, shows a
    *  "+ Add new customer" toggle under the dropdown. */
   onQuickAddCustomer?: (input: QuickCustomerInput) => Promise<{ id: string; name: string; stateCode: string }>;
@@ -64,7 +67,7 @@ function emptyLine(): DraftLine {
   return { dishId: "", portions: "1", unitPrice: "0", discountPct: "0", gstRatePct: "5", notes: "" };
 }
 
-export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel = "Create draft", redirectOnSuccess, onQuickAddCustomer }: Props) {
+export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel = "Create draft", redirectOnSuccess, inHouseOnly = false, onQuickAddCustomer }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -73,7 +76,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
   const [customerOptions, setCustomerOptions] = useState(customers);
   const [customerId, setCustomerId] = useState(defaults?.customerId ?? customers[0]?.id ?? "");
   const [channel, setChannel] = useState<OrderChannel>(
-    (defaults?.channel as OrderChannel) ?? OrderChannel.BANQUET,
+    (defaults?.channel as OrderChannel) ?? (inHouseOnly ? OrderChannel.ROOM_SERVICE : OrderChannel.BANQUET),
   );
   const [roomNumber, setRoomNumber] = useState(defaults?.roomNumber ?? "");
   const [tableNumber, setTableNumber] = useState(defaults?.tableNumber ?? "");
@@ -321,9 +324,9 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
               onChange={(e) => setChannel(e.target.value as OrderChannel)}
               className="h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
             >
-              <option value={OrderChannel.BANQUET}>Banquet (corporate catering)</option>
-              <option value={OrderChannel.ODC}>ODC (outdoor catering)</option>
-              <option value={OrderChannel.PACKET}>Packet food / take-away</option>
+              {!inHouseOnly && <option value={OrderChannel.BANQUET}>Banquet (corporate catering)</option>}
+              {!inHouseOnly && <option value={OrderChannel.ODC}>ODC (outdoor catering)</option>}
+              {!inHouseOnly && <option value={OrderChannel.PACKET}>Packet food / take-away</option>}
               <option value={OrderChannel.ROOM_SERVICE}>Room service</option>
               <option value={OrderChannel.ALACARTE}>À la carte (dine-in)</option>
               <option value={OrderChannel.MANAGEMENT}>Management (internal)</option>

@@ -14,9 +14,13 @@ export default async function NewOrderPage() {
   // (role DELIVERY, FNB_SERVICE its retired alias) takes room-service / à la
   // carte / management orders. Other roles hitting this URL directly get
   // redirected to /forbidden.
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.SALES, Role.FNB_SERVICE, Role.DELIVERY]);
+  const session = await gateRolePage([Role.ADMIN, Role.MANAGER, Role.SALES, Role.FNB_SERVICE, Role.DELIVERY]);
+  // F&B Service only takes in-house room orders — those auto-attach the
+  // House / Walk-in customer, so they don't get the customer list (and can't
+  // browse every client). Only the catering roles pick a named customer.
+  const inHouseOnly = session.user.role === Role.DELIVERY || session.user.role === Role.FNB_SERVICE;
   const [customers, dishes] = await Promise.all([
-    listCustomers({ active: true }),
+    inHouseOnly ? Promise.resolve([]) : listCustomers({ active: true }),
     listDishes({ active: true }),
   ]);
 
@@ -60,6 +64,7 @@ export default async function NewOrderPage() {
         description="Saves as DRAFT. Submit from the detail page to send for manager approval — the manager signs off before the chef sees it."
       />
       <OrderForm
+        inHouseOnly={inHouseOnly}
         customers={customers.map((c) => ({ id: c.id, name: c.name, stateCode: c.stateCode }))}
         dishes={dishes.map((d) => ({
           id: d.id,

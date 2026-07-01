@@ -139,7 +139,9 @@ export default async function OrdersPage({
     getOrderStatusCounts(),
   ]);
   const role = session?.user?.role;
-  const canCreate = role === Role.ADMIN || role === Role.MANAGER || role === Role.SALES;
+  const canCreate = role === Role.ADMIN || role === Role.MANAGER || role === Role.SALES || role === Role.FNB_SERVICE || role === Role.DELIVERY;
+  // F&B Service takes in-house room orders but shouldn't see the financials.
+  const isFnb = role === Role.DELIVERY || role === Role.FNB_SERVICE;
   const isAll = filter === "all" && !sp.q;
 
   // Group counts across ALL orders (not just the filtered view) so the tabs
@@ -219,19 +221,19 @@ export default async function OrdersPage({
             return (
               <section key={key}>
                 <h2 className="mb-2 text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">{label} · {rows.length}</h2>
-                <OrdersTable rows={rows} />
+                <OrdersTable rows={rows} showValue={!isFnb} />
               </section>
             );
           })}
         </div>
       ) : (
-        <OrdersTable rows={orders} />
+        <OrdersTable rows={orders} showValue={!isFnb} />
       )}
     </>
   );
 }
 
-function OrdersTable({ rows }: { rows: OrderRow[] }) {
+function OrdersTable({ rows, showValue = true }: { rows: OrderRow[]; showValue?: boolean }) {
   return (
     <Table>
       <TableHeader>
@@ -240,7 +242,7 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
           <TableHead>Meal</TableHead>
           <TableHead className="text-right">Pax</TableHead>
           <TableHead>Event</TableHead>
-          <TableHead className="text-right">Value</TableHead>
+          {showValue && <TableHead className="text-right">Value</TableHead>}
           <TableHead>Status</TableHead>
         </TableRow>
       </TableHeader>
@@ -260,7 +262,7 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
               <TableCell className="text-[12.5px] text-ik-ink-2">{o.mealType}</TableCell>
               <TableCell className="text-right">{o.headcount}</TableCell>
               <TableCell className="font-mono text-[12px]">{formatIST(o.eventDate, "yyyy-MM-dd")}</TableCell>
-              <TableCell className="text-right font-mono">{formatINRWhole(o.contractValue)}</TableCell>
+              {showValue && <TableCell className="text-right font-mono">{formatINRWhole(o.contractValue)}</TableCell>}
               <TableCell><StatusPill tone={tone}>{STATUS_LABEL[o.status]}</StatusPill></TableCell>
             </TableRow>
           );
