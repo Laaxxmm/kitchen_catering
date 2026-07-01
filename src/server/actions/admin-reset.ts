@@ -14,6 +14,7 @@ import { sha256Json } from "@/lib/audit";
 // can be triggered against production without the CLI.
 
 const CONFIRM_PHRASE = "RESET";
+const CLEAR_ORDERS_PHRASE = "CLEAR ORDERS";
 
 export interface ResetSummary {
   orders: number;
@@ -22,6 +23,20 @@ export interface ResetSummary {
   notifications: number;
   tasks: number;
   auditRows: number;
+}
+
+export interface ClearOrdersSummary {
+  orders: number;
+  quotes: number;
+  deliveries: number;
+  chefRequisitions: number;
+  productionJobs: number;
+  tasks: number;
+  notifications: number;
+  /** Finance rows deliberately preserved — surfaced so the admin can see
+   *  exactly what survived the clear. */
+  invoicesKept: number;
+  vendorBillsKept: number;
 }
 
 export async function resetTransactionalData(confirm: string): Promise<ResetSummary> {
@@ -162,6 +177,128 @@ export async function resetTransactionalData(confirm: string): Promise<ResetSumm
   revalidatePath("/dashboard");
   revalidatePath("/orders");
   revalidatePath("/invoices");
+  revalidatePath("/notifications");
+
+  return summary;
+}
+
+/**
+ * Selective clean-up — clears the OPERATIONAL order pipeline while KEEPING
+ * every finance / accounts record intact:
+ *
+ *   Deleted   orders (+ items / budget / overhead), quotes, chef requisitions,
+ *             production jobs, deliveries, order-tied ingredient issues, labour
+ *             time entries, legacy purchase requisitions, tasks, notifications.
+ *   Kept      customer invoices + payments (AR), vendor bills + payments (AP),
+ *             vendor POs, GRNs, ingredient receipts, petty cash, salary runs,
+ *             e-invoice logs — and the full audit log.
+ *
+ * Finance records that pointed at a now-deleted order (customer invoices,
+ * vendor POs) keep the record but have their orderId detached (set null), so
+ * the money survives without a dangling foreign key. Stock on-hand is left
+ * exactly as it stands — deleting historical movement rows doesn't change the
+ * stored quantity. Only the operational document sequences restart; invoice /
+ * PO / GRN / bill numbering continues so finance stays gap-free.
+ *
+ * ADMIN-only, gated behind typing "CLEAR ORDERS".
+ */
+export async function clearOrdersKeepFinance(confirm: string): Promise<ClearOrdersSummary> {
+  const session = await requireRole([Role.ADMIN]);
+  if (confirm !== CLEAR_ORDERS_PHRASE) {
+    throw new Error(`Type ${CLEAR_ORDERS_PHRASE} to confirm.`);
+  }
+
+  const summary = await db.$transaction(
+    async (tx) => {
+      // Labour logged against orders (RESTRICT FK — must go before orders).
+      await tx.timeEntry.deleteMany();
+
+      // Order-tied stock issues (reference order + prLine + chefReqLine +
+      // production job — so they must be deleted before all of those).
+      await tx.ingredientIssue.deleteMany();
+
+      // Production.
+      await tx.productionJobItem.deleteMany();
+      const productionJobs = await tx.productionJob.deleteMany();
+
+      // Deliveries.
+      await tx.deliveryAttempt.deleteMany();
+      const deliveries = await tx.delivery.deleteMany();
+
+      // Chef requisitions (lines reference OrderItem, which cascades on order
+      // delete — so clear the requisition lines first).
+      await tx.chefRequisitionLine.deleteMany();
+      const chefRequisitions = await tx.chefRequisition.deleteMany();
+
+      // Legacy purchase requisitions (reference order).
+      await tx.purchaseRequisitionLine.deleteMany();
+      await tx.purchaseRequisition.deleteMany();
+
+      // Detach the KEPT finance records from the orders we're about to delete
+      // so the money survives with no dangling FK.
+      await tx.customerInvoice.updateMany({ data: { orderId: null } });
+      await tx.vendorPO.updateMany({ data: { orderId: null } });
+
+      // Quotes (a converted quote references its order).
+      await tx.quoteLine.deleteMany();
+      await tx.quoteEvent.deleteMany();
+      const quotes = await tx.quote.deleteMany();
+
+      // Orders — OrderItem / budget / overhead lines cascade automatically.
+      const orders = await tx.order.deleteMany();
+
+      // Operational clutter (regenerates as work resumes).
+      const tasks = await tx.task.deleteMany();
+      const notifs = await tx.notification.deleteMany();
+
+      // Restart ONLY the operational document sequences. Finance numbering
+      // (invoices, POs, GRNs, bills, petty cash, salary) is left alone so the
+      // books stay continuous and gap-free.
+      await tx.orderCodeSequence.deleteMany();
+      await tx.quoteNumberSequence.deleteMany();
+      await tx.requisitionNumberSequence.deleteMany();
+      await tx.chefRequisitionNumberSequence.deleteMany();
+      await tx.productionJobNumberSequence.deleteMany();
+      await tx.deliveryNumberSequence.deleteMany();
+
+      const [invoicesKept, vendorBillsKept] = await Promise.all([
+        tx.customerInvoice.count(),
+        tx.vendorBill.count(),
+      ]);
+
+      return {
+        orders: orders.count,
+        quotes: quotes.count,
+        deliveries: deliveries.count,
+        chefRequisitions: chefRequisitions.count,
+        productionJobs: productionJobs.count,
+        tasks: tasks.count,
+        notifications: notifs.count,
+        invoicesKept,
+        vendorBillsKept,
+      };
+    },
+    { timeout: 120_000, maxWait: 10_000 },
+  );
+
+  // Audit trail is KEPT for this variant — add one row naming who ran it.
+  await db.auditLog.create({
+    data: {
+      userId: session.user.id,
+      action: "ORDERS_CLEARED_KEEP_FINANCE",
+      entity: "System",
+      entityId: "clear-orders",
+      payloadHash: sha256Json({
+        ordersDeleted: summary.orders,
+        invoicesKept: summary.invoicesKept,
+        vendorBillsKept: summary.vendorBillsKept,
+        at: "in-app",
+      }),
+    },
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/orders");
   revalidatePath("/notifications");
 
   return summary;
