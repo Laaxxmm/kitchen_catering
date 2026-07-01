@@ -52,12 +52,18 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
   return (
     <>
       <PageHeader
-        eyebrow={`Requisition · Order ${requisition.order.code}`}
+        eyebrow={requisition.order ? `Requisition · Order ${requisition.order.code}` : "Requisition · General kitchen request"}
         title={requisition.requisitionNo}
-        description={`${requisition.order.customer.name} · event ${formatIST(requisition.order.eventDate, "yyyy-MM-dd")}`}
+        description={
+          requisition.order
+            ? `${requisition.order.customer.name} · event ${formatIST(requisition.order.eventDate, "yyyy-MM-dd")}`
+            : "Standalone kitchen stock request — not tied to any order."
+        }
         actions={
           <div className="flex gap-2">
-            <Link href={`/orders/${requisition.order.id}`}><Button variant="outline">Back to order</Button></Link>
+            {requisition.order
+              ? <Link href={`/orders/${requisition.order.id}`}><Button variant="outline">Back to order</Button></Link>
+              : <Link href="/requisitions"><Button variant="outline">Back to requisitions</Button></Link>}
             {canSubmit && (
               <form action={doSubmit}>
                 <Button type="submit">Submit to store</Button>

@@ -11,9 +11,10 @@ export interface StoreReq {
   id: string;
   requisitionNo: string;
   status: ChefRequisitionStatus;
-  orderCode: string;
+  /** null for a standalone (order-less) kitchen stock request. */
+  orderCode: string | null;
   customerName: string;
-  eventDate: string;
+  eventDate: string | null;
   lines: number;
 }
 export interface StorePO {
@@ -69,10 +70,15 @@ export function StoreBoard({ chefReqs, pos }: { chefReqs: StoreReq[]; pos: Store
                 <li key={r.id} className="rounded-md border border-amber bg-amber-wash p-3">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <span className="font-mono text-[12.5px] text-brand-700">{r.requisitionNo}</span>
-                    <span className="text-[11.5px] text-ik-ink-3">{formatIST(new Date(r.eventDate), "EEE d MMM HH:mm")}</span>
+                    {r.eventDate && (
+                      <span className="text-[11.5px] text-ik-ink-3">{formatIST(new Date(r.eventDate), "EEE d MMM HH:mm")}</span>
+                    )}
                   </div>
                   <div className="mt-1 text-[13px] text-ik-ink">
-                    <strong>{r.customerName}</strong> <span className="text-ik-ink-3">· order {r.orderCode}</span>
+                    <strong>{r.customerName}</strong>
+                    {r.orderCode
+                      ? <span className="text-ik-ink-3"> · order {r.orderCode}</span>
+                      : <span className="text-ik-ink-3"> · general kitchen request</span>}
                   </div>
                   <div className="mt-0.5 text-[12px] text-ik-ink-2">
                     {r.lines} {r.lines === 1 ? "line" : "lines"} · {r.status === "PARTIALLY_ISSUED" ? "partly issued" : "to issue"}

@@ -718,8 +718,10 @@ model IngredientIssue {
   id                    String                   @id @default(cuid())
   ingredientId          String
   ingredient            Ingredient               @relation(fields: [ingredientId], references: [id])
-  orderId               String
-  order                 Order                    @relation(fields: [orderId], references: [id])
+  // Optional: usually an issue serves an order, but a standalone (order-less)
+  // chef requisition issues stock with no order attached.
+  orderId               String?
+  order                 Order?                   @relation(fields: [orderId], references: [id])
   productionJobId       String?
   productionJob         ProductionJob?           @relation(fields: [productionJobId], references: [id])
   qty                   Decimal                  @db.Decimal(14, 3)
@@ -1054,8 +1056,10 @@ model OrderOverheadAllocation {
 model ChefRequisition {
   id                String                @id @default(cuid())
   requisitionNo     String                @unique // CR-26-27-0001
-  orderId           String
-  order             Order                 @relation(fields: [orderId], references: [id])
+  // Optional: a requisition usually serves an order, but the chef can also
+  // raise a general/standalone stock request not tied to any order.
+  orderId           String?
+  order             Order?                @relation(fields: [orderId], references: [id])
   status            ChefRequisitionStatus @default(DRAFT)
   notes             String?
   createdById       String // the chef

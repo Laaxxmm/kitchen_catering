@@ -34,10 +34,13 @@ export default async function IssuingQueuePage() {
                 <StatusBadge status={r.status} />
               </div>
               <div className="mt-1 text-[12.5px] text-ik-ink-2">
-                Order <span className="font-mono">{r.order.code}</span> · {r.order.customer.name}
+                {r.order
+                  ? <>Order <span className="font-mono">{r.order.code}</span> · {r.order.customer.name}</>
+                  : <>General kitchen request</>}
               </div>
               <div className="mt-1 text-[11.5px] text-ik-ink-3">
-                Event {formatIST(r.order.eventDate, "yyyy-MM-dd HH:mm")} · {r._count.lines} line{r._count.lines === 1 ? "" : "s"}
+                {r.order ? <>Event {formatIST(r.order.eventDate, "yyyy-MM-dd HH:mm")} · </> : null}
+                {r._count.lines} line{r._count.lines === 1 ? "" : "s"}
               </div>
             </Link>
           ))}

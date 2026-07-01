@@ -77,6 +77,7 @@ export default async function DashboardPage() {
         <LauncherGreeting
           firstName={firstName}
           subtitle="Every order that needs you, with the next action on the card — accept, get ingredients, cook, hand to delivery."
+          actions={<Link href="/requisitions/new"><Button variant="outline">New stock request</Button></Link>}
         />
         <div className="grid gap-5">
           <MyTasksPanel />
@@ -167,9 +168,9 @@ export default async function DashboardPage() {
               id: r.id,
               requisitionNo: r.requisitionNo,
               status: r.status,
-              orderCode: r.order.code,
-              customerName: r.order.customer.name,
-              eventDate: r.order.eventDate.toISOString(),
+              orderCode: r.order?.code ?? null,
+              customerName: r.order?.customer.name ?? "Kitchen stock request",
+              eventDate: r.order?.eventDate.toISOString() ?? null,
               lines: r._count.lines,
             }))}
             pos={pos.map((p) => ({

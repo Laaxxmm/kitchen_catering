@@ -378,6 +378,14 @@ export const ChefRequisitionCreateInput = z.object({
   lines: z.array(ChefRequisitionLineInput).optional(),
 });
 
+// Standalone (order-less) stock request the chef raises for the kitchen —
+// not tied to any order. At least one line required.
+export const ChefRequisitionStandaloneInput = z.object({
+  notes: z.string().max(2000).nullable().optional(),
+  lines: z.array(ChefRequisitionLineInput).min(1),
+});
+export type ChefRequisitionStandaloneInputT = z.infer<typeof ChefRequisitionStandaloneInput>;
+
 export const ChefRequisitionIssueInput = z.object({
   lineId: z.string(),
   qtyToIssue: decimalString,

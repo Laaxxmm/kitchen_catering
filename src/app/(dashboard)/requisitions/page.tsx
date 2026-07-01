@@ -1,7 +1,9 @@
 import Link from "next/link";
-import { ChefRequisitionStatus } from "@prisma/client";
+import { ChefRequisitionStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { auth } from "@/server/auth";
 import { listChefRequisitions } from "@/server/actions/chef-requisitions";
 import { formatIST } from "@/lib/time";
 import { StatusPill, type PillTone } from "@/components/ik/StatusPill";
@@ -53,7 +55,9 @@ export default async function RequisitionsPage({
 }) {
   const sp = await searchParams;
   const filter = sp.filter ?? "all";
-  const requisitions = await listChefRequisitions();
+  const [session, requisitions] = await Promise.all([auth(), listChefRequisitions()]);
+  const role = session?.user?.role;
+  const canRaise = role === Role.ADMIN || role === Role.KITCHEN_HEAD;
   const now = new Date();
 
   const counts: Record<Group, number> = { issue: 0, done: 0, other: 0 };
@@ -63,7 +67,7 @@ export default async function RequisitionsPage({
   // store needs to issue these first. Drives the red dot on the "Needs
   // issuing" tab even when the plain count would read as routine amber.
   const urgentCount = requisitions.filter(
-    (r) => STATUS_META[r.status].group === "issue" && ["overdue", "today"].includes(eventUrgency(r.order.eventDate, now) ?? ""),
+    (r) => STATUS_META[r.status].group === "issue" && r.order != null && ["overdue", "today"].includes(eventUrgency(r.order.eventDate, now) ?? ""),
   ).length;
 
   const isAll = filter === "all";
@@ -76,6 +80,7 @@ export default async function RequisitionsPage({
         eyebrow="Make & deliver"
         title="Requisitions"
         description="Kitchen → store. What needs issuing — soonest events first — is up top."
+        actions={canRaise ? <Link href="/requisitions/new"><Button>New stock request</Button></Link> : null}
       />
 
       {/* Clickable KPI tabs — switch the view by status group. The "Needs
@@ -152,18 +157,22 @@ function ReqSection({ title, rows, now }: { title?: string; rows: Req[]; now: Da
         <TableBody>
           {rows.map((r) => {
             const meta = STATUS_META[r.status];
-            const urgency = meta.group === "issue" ? eventUrgency(r.order.eventDate, now) : null;
+            const urgency = meta.group === "issue" && r.order ? eventUrgency(r.order.eventDate, now) : null;
             return (
               <TableRow key={r.id}>
                 <TableCell>
                   <Link href={`/requisitions/${r.id}`} className="font-mono text-brand hover:underline">{r.requisitionNo}</Link>
                 </TableCell>
                 <TableCell>
-                  <Link href={`/orders/${r.orderId}`} className="font-mono text-[12px] text-brand hover:underline">{r.order.code}</Link>
+                  {r.order ? (
+                    <Link href={`/orders/${r.orderId}`} className="font-mono text-[12px] text-brand hover:underline">{r.order.code}</Link>
+                  ) : (
+                    <span className="text-[12px] text-ik-ink-3">General request</span>
+                  )}
                 </TableCell>
-                <TableCell>{r.order.customer.name}</TableCell>
+                <TableCell>{r.order?.customer.name ?? <span className="text-ik-ink-3">Kitchen stock</span>}</TableCell>
                 <TableCell className="font-mono text-[12px]">
-                  {formatIST(r.order.eventDate, "yyyy-MM-dd")}
+                  {r.order ? formatIST(r.order.eventDate, "yyyy-MM-dd") : <span className="text-ik-ink-3">—</span>}
                   {urgency === "overdue" && <span className="ml-2 rounded bg-alert-wash px-1.5 py-0.5 font-sans text-[10px] font-medium text-alert">Overdue</span>}
                   {urgency === "today" && <span className="ml-2 rounded bg-alert-wash px-1.5 py-0.5 font-sans text-[10px] font-medium text-alert">Today</span>}
                   {urgency === "soon" && <span className="ml-2 rounded bg-amber-wash px-1.5 py-0.5 font-sans text-[10px] font-medium text-amber">Soon</span>}

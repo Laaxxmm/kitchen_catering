@@ -20,10 +20,12 @@ import {
   ChefRequisitionIssueInput,
   ChefRequisitionLineInput,
   ChefRequisitionSendToProcurementInput,
+  ChefRequisitionStandaloneInput,
 } from "@/lib/validators";
 import { nextChefRequisitionNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
+import { notifyRoles } from "@/server/actions/notifications";
 import { createProductionJobForOrder } from "./production-jobs";
 
 
@@ -102,6 +104,72 @@ export async function createChefRequisition(raw: unknown) {
 
   revalidatePath("/requisitions");
   revalidatePath(`/orders/${input.orderId}`);
+  return { id: result.id, requisitionNo: result.requisitionNo };
+}
+
+/**
+ * Standalone (order-less) stock request. The chef needs ingredients for the
+ * kitchen that aren't tied to any specific order — general prep, low kitchen
+ * stock, spoilage replacement. Goes straight to the store (SUBMITTED) so they
+ * can issue it, exactly like an order requisition, but with no order link.
+ */
+export async function createStandaloneChefRequisition(raw: unknown) {
+  const session = await requireRole(REQUISITION_CREATE_ROLES);
+  const input = ChefRequisitionStandaloneInput.parse(raw);
+
+  const result = await db.$transaction(async (tx) => {
+    const requisitionNo = await nextChefRequisitionNumber(tx);
+
+    const ingredientIds = input.lines.map((l) => l.ingredientId);
+    const ingredients = await tx.ingredient.findMany({
+      where: { id: { in: ingredientIds } },
+      select: { id: true, avgUnitCost: true, unit: true },
+    });
+    const costMap = new Map(ingredients.map((i) => [i.id, i.avgUnitCost.toString()]));
+    const unitMap = new Map(ingredients.map((i) => [i.id, i.unit]));
+
+    const created = await tx.chefRequisition.create({
+      data: {
+        requisitionNo,
+        orderId: null,
+        // Straight to the store to fulfil — a standalone request is meant to
+        // be issued, not parked as a draft.
+        status: ChefRequisitionStatus.SUBMITTED,
+        submittedAt: new Date(),
+        notes: input.notes ?? null,
+        createdById: session.user.id,
+        lines: {
+          create: input.lines.map((l) => ({
+            ingredientId: l.ingredientId,
+            requestedQty: l.requestedQty,
+            unit: l.unit ?? unitMap.get(l.ingredientId) ?? "",
+            unitCostSnapshot: costMap.get(l.ingredientId) ?? "0",
+            notes: l.notes ?? null,
+          })),
+        },
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "CHEF_REQUISITION_CREATED",
+        entity: "ChefRequisition",
+        entityId: created.id,
+        payloadHash: sha256Json({ orderId: null, standalone: true, lines: input.lines.length }),
+      },
+    });
+    return created;
+  });
+
+  await notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+    kind: "GENERIC",
+    title: `Kitchen stock request ${result.requisitionNo}`,
+    body: `The chef raised a general stock request (no order). Open to issue line by line.`,
+    link: `/requisitions/${result.id}`,
+    dedupeKey: `chef-standalone-req:${result.id}`,
+  });
+
+  revalidatePath("/requisitions");
   return { id: result.id, requisitionNo: result.requisitionNo };
 }
 
@@ -240,7 +308,8 @@ export async function submitChefRequisition(id: string) {
     });
 
     // First requisition for the order? Transition order to ISSUING.
-    if (req.order.status === OrderStatus.CHEF_REQUISITION_PENDING) {
+    // Standalone (order-less) requisitions have no order to advance.
+    if (req.order && req.order.status === OrderStatus.CHEF_REQUISITION_PENDING) {
       await tx.order.update({ where: { id: req.order.id }, data: { status: OrderStatus.ISSUING } });
     }
 
@@ -348,10 +417,13 @@ export async function issueChefRequisitionLine(raw: unknown) {
       },
     });
 
-    // 5. If every requisition for the order is fully issued, advance the order
-    if (allDone) {
+    // 5. If every requisition for the order is fully issued, advance the
+    //    order. Standalone (order-less) requisitions have nothing to advance —
+    //    fulfilling them just decrements stock.
+    const reqOrderId = line.requisition.orderId;
+    if (allDone && reqOrderId) {
       const allReqs = await tx.chefRequisition.findMany({
-        where: { orderId: line.requisition.orderId },
+        where: { orderId: reqOrderId },
         select: { id: true, status: true },
       });
       const everyReqDone = allReqs.every((r) =>
@@ -361,11 +433,11 @@ export async function issueChefRequisitionLine(raw: unknown) {
       );
       if (everyReqDone) {
         await tx.order.update({
-          where: { id: line.requisition.orderId },
+          where: { id: reqOrderId },
           data: { status: OrderStatus.READY_FOR_PRODUCTION },
         });
         // Auto-create the production job. Idempotent on order.
-        await createProductionJobForOrder(tx, line.requisition.orderId);
+        await createProductionJobForOrder(tx, reqOrderId);
       }
     }
 
@@ -446,7 +518,11 @@ export async function listChefRequisitions(
       ...(opts.status ? { status: { in: opts.status } } : {}),
       ...(opts.orderId ? { orderId: opts.orderId } : {}),
       // Hide requisitions whose order was cancelled / rejected / completed.
-      ...(opts.activeOrderOnly ? { order: { status: { notIn: INACTIVE_ORDER_STATUSES } } } : {}),
+      // Standalone requisitions (no order) always pass — there's no order to
+      // go inactive.
+      ...(opts.activeOrderOnly
+        ? { OR: [{ orderId: null }, { order: { status: { notIn: INACTIVE_ORDER_STATUSES } } }] }
+        : {}),
     },
     include: {
       order: { select: { code: true, customer: { select: { name: true } }, eventDate: true } },
