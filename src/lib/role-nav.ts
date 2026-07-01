@@ -56,7 +56,7 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   // (see customer-invoices.markCustomerInvoicePaid).
   ACCOUNTS: new Set([
     "dashboard", "tasks", "roomservicebills", "invoices", "payments", "inventory",
-    "purchaseorders", "vendors", "supplierbills", "pettycash",
+    "purchaseorders", "vendors", "supplierbills", "pettycash", "reports",
   ]),
   // Housekeeping manager: laser-focused on the hotel-side stockroom.
   // Personal task list + housekeeping module only.

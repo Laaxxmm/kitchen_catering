@@ -121,7 +121,7 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // reports stay admin/manager.
   { pattern: /^\/petty-cash(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   { pattern: /^\/salary(\/|$)/, allow: ["ADMIN", "MANAGER"] },
-  { pattern: /^\/reports(\/|$)/, allow: ["ADMIN", "MANAGER"] },
+  { pattern: /^\/reports(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
 ];
 
 export default auth((req) => {
