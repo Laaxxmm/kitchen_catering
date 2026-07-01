@@ -40,7 +40,7 @@ import { indefineStateCode } from "@/lib/org";
 import { isImmediateChannel, channelWantsFeedback, isEventDeliveryChannel } from "@/lib/order-channels";
 import { getOrCreateHouseCustomerId } from "@/lib/house-customer";
 import { createNotification, notifyRoles } from "@/server/actions/notifications";
-import { formatIST } from "@/lib/time";
+import { formatIST, istToUtc } from "@/lib/time";
 
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.SALES, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.ACCOUNTS, Role.DELIVERY,
@@ -217,7 +217,11 @@ export async function createOrder(raw: unknown) {
     // collect event date, delivery address/window or place of supply — the
     // columns are NOT NULL, so fill sensible defaults: served now, to the
     // room/table, taxed at the hotel's own state.
-    const eventDateVal = input.eventDate ? new Date(input.eventDate) : new Date();
+    // The form sends IST clock time (from a datetime-local input); convert
+    // through istToUtc so it's stored as the correct UTC instant. Using a bare
+    // new Date() here parsed it as UTC on the server, shifting every event
+    // ~5.5h forward (and across midnight) when shown back in IST.
+    const eventDateVal = input.eventDate ? istToUtc(input.eventDate) : new Date();
     const deliveryAddressVal =
       input.deliveryAddress?.trim() ||
       (input.roomNumber?.trim()
@@ -225,8 +229,8 @@ export async function createOrder(raw: unknown) {
         : input.tableNumber?.trim()
           ? `Table ${input.tableNumber.trim()}`
           : "In-house service");
-    const windowStartVal = input.deliveryWindowStart ? new Date(input.deliveryWindowStart) : eventDateVal;
-    const windowEndVal = input.deliveryWindowEnd ? new Date(input.deliveryWindowEnd) : eventDateVal;
+    const windowStartVal = input.deliveryWindowStart ? istToUtc(input.deliveryWindowStart) : eventDateVal;
+    const windowEndVal = input.deliveryWindowEnd ? istToUtc(input.deliveryWindowEnd) : eventDateVal;
     const placeOfSupplyVal = input.placeOfSupplyStateCode || indefineStateCode();
 
     // In-house orders may not name a guest — book them against the built-in
@@ -291,12 +295,12 @@ export async function updateOrderDraft(id: string, raw: unknown) {
     const data: Record<string, unknown> = {};
     if (input.customerId) data.customerId = input.customerId;
     if (input.channel) data.channel = input.channel;
-    if (input.eventDate) data.eventDate = new Date(input.eventDate);
+    if (input.eventDate) data.eventDate = istToUtc(input.eventDate);
     if (input.headcount) data.headcount = input.headcount;
     if (input.mealType) data.mealType = input.mealType;
     if (input.deliveryAddress) data.deliveryAddress = input.deliveryAddress;
-    if (input.deliveryWindowStart) data.deliveryWindowStart = new Date(input.deliveryWindowStart);
-    if (input.deliveryWindowEnd) data.deliveryWindowEnd = new Date(input.deliveryWindowEnd);
+    if (input.deliveryWindowStart) data.deliveryWindowStart = istToUtc(input.deliveryWindowStart);
+    if (input.deliveryWindowEnd) data.deliveryWindowEnd = istToUtc(input.deliveryWindowEnd);
     if (input.placeOfSupplyStateCode) data.placeOfSupplyStateCode = input.placeOfSupplyStateCode;
     if (input.roomNumber !== undefined) data.roomNumber = input.roomNumber?.trim() || null;
     if (input.tableNumber !== undefined) data.tableNumber = input.tableNumber?.trim() || null;

@@ -19,6 +19,7 @@ import {
 } from "@/lib/validators";
 import { nextDeliveryNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
+import { istToUtc } from "@/lib/time";
 import { channelWantsFeedback, isEventDeliveryChannel } from "@/lib/order-channels";
 import { notifyRoles } from "@/server/actions/notifications";
 
@@ -380,7 +381,8 @@ export async function scheduleDelivery(raw: unknown) {
         orderId: order.id,
         driverUserId: input.driverUserId,
         vehicleNo: input.vehicleNo ?? null,
-        scheduledAt: new Date(input.scheduledAt),
+        // datetime-local sends IST clock time — convert to a UTC instant.
+        scheduledAt: istToUtc(input.scheduledAt),
         // otpHash deliberately left null — OTP step retired.
         recipientName: order.customer.contactName ?? null,
         recipientPhone: order.customer.phone ?? null,
