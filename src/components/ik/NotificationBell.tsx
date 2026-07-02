@@ -9,7 +9,6 @@ import {
   listMyNotifications,
   markAllNotificationsRead,
   markNotificationRead,
-  myUnreadCount,
 } from "@/server/actions/notifications";
 import { isNextNavigationError } from "@/lib/next-error";
 import { formatIST } from "@/lib/time";
@@ -72,7 +71,11 @@ export function NotificationBell({ placement = "up" }: { placement?: "up" | "dow
     let cancelled = false;
     async function refresh() {
       try {
-        const c = await myUnreadCount();
+        // Poll a route handler (not a server action) so a stale tab left open
+        // across a redeploy keeps working instead of spamming the server logs.
+        const res = await fetch("/api/notifications/unread-count", { cache: "no-store" });
+        if (!res.ok) return;
+        const { count: c } = (await res.json()) as { count: number };
         if (cancelled) return;
         setCount(c);
         const prev = lastCountRef.current;
