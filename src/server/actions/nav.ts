@@ -1,5 +1,6 @@
 "use server";
 
+import { unstable_cache } from "next/cache";
 import {
   CustomerInvoiceStatus,
   ChefRequisitionStatus,
@@ -19,10 +20,19 @@ import type { NavBadges } from "@/lib/nav-config";
  * admin/manager (the roles that see every group); other roles have small,
  * focused navs that don't need badges. All counts come from existing data —
  * nothing is hardcoded. Zero counts are omitted so no badge renders.
+ *
+ * The layout renders this on EVERY navigation, so the (org-wide) counts are
+ * cached for 30s — the badges are just "needs you" hints, so slight staleness
+ * is fine, and it keeps every page load from re-running ~8 count queries.
  */
 export async function getNavBadges(): Promise<NavBadges> {
   const session = await requireSession();
   if (!hasRole(session, [Role.ADMIN, Role.MANAGER])) return {};
+  return computeNavBadges();
+}
+
+const computeNavBadges = unstable_cache(
+  async (): Promise<NavBadges> => {
   const now = new Date();
 
   const [pendingOrders, openReqs, ingredients, poPending, billsMatch, billsPay, openInvoices] =
@@ -70,4 +80,7 @@ export async function getNavBadges(): Promise<NavBadges> {
   if (overdueInvoices > 0) badges.money = { count: overdueInvoices, tone: "red" };
   else if (openInvoices.length > 0) badges.money = { count: openInvoices.length, tone: "amber" };
   return badges;
-}
+  },
+  ["nav-badges-v1"],
+  { revalidate: 30 },
+);
