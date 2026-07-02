@@ -23,7 +23,20 @@ interface Props {
  * through to the dedicated P&L page.
  */
 export async function OrderCostSummary({ orderId }: Props) {
-  const pnl = await computeOrderPnL(orderId);
+  // The P&L rolls up recipes, issues, labour and invoices — a lot of moving
+  // parts. If any of it trips, degrade to a small note rather than taking down
+  // the whole order page.
+  let pnl: Awaited<ReturnType<typeof computeOrderPnL>>;
+  try {
+    pnl = await computeOrderPnL(orderId);
+  } catch (err) {
+    console.error("OrderCostSummary: P&L failed", err);
+    return (
+      <div className="rounded-md border border-ik-rule bg-ik-card p-4 text-[12.5px] text-ik-ink-3">
+        Cost &amp; profitability couldn&apos;t be computed for this order right now.
+      </div>
+    );
+  }
   if (!pnl) return null;
 
   const revenue = pnl.revenue.invoiced.toNumber();
