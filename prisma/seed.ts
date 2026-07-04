@@ -29,10 +29,18 @@ async function main() {
   }
 
   // ─── Users ──────────────────────────────────────────────────────
-  // Placeholder password "changeme123" — dev/bootstrap only. Real prod
-  // passwords should be rotated via /admin/users immediately after the
-  // first deploy completes.
-  const passwordHash = await bcrypt.hash("changeme123", 12);
+  // Bootstrap password comes from SEED_DEFAULT_PASSWORD; the "changeme123"
+  // fallback is dev-only (it's public in this repo, so anyone can log into
+  // a deploy seeded with it). Rotate real passwords via /admin/users right
+  // after the first deploy either way.
+  const seedPassword = process.env.SEED_DEFAULT_PASSWORD || "changeme123";
+  if (!process.env.SEED_DEFAULT_PASSWORD && process.env.NODE_ENV === "production") {
+    console.warn(
+      "[seed] WARNING: seeding production users with the public default password. " +
+        "Set SEED_DEFAULT_PASSWORD (or rotate every account immediately).",
+    );
+  }
+  const passwordHash = await bcrypt.hash(seedPassword, 12);
   const users: Array<{ email: string; name: string; role: Role }> = [
     { email: "admin@indefine.in",    name: "Admin User",      role: Role.ADMIN },
     { email: "manager@indefine.in",  name: "Manager User",    role: Role.MANAGER },

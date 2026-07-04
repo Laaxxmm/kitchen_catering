@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { DocumentEntityType, Role } from "@prisma/client";
 import { auth } from "@/server/auth";
 import { db } from "@/server/db";
 import { streamDocument } from "@/lib/storage";
@@ -6,12 +7,29 @@ import { Readable } from "node:stream";
 
 // Authenticated download of a stored Document. The DB row carries the
 // storagePath (relative under UPLOAD_ROOT); we stream the file back if
-// the caller is signed in. No role gating yet — every signed-in user
-// who can see a vendor bill / petty cash voucher should be able to see
-// the attached invoice PDF. Tighten later if a stricter rule emerges.
+// the caller's role is allowed to see the entity the document hangs off.
+// Mirrors the middleware's module gates — without this, any signed-in
+// user could pull any attachment (vendor bills, petty cash proofs…) by
+// enumerating document ids.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ALL_STAFF: Role[] = [
+  Role.ADMIN, Role.MANAGER, Role.SALES, Role.STORE_KEEPER, Role.KITCHEN_HEAD,
+  Role.ACCOUNTS, Role.DELIVERY, Role.FNB_SERVICE,
+];
+const FINANCE: Role[] = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
+const ENTITY_ROLES: Record<DocumentEntityType, Role[]> = {
+  [DocumentEntityType.ORDER]: ALL_STAFF,
+  [DocumentEntityType.QUOTE]: [Role.ADMIN, Role.MANAGER, Role.SALES],
+  [DocumentEntityType.CUSTOMER_INVOICE]: [...FINANCE, Role.SALES, Role.DELIVERY, Role.FNB_SERVICE],
+  [DocumentEntityType.VENDOR_PO]: [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.ACCOUNTS],
+  [DocumentEntityType.VENDOR_BILL]: FINANCE,
+  [DocumentEntityType.DELIVERY]: [Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD, Role.DELIVERY, Role.FNB_SERVICE],
+  [DocumentEntityType.PETTY_CASH_VOUCHER]: FINANCE,
+  [DocumentEntityType.PURCHASE_REQUISITION]: [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.ACCOUNTS],
+};
 
 export async function GET(
   _req: NextRequest,
@@ -25,6 +43,11 @@ export async function GET(
   const doc = await db.document.findUnique({ where: { id } });
   if (!doc) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  const allowed = ENTITY_ROLES[doc.entityType] ?? [Role.ADMIN];
+  const role = session.user.role as Role;
+  if (role !== Role.ADMIN && !allowed.includes(role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const file = await streamDocument(doc.storagePath);
   if (!file) {
