@@ -87,12 +87,6 @@ const schema = z.object({
   // Set when you wire a Railway cron service hitting
   // /api/cron/vendor-reminders. Generate via openssl rand -base64 32.
   CRON_SECRET: z.string().optional(),
-
-  // ─── AI integrations (optional) ──────────────────────────────────
-  AI_ENABLED: z.string().optional(),
-  ANTHROPIC_API_KEY: z.string().optional(),
-  AI_MODEL_DEFAULT: z.string().optional(),
-  AI_MODEL_FAST: z.string().optional(),
 });
 
 function loadEnv() {

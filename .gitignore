@@ -6,7 +6,6 @@ node_modules/
 # testing
 coverage/
 test-results/
-playwright-report/
 
 # next.js
 .next/
@@ -75,3 +74,6 @@ android/app/release/
 android/app/debug/
 *.iml
 .gradle/
+
+# local db reset logs
+scripts/*.log

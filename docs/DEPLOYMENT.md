@@ -54,7 +54,6 @@ to sensible defaults.
 | `INDEFINE_GSTIN` / `INDEFINE_ADDRESS` / `INDEFINE_BANK_DETAILS` | Override org-level constants used on invoice PDFs. |
 | `EINVOICE_PROVIDER` + `CLEARTAX_API_KEY` + `CLEARTAX_GSP_GSTIN` | Live e-invoicing. Defaults to `nic-sandbox`. |
 | `STORAGE_S3_*` | Cloud uploads. Without these, files go to `./public/uploads`. |
-| `AI_ENABLED=true` + `ANTHROPIC_API_KEY` | Claude-backed features. |
 
 ### First deploy only
 
