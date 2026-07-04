@@ -60,8 +60,15 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
     await reverseVendorBillPayment({ paymentId, reason });
   }
 
-  const discrepancies: Array<{ line: string; field: string; poValue?: string; billValue: string; delta?: string }> =
-    bill.discrepancyNote ? JSON.parse(bill.discrepancyNote) : [];
+  let discrepancies: Array<{ line: string; field: string; poValue?: string; billValue: string; delta?: string }> = [];
+  if (bill.discrepancyNote) {
+    try {
+      discrepancies = JSON.parse(bill.discrepancyNote);
+    } catch {
+      // Corrupt/legacy note must not take the whole bill page down.
+      console.warn(`[vendor-bill] unparseable discrepancyNote on ${bill.billNo}`);
+    }
+  }
 
   return (
     <>

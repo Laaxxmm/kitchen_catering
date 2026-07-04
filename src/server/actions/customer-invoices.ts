@@ -31,8 +31,12 @@ import { notifyRoles } from "@/server/actions/notifications";
 import type { Prisma } from "@prisma/client";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
+// F&B Service (DELIVERY / retired alias FNB_SERVICE) can view generated
+// bills — the middleware admits them to /invoices/[id] for room-service
+// billing, so the read gate must match or the page crashes for them.
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.SALES, Role.ACCOUNTS, Role.KITCHEN_HEAD, Role.STORE_KEEPER,
+  Role.DELIVERY, Role.FNB_SERVICE,
 ];
 
 function newShareToken(): string {

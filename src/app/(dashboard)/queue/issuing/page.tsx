@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ChefRequisitionStatus } from "@prisma/client";
+import { ChefRequisitionStatus, Role } from "@prisma/client";
+import { gateRolePage } from "@/server/rbac";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { listChefRequisitions } from "@/server/actions/chef-requisitions";
@@ -8,6 +9,7 @@ import { formatIST } from "@/lib/time";
 export const dynamic = "force-dynamic";
 
 export default async function IssuingQueuePage() {
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER]);
   const requisitions = await listChefRequisitions({
     status: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED],
   });

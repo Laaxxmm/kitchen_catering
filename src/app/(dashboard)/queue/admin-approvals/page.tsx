@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { OrderStatus } from "@prisma/client";
+import { OrderStatus, Role } from "@prisma/client";
+import { gateRolePage } from "@/server/rbac";
 import { PageHeader } from "@/components/ui/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { listOrders } from "@/server/actions/orders";
@@ -9,6 +10,7 @@ import { formatIST } from "@/lib/time";
 export const dynamic = "force-dynamic";
 
 export default async function AdminApprovalsQueuePage() {
+  await gateRolePage([Role.ADMIN, Role.MANAGER]);
   const orders = await listOrders({ status: [OrderStatus.PENDING_ADMIN_APPROVAL] });
   return (
     <>

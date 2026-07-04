@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { OrderStatus } from "@prisma/client";
+import { OrderStatus, Role } from "@prisma/client";
+import { gateRolePage } from "@/server/rbac";
 import { PageHeader } from "@/components/ui/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -10,6 +11,9 @@ import { formatIST } from "@/lib/time";
 export const dynamic = "force-dynamic";
 
 export default async function ManagerApprovalsQueuePage() {
+  // Redirects wrong-role visits instead of letting a deeper role gate
+  // throw into the RSC render (which shows the generic crash page).
+  await gateRolePage([Role.ADMIN, Role.MANAGER]);
   const orders = await listOrders({
     status: [OrderStatus.CHANGES_PROPOSED_BY_CHEF],
   });
