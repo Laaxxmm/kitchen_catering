@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Combobox } from "@/components/ui/combobox";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface OrderItemOption {
   /** The order-item id — the swap targets this specific line. */
@@ -24,10 +25,10 @@ interface DishOption {
 }
 
 interface Props {
-  onApprove: (note: string) => Promise<void>;
-  onSuggest: (note: string) => Promise<void>;
+  onApprove: (note: string) => Promise<ActionResult>;
+  onSuggest: (note: string) => Promise<ActionResult>;
   /** Apply a dish swap directly to the order (chef's call). */
-  onApplySwap: (orderItemId: string, newDishId: string, reason: string) => Promise<void>;
+  onApplySwap: (orderItemId: string, newDishId: string, reason: string) => Promise<ActionResult>;
   /** Current dishes on the order — populates the "Replace" dropdown. */
   orderItems: OrderItemOption[];
   /** Full dish catalogue — populates the "With" dropdown. */
@@ -68,14 +69,18 @@ export function ChefApprovalBlock({ onApprove, onSuggest, onApplySwap, orderItem
     [dishes],
   );
 
-  function run(fn: () => Promise<void>, successMsg: string) {
+  function run(fn: () => Promise<ActionResult>, successMsg: string) {
     if (!note.trim()) {
       toast.error("Please add a short note before continuing");
       return;
     }
     startTransition(async () => {
       try {
-        await fn();
+        const res = await fn();
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(successMsg);
         setNote("");
         setSwapReason("");
@@ -96,7 +101,11 @@ export function ChefApprovalBlock({ onApprove, onSuggest, onApplySwap, orderItem
     if (!toDishId) return toast.error("Pick a replacement dish");
     startTransition(async () => {
       try {
-        await onApplySwap(fromDish, toDishId, swapReason.trim());
+        const res = await onApplySwap(fromDish, toDishId, swapReason.trim());
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Dish swapped on the order");
         setSwapReason("");
         setShowSwap(false);

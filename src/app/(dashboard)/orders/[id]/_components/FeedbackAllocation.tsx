@@ -31,7 +31,11 @@ export function FeedbackAllocation({ orderId, canAllocate, assigneeName, rating,
     if (!assigneeId) return toast.error("Pick a person");
     startTransition(async () => {
       try {
-        await allocateOrderFeedback(orderId, assigneeId);
+        const res = await allocateOrderFeedback(orderId, assigneeId);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Feedback collection assigned");
         setOpen(false);
         router.refresh();

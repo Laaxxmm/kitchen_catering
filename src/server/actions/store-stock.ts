@@ -1,11 +1,16 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Role } from "@prisma/client";
+import { Role, type Prisma } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResult,
+} from "@/server/action-result";
 
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER, Role.MAINTENANCE_MANAGER,
@@ -21,6 +26,22 @@ const WRITE_ROLES_BY_STORE: Record<StoreKey, Role[]> = {
 };
 
 export type StoreKey = "housekeeping" | "maintenance" | "banquet";
+
+/**
+ * Row-lock a store item for the rest of the transaction. adjustStoreStock
+ * reads currentStock, computes, then writes back — without the lock a
+ * concurrent movement (receipt / issue / another adjustment) reads the same
+ * snapshot and one update is silently lost. FOR UPDATE serialises them.
+ */
+async function lockStoreItemRow(tx: Prisma.TransactionClient, store: StoreKey, id: string) {
+  if (store === "housekeeping") {
+    await tx.$executeRaw`SELECT 1 FROM "HousekeepingItem" WHERE "id" = ${id} FOR UPDATE`;
+  } else if (store === "maintenance") {
+    await tx.$executeRaw`SELECT 1 FROM "MaintenanceItem" WHERE "id" = ${id} FOR UPDATE`;
+  } else {
+    await tx.$executeRaw`SELECT 1 FROM "BanquetItem" WHERE "id" = ${id} FOR UPDATE`;
+  }
+}
 
 interface RawItem {
   id: string;
@@ -126,12 +147,28 @@ export async function adjustStoreStock(input: {
   qty: string;
   reason: string;
   note?: string;
-}) {
+}): Promise<ActionResult> {
+  try {
+    return await adjustStoreStockInner(input);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function adjustStoreStockInner(input: {
+  store: StoreKey;
+  itemId: string;
+  mode: "set" | "delta";
+  qty: string;
+  reason: string;
+  note?: string;
+}): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES_BY_STORE[input.store]);
-  if (!input.reason?.trim()) throw new Error("A reason is required");
+  if (!input.reason?.trim()) throw new ActionError("A reason is required");
   const amount = toDecimal(input.qty || "0");
 
   await db.$transaction(async (tx) => {
+    await lockStoreItemRow(tx, input.store, input.itemId);
     const find = { where: { id: input.itemId }, select: { currentStock: true, name: true } };
     const item =
       input.store === "housekeeping"
@@ -139,12 +176,12 @@ export async function adjustStoreStock(input: {
         : input.store === "maintenance"
           ? await tx.maintenanceItem.findUnique(find)
           : await tx.banquetItem.findUnique(find);
-    if (!item) throw new Error("Item not found");
+    if (!item) throw new ActionError("Item not found");
 
     const before = toDecimal(item.currentStock);
     const after = input.mode === "set" ? amount : before.plus(amount);
-    if (after.lt(0)) throw new Error("Adjusted on-hand cannot be negative");
-    if (after.eq(before)) throw new Error("No change — the quantity matches current on-hand");
+    if (after.lt(0)) throw new ActionError("Adjusted on-hand cannot be negative");
+    if (after.eq(before)) throw new ActionError("No change — the quantity matches current on-hand");
     const next = after.toDecimalPlaces(3).toString();
 
     if (input.store === "housekeeping") await tx.housekeepingItem.update({ where: { id: input.itemId }, data: { currentStock: next } });
@@ -171,4 +208,5 @@ export async function adjustStoreStock(input: {
 
   revalidatePath(`/${input.store}`);
   revalidatePath(`/${input.store}/items`);
+  return { ok: true };
 }

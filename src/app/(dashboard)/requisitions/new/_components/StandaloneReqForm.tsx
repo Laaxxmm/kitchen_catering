@@ -41,7 +41,7 @@ export function StandaloneReqForm({ ingredients }: { ingredients: Ingredient[] }
     if (payload.length === 0) return toast.error("Add at least one ingredient with a quantity");
     startTransition(async () => {
       try {
-        const { requisitionNo } = await createStandaloneChefRequisition({
+        const res = await createStandaloneChefRequisition({
           notes: notes.trim() || undefined,
           lines: payload.map((l) => ({
             ingredientId: l.ingredientId,
@@ -50,7 +50,11 @@ export function StandaloneReqForm({ ingredients }: { ingredients: Ingredient[] }
             notes: l.notes.trim() || null,
           })),
         });
-        toast.success(`Stock request ${requisitionNo} sent to the store`);
+        if (res.ok === false) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success(`Stock request ${res.requisitionNo} sent to the store`);
         router.push("/requisitions");
       } catch (err) {
         if (isNextNavigationError(err)) throw err;

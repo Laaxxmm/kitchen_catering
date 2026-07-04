@@ -71,31 +71,31 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   }
   async function doChefApprove(note: string) {
     "use server";
-    await chefApproveOrder(id, { decision: "APPROVED", note });
+    return await chefApproveOrder(id, { decision: "APPROVED", note });
   }
   async function doChefSuggest(note: string) {
     "use server";
-    await chefApproveOrder(id, { decision: "SUGGESTED_CHANGES", note });
+    return await chefApproveOrder(id, { decision: "SUGGESTED_CHANGES", note });
   }
   async function doApplySwap(orderItemId: string, newDishId: string, reason: string) {
     "use server";
-    await swapOrderItemDish(id, orderItemId, newDishId, reason || null);
+    return await swapOrderItemDish(id, orderItemId, newDishId, reason || null);
   }
   async function doManagerApproveChanges(note: string) {
     "use server";
-    await managerApproveChefSuggestion(id, { decision: "APPROVED", note: note || undefined });
+    return await managerApproveChefSuggestion(id, { decision: "APPROVED", note: note || undefined });
   }
   async function doManagerRejectChanges(note: string) {
     "use server";
-    await managerApproveChefSuggestion(id, { decision: "REJECTED", note: note || undefined });
+    return await managerApproveChefSuggestion(id, { decision: "REJECTED", note: note || undefined });
   }
   async function doAdminApprove(note: string) {
     "use server";
-    await adminApproveOrder(id, { decision: "APPROVED", note });
+    return await adminApproveOrder(id, { decision: "APPROVED", note });
   }
   async function doAdminReject(note: string) {
     "use server";
-    await adminApproveOrder(id, { decision: "REJECTED", note });
+    return await adminApproveOrder(id, { decision: "REJECTED", note });
   }
   async function doCancel(formData: FormData) {
     "use server";

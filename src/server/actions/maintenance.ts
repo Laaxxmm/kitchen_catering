@@ -12,6 +12,25 @@ import {
   MaintenanceReceiptInput,
   MaintenanceStaffInput,
 } from "@/lib/validators";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResultWith,
+} from "@/server/action-result";
+
+/**
+ * Row-lock maintenance items for the rest of the transaction. Every stock
+ * movement (receipt / activity consumption) reads or updates currentStock —
+ * without the lock two concurrent movements read the same snapshot and one
+ * update is silently lost (stock can even go negative past the availability
+ * check). FOR UPDATE serialises them; ids are locked in a stable order so
+ * concurrent multi-line movements can't deadlock.
+ */
+async function lockMaintenanceItemRows(tx: Prisma.TransactionClient, ids: string[]) {
+  for (const id of [...new Set(ids)].sort()) {
+    await tx.$executeRaw`SELECT 1 FROM "MaintenanceItem" WHERE "id" = ${id} FOR UPDATE`;
+  }
+}
 
 // Maintenance department — electrical + mechanical work at rooms, plus its
 // own spares inventory (switches, pipes, bulbs, washers …).
@@ -259,7 +278,15 @@ export async function listMaintenanceItems(opts: { activeOnly?: boolean; categor
 
 // ─── Receipts ─────────────────────────────────────────────────────────
 
-export async function recordMaintenanceReceipt(raw: unknown) {
+export async function recordMaintenanceReceipt(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await recordMaintenanceReceiptInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function recordMaintenanceReceiptInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = MaintenanceReceiptInput.parse(raw);
 
@@ -269,10 +296,11 @@ export async function recordMaintenanceReceipt(raw: unknown) {
     costPerUnit: l.costPerUnit ? new Prisma.Decimal(l.costPerUnit) : null,
   }));
   for (const l of lines) {
-    if (l.qty.lessThanOrEqualTo(0)) throw new Error("Quantity must be > 0");
+    if (l.qty.lessThanOrEqualTo(0)) throw new ActionError("Quantity must be > 0");
   }
 
   const receipt = await db.$transaction(async (tx) => {
+    await lockMaintenanceItemRows(tx, lines.map((l) => l.itemId));
     const created = await tx.maintenanceReceipt.create({
       data: {
         receivedAt: istToUtc(input.receivedAt),
@@ -308,7 +336,7 @@ export async function recordMaintenanceReceipt(raw: unknown) {
   revalidatePath("/maintenance/receipts");
   revalidatePath("/maintenance/items");
   revalidatePath("/maintenance");
-  return { id: receipt.id };
+  return { ok: true, id: receipt.id };
 }
 
 export async function listMaintenanceReceipts(opts: { limit?: number } = {}) {
@@ -325,7 +353,15 @@ export async function listMaintenanceReceipts(opts: { limit?: number } = {}) {
 
 // ─── Activities (work performed at room) ──────────────────────────────
 
-export async function recordMaintenanceActivity(raw: unknown) {
+export async function recordMaintenanceActivity(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await recordMaintenanceActivityInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function recordMaintenanceActivityInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = MaintenanceActivityInput.parse(raw);
 
@@ -334,30 +370,33 @@ export async function recordMaintenanceActivity(raw: unknown) {
     qty: new Prisma.Decimal(l.quantity),
   }));
   for (const l of lines) {
-    if (l.qty.lessThanOrEqualTo(0)) throw new Error("Quantity must be > 0");
-  }
-
-  // Pre-check stock for any consumed items.
-  if (lines.length > 0) {
-    const itemIds = [...new Set(lines.map((l) => l.itemId))];
-    const items = await db.maintenanceItem.findMany({
-      where: { id: { in: itemIds } },
-      select: { id: true, name: true, currentStock: true, unit: true, active: true },
-    });
-    const byId = new Map(items.map((i) => [i.id, i]));
-    for (const l of lines) {
-      const it = byId.get(l.itemId);
-      if (!it) throw new Error("Item not found");
-      if (!it.active) throw new Error(`Item ${it.name} is inactive`);
-      if (new Decimal(it.currentStock.toString()).lt(new Decimal(l.qty.toString()))) {
-        throw new Error(
-          `Not enough ${it.name} in stock (have ${it.currentStock.toString()} ${it.unit})`
-        );
-      }
-    }
+    if (l.qty.lessThanOrEqualTo(0)) throw new ActionError("Quantity must be > 0");
   }
 
   const activity = await db.$transaction(async (tx) => {
+    // Check stock for any consumed items under the row lock — a pre-check
+    // outside the txn could pass for two concurrent activities that
+    // together overdraw.
+    if (lines.length > 0) {
+      const itemIds = [...new Set(lines.map((l) => l.itemId))];
+      await lockMaintenanceItemRows(tx, itemIds);
+      const items = await tx.maintenanceItem.findMany({
+        where: { id: { in: itemIds } },
+        select: { id: true, name: true, currentStock: true, unit: true, active: true },
+      });
+      const byId = new Map(items.map((i) => [i.id, i]));
+      for (const l of lines) {
+        const it = byId.get(l.itemId);
+        if (!it) throw new ActionError("Item not found");
+        if (!it.active) throw new ActionError(`Item ${it.name} is inactive`);
+        if (new Decimal(it.currentStock.toString()).lt(new Decimal(l.qty.toString()))) {
+          throw new ActionError(
+            `Not enough ${it.name} in stock (have ${it.currentStock.toString()} ${it.unit})`
+          );
+        }
+      }
+    }
+
     const created = await tx.maintenanceActivity.create({
       data: {
         performedAt: istToUtc(input.performedAt),
@@ -394,7 +433,7 @@ export async function recordMaintenanceActivity(raw: unknown) {
   revalidatePath("/maintenance/activities");
   revalidatePath("/maintenance/items");
   revalidatePath("/maintenance");
-  return { id: activity.id };
+  return { ok: true, id: activity.id };
 }
 
 export interface ListActivitiesOpts {

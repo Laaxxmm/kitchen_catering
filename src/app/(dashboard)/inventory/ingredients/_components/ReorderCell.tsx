@@ -28,7 +28,12 @@ export function ReorderCell({ id, value, canEdit }: { id: string; value: string;
     }
     startTransition(async () => {
       try {
-        await setReorderLevel(id, val || "0");
+        const res = await setReorderLevel(id, val || "0");
+        if (res && res.ok === false) {
+          toast.error(res.error);
+          setVal(value);
+          return;
+        }
         toast.success("Reorder level updated");
         setEditing(false);
         router.refresh();

@@ -9,10 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { IngredientInputT } from "@/lib/validators";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResultWith } from "@/lib/action-result";
 
 interface Props {
   defaults?: Partial<IngredientInputT>;
-  onSubmit: (input: IngredientInputT) => Promise<{ id: string }>;
+  onSubmit: (input: IngredientInputT) => Promise<ActionResultWith<{ id: string }>>;
   submitLabel?: string;
   redirectOnSuccess?: string;
   // When editing, opening fields are immutable (you'd need to re-seed history).
@@ -46,6 +47,10 @@ export function IngredientForm({ defaults, onSubmit, submitLabel = "Save", redir
     startTransition(async () => {
       try {
         const result = await onSubmit(cleaned);
+        if (result && result.ok === false) {
+          toast.error(result.error);
+          return;
+        }
         toast.success("Saved");
         if (redirectOnSuccess) router.push(redirectOnSuccess.replace(":id", result.id));
         router.refresh();

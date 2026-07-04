@@ -11,6 +11,7 @@ import { WorkTabs } from "@/components/ik/dashboard/WorkTabs";
 import { formatIST } from "@/lib/time";
 import { formatINR } from "@/lib/money";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 import { adminApproveOrder, managerApproveChefSuggestion } from "@/server/actions/orders";
 import { approveVendorPO } from "@/server/actions/procurement";
 
@@ -117,7 +118,11 @@ function useApprove() {
   function run(fn: () => Promise<unknown>, successMsg: string, after?: () => void) {
     startTransition(async () => {
       try {
-        await fn();
+        const res = (await fn()) as ActionResult | undefined;
+        if (res && res.ok === false) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(successMsg);
         after?.();
         router.refresh();

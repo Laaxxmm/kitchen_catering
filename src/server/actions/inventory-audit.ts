@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { Role } from "@prisma/client";
+import { Role, type Prisma } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { InventoryAuditPostInput } from "@/lib/validators";
@@ -11,6 +11,16 @@ import { toDecimal } from "@/lib/money";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD];
+
+/**
+ * Row-lock an ingredient for the rest of the transaction (same rationale as
+ * inventory.ts): the audit reads onHandQty, computes the delta, then writes
+ * back — without the lock a concurrent receipt/issue reads the same snapshot
+ * and one update is silently lost. FOR UPDATE serialises them.
+ */
+async function lockIngredientRow(tx: Prisma.TransactionClient, id: string) {
+  await tx.$executeRaw`SELECT 1 FROM "Ingredient" WHERE "id" = ${id} FOR UPDATE`;
+}
 
 /**
  * Monthly physical-count adjustment. For each line where the storekeeper's
@@ -50,6 +60,7 @@ export async function postInventoryAudit(raw: unknown) {
     const changes: Array<{ ingredient: string; from: string; to: string; delta: string }> = [];
 
     for (const lineInput of input.lines) {
+      await lockIngredientRow(tx, lineInput.ingredientId);
       const ing = await tx.ingredient.findUnique({
         where: { id: lineInput.ingredientId },
         select: { id: true, name: true, unit: true, onHandQty: true, avgUnitCost: true },

@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { IngredientReceiptInputT } from "@/lib/validators";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResultWith } from "@/lib/action-result";
 
 interface IngredientOption {
   id: string;
@@ -20,7 +21,7 @@ interface IngredientOption {
 
 interface Props {
   ingredients: IngredientOption[];
-  onSubmit: (input: IngredientReceiptInputT) => Promise<{ id: string }>;
+  onSubmit: (input: IngredientReceiptInputT) => Promise<ActionResultWith<{ id: string }>>;
   redirectOnSuccess?: string;
 }
 
@@ -56,7 +57,11 @@ export function ReceiptForm({ ingredients, onSubmit, redirectOnSuccess }: Props)
     };
     startTransition(async () => {
       try {
-        await onSubmit(cleaned);
+        const res = await onSubmit(cleaned);
+        if (res && res.ok === false) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Receipt recorded");
         if (redirectOnSuccess) router.push(redirectOnSuccess);
         router.refresh();

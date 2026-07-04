@@ -80,7 +80,7 @@ export function ActivityForm({
 
     startTransition(async () => {
       try {
-        await recordMaintenanceActivity({
+        const res = await recordMaintenanceActivity({
           performedAt,
           staffId,
           roomId,
@@ -91,6 +91,10 @@ export function ActivityForm({
           notes: notes.trim() || null,
           lines: cleanLines,
         });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Activity recorded");
         router.push("/maintenance/activities");
         router.refresh();

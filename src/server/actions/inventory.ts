@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Role } from "@prisma/client";
+import { Role, type Prisma } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import {
@@ -13,6 +13,24 @@ import {
 import { newMovingAverage } from "@/lib/inventory-cost";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
+
+/**
+ * Row-lock an ingredient for the rest of the transaction. Every stock
+ * movement (receipt / issue / adjustment) reads onHandQty/avgUnitCost,
+ * computes, then writes back — without the lock two concurrent movements
+ * read the same snapshot and one update is silently lost (stock can even
+ * go negative past the "insufficient stock" check). FOR UPDATE serialises
+ * them: the second caller waits, then reads the committed value.
+ */
+async function lockIngredientRow(tx: Prisma.TransactionClient, id: string) {
+  await tx.$executeRaw`SELECT 1 FROM "Ingredient" WHERE "id" = ${id} FOR UPDATE`;
+}
 
 // Stock movements (receipts / issues) — the store's job (+ management).
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
@@ -35,10 +53,18 @@ const READ_ROLES = [
  * gives the store a quick way to populate it so the Out/Low/In-stock status
  * actually means something. Accepts any non-negative quantity.
  */
-export async function setReorderLevel(id: string, value: string) {
+export async function setReorderLevel(id: string, value: string): Promise<ActionResult> {
+  try {
+    return await setReorderLevelInner(id, value);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function setReorderLevelInner(id: string, value: string): Promise<{ ok: true }> {
   const session = await requireRole(CATALOG_ROLES);
   const qty = toDecimal(value || "0");
-  if (qty.lt(0)) throw new Error("Reorder level can't be negative");
+  if (qty.lt(0)) throw new ActionError("Reorder level can't be negative");
   await db.$transaction(async (tx) => {
     await tx.ingredient.update({
       where: { id },
@@ -55,11 +81,30 @@ export async function setReorderLevel(id: string, value: string) {
     });
   });
   revalidatePath("/inventory/ingredients");
+  return { ok: true };
 }
 
-export async function createIngredient(raw: unknown) {
+export async function createIngredient(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await createIngredientInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createIngredientInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(CATALOG_ROLES);
   const input = IngredientInput.parse(raw);
+
+  // Friendly duplicate check up front (the DB unique on sku still backstops
+  // this — actionFailure maps its P2002 to a readable message).
+  const dupe = await db.ingredient.findFirst({
+    where: { sku: { equals: input.sku, mode: "insensitive" } },
+    select: { id: true, name: true },
+  });
+  if (dupe) {
+    throw new ActionError(`SKU "${input.sku}" is already used by "${dupe.name}".`);
+  }
 
   const row = await db.$transaction(async (tx) => {
     const created = await tx.ingredient.create({
@@ -94,10 +139,18 @@ export async function createIngredient(raw: unknown) {
   });
 
   revalidatePath("/inventory/ingredients");
-  return { id: row.id };
+  return { ok: true, id: row.id };
 }
 
-export async function updateIngredient(id: string, raw: unknown) {
+export async function updateIngredient(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    return await updateIngredientInner(id, raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function updateIngredientInner(id: string, raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(CATALOG_ROLES);
   const input = IngredientInput.parse(raw);
   await db.$transaction(async (tx) => {
@@ -126,22 +179,28 @@ export async function updateIngredient(id: string, raw: unknown) {
   });
   revalidatePath("/inventory/ingredients");
   revalidatePath(`/inventory/ingredients/${id}`);
+  return { ok: true };
 }
 
-export async function deactivateIngredient(id: string) {
-  const session = await requireRole(CATALOG_ROLES);
-  await db.$transaction(async (tx) => {
-    await tx.ingredient.update({ where: { id }, data: { active: false } });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "INGREDIENT_DEACTIVATED",
-        entity: "Ingredient",
-        entityId: id,
-      },
+export async function deactivateIngredient(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(CATALOG_ROLES);
+    await db.$transaction(async (tx) => {
+      await tx.ingredient.update({ where: { id }, data: { active: false } });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "INGREDIENT_DEACTIVATED",
+          entity: "Ingredient",
+          entityId: id,
+        },
+      });
     });
-  });
-  revalidatePath("/inventory/ingredients");
+    revalidatePath("/inventory/ingredients");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 /**
@@ -151,13 +210,22 @@ export async function deactivateIngredient(id: string) {
  *
  * Both updates happen in the same transaction, with an AuditLog row.
  */
-export async function recordIngredientReceipt(raw: unknown) {
+export async function recordIngredientReceipt(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await recordIngredientReceiptInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function recordIngredientReceiptInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = IngredientReceiptInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {
+    await lockIngredientRow(tx, input.ingredientId);
     const ingredient = await tx.ingredient.findUnique({ where: { id: input.ingredientId } });
-    if (!ingredient) throw new Error("Ingredient not found");
+    if (!ingredient) throw new ActionError("Ingredient not found");
 
     const { qty, avgUnitCost } = newMovingAverage({
       onHandQty: ingredient.onHandQty,
@@ -206,7 +274,7 @@ export async function recordIngredientReceipt(raw: unknown) {
 
   revalidatePath("/inventory/ingredients");
   revalidatePath("/inventory/receipts");
-  return { id: result.id };
+  return { ok: true, id: result.id };
 }
 
 /**
@@ -216,19 +284,28 @@ export async function recordIngredientReceipt(raw: unknown) {
  * (moving-average is for receipts only). Refuses to issue if it would make
  * stock negative.
  */
-export async function recordDirectIngredientIssue(raw: unknown) {
+export async function recordDirectIngredientIssue(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await recordDirectIngredientIssueInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function recordDirectIngredientIssueInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = IngredientIssueInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {
+    await lockIngredientRow(tx, input.ingredientId);
     const ingredient = await tx.ingredient.findUnique({ where: { id: input.ingredientId } });
-    if (!ingredient) throw new Error("Ingredient not found");
+    if (!ingredient) throw new ActionError("Ingredient not found");
 
     const issueQty = toDecimal(input.qty);
     const onHand = toDecimal(ingredient.onHandQty);
-    if (issueQty.lte(0)) throw new Error("Issue quantity must be positive");
+    if (issueQty.lte(0)) throw new ActionError("Issue quantity must be positive");
     if (issueQty.gt(onHand)) {
-      throw new Error(
+      throw new ActionError(
         `Insufficient stock. On hand: ${onHand.toString()}, requested: ${issueQty.toString()}`,
       );
     }
@@ -268,7 +345,7 @@ export async function recordDirectIngredientIssue(raw: unknown) {
 
   revalidatePath("/inventory/ingredients");
   revalidatePath("/inventory/issues");
-  return { id: result.id };
+  return { ok: true, id: result.id };
 }
 
 /**
@@ -280,19 +357,28 @@ export async function recordDirectIngredientIssue(raw: unknown) {
  * Caller provides either `newQty` (absolute target) or `delta` (signed
  * change); we resolve to the same end state and record both for audit.
  */
-export async function adjustIngredientStock(raw: unknown) {
+export async function adjustIngredientStock(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await adjustIngredientStockInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function adjustIngredientStockInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(ADJUST_ROLES);
   const input = IngredientAdjustmentInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {
+    await lockIngredientRow(tx, input.ingredientId);
     const ingredient = await tx.ingredient.findUnique({ where: { id: input.ingredientId } });
-    if (!ingredient) throw new Error("Ingredient not found");
+    if (!ingredient) throw new ActionError("Ingredient not found");
 
     const before = toDecimal(ingredient.onHandQty);
     const after = input.newQty !== undefined ? toDecimal(input.newQty) : before.plus(toDecimal(input.delta!));
-    if (after.lt(0)) throw new Error("Adjusted on-hand cannot be negative");
+    if (after.lt(0)) throw new ActionError("Adjusted on-hand cannot be negative");
     const delta = after.minus(before);
-    if (delta.eq(0)) throw new Error("No change — adjusted quantity matches current on-hand");
+    if (delta.eq(0)) throw new ActionError("No change — adjusted quantity matches current on-hand");
 
     const adj = await tx.ingredientAdjustment.create({
       data: {
@@ -332,7 +418,7 @@ export async function adjustIngredientStock(raw: unknown) {
   revalidatePath("/inventory/ingredients");
   revalidatePath("/inventory/adjustments");
   revalidatePath(`/inventory/ingredients/${input.ingredientId}`);
-  return { id: result.id };
+  return { ok: true, id: result.id };
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────

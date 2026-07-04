@@ -22,6 +22,7 @@ export default async function NewPettyCashFloatPage() {
     const openingBalance = String(formData.get("openingBalance") ?? "0");
     if (!custodianId || !name) return;
     const r = await createPettyCashFloat({ custodianId, name, openingBalance });
+    if (!r.ok) return;
     redirect(`/petty-cash/floats/${r.id}`);
   }
 

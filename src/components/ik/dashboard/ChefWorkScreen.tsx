@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Countdown } from "@/components/ik/dashboard/Countdown";
 import { formatIST } from "@/lib/time";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 import { chefApproveOrder, markInHouseServed } from "@/server/actions/orders";
 import { markIngredientsAvailable } from "@/server/actions/chef-requisitions";
 import { startCookingOrder, markOrderCooked } from "@/server/actions/production-jobs";
@@ -201,7 +202,11 @@ function ChefOrderCard({ order, highlight = false }: { order: ChefBoardOrder; hi
   function run(fn: () => Promise<unknown>, successMsg: string) {
     startTransition(async () => {
       try {
-        await fn();
+        const res = (await fn()) as ActionResult | undefined;
+        if (res && res.ok === false) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(successMsg);
         setShowReject(false);
         setRejectNote("");

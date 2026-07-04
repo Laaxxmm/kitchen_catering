@@ -39,7 +39,11 @@ export function StoreAdjustForm({ store, items, backHref }: { store: StoreKey; i
     if (qty.trim() === "") return toast.error("Enter a quantity");
     startTransition(async () => {
       try {
-        await adjustStoreStock({ store, itemId, mode, qty, reason, note: note.trim() || undefined });
+        const res = await adjustStoreStock({ store, itemId, mode, qty, reason, note: note.trim() || undefined });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Stock adjusted");
         router.push(backHref);
       } catch (err) {

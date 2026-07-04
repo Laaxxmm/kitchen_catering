@@ -10,7 +10,6 @@ import {
 import { db } from "@/server/db";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import {
-  AuthorizationError,
   requireRole,
   REQUISITION_CREATE_ROLES,
   REQUISITION_FULFIL_ROLES,
@@ -22,6 +21,12 @@ import {
   ChefRequisitionSendToProcurementInput,
   ChefRequisitionStandaloneInput,
 } from "@/lib/validators";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
 import { nextChefRequisitionNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
@@ -38,7 +43,19 @@ import { createProductionJobForOrder } from "./production-jobs";
  * each line's ingredient avg cost so the planned-cost baseline survives
  * later cost moves.
  */
-export async function createChefRequisition(raw: unknown) {
+export async function createChefRequisition(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string; requisitionNo: string }>> {
+  try {
+    return await createChefRequisitionInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createChefRequisitionInner(
+  raw: unknown,
+): Promise<{ ok: true; id: string; requisitionNo: string }> {
   const session = await requireRole(REQUISITION_CREATE_ROLES);
   const input = ChefRequisitionCreateInput.parse(raw);
 
@@ -47,13 +64,13 @@ export async function createChefRequisition(raw: unknown) {
       where: { id: input.orderId },
       select: { status: true },
     });
-    if (!order) throw new Error("Order not found");
+    if (!order) throw new ActionError("Order not found");
     const ok = order.status === OrderStatus.CHEF_REQUISITION_PENDING
       || order.status === OrderStatus.IN_PREP
       || order.status === OrderStatus.READY_FOR_PRODUCTION
       || order.status === OrderStatus.ISSUING;
     if (!ok) {
-      throw new AuthorizationError(`Order status ${order.status} doesn't allow a new requisition`);
+      throw new ActionError(`Order status ${order.status} doesn't allow a new requisition`);
     }
 
     const requisitionNo = await nextChefRequisitionNumber(tx);
@@ -104,7 +121,7 @@ export async function createChefRequisition(raw: unknown) {
 
   revalidatePath("/requisitions");
   revalidatePath(`/orders/${input.orderId}`);
-  return { id: result.id, requisitionNo: result.requisitionNo };
+  return { ok: true, id: result.id, requisitionNo: result.requisitionNo };
 }
 
 /**
@@ -113,7 +130,19 @@ export async function createChefRequisition(raw: unknown) {
  * stock, spoilage replacement. Goes straight to the store (SUBMITTED) so they
  * can issue it, exactly like an order requisition, but with no order link.
  */
-export async function createStandaloneChefRequisition(raw: unknown) {
+export async function createStandaloneChefRequisition(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string; requisitionNo: string }>> {
+  try {
+    return await createStandaloneChefRequisitionInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createStandaloneChefRequisitionInner(
+  raw: unknown,
+): Promise<{ ok: true; id: string; requisitionNo: string }> {
   const session = await requireRole(REQUISITION_CREATE_ROLES);
   const input = ChefRequisitionStandaloneInput.parse(raw);
 
@@ -170,7 +199,7 @@ export async function createStandaloneChefRequisition(raw: unknown) {
   });
 
   revalidatePath("/requisitions");
-  return { id: result.id, requisitionNo: result.requisitionNo };
+  return { ok: true, id: result.id, requisitionNo: result.requisitionNo };
 }
 
 /**
@@ -185,110 +214,133 @@ export async function createStandaloneChefRequisition(raw: unknown) {
  * margin on whichever order it WAS issued against. The chef can still
  * raise a partial requisition later if they realise something's short.
  */
-export async function markIngredientsAvailable(orderId: string, note?: string) {
-  const session = await requireRole(REQUISITION_CREATE_ROLES);
+export async function markIngredientsAvailable(orderId: string, note?: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(REQUISITION_CREATE_ROLES);
 
-  await db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({
-      where: { id: orderId },
-      select: { status: true },
+    await db.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: { status: true },
+      });
+      if (!order) throw new ActionError("Order not found");
+      if (order.status !== OrderStatus.CHEF_REQUISITION_PENDING) {
+        throw new ActionError(
+          `Order status ${order.status} doesn't allow skipping the requisition`,
+        );
+      }
+      await tx.order.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.READY_FOR_PRODUCTION },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "ORDER_INGREDIENTS_ALREADY_AVAILABLE",
+          entity: "Order",
+          entityId: orderId,
+          payloadHash: sha256Json({ note: note ?? null }),
+        },
+      });
     });
-    if (!order) throw new Error("Order not found");
-    if (order.status !== OrderStatus.CHEF_REQUISITION_PENDING) {
-      throw new AuthorizationError(
-        `Order status ${order.status} doesn't allow skipping the requisition`,
-      );
-    }
-    await tx.order.update({
-      where: { id: orderId },
-      data: { status: OrderStatus.READY_FOR_PRODUCTION },
-    });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "ORDER_INGREDIENTS_ALREADY_AVAILABLE",
-        entity: "Order",
-        entityId: orderId,
-        payloadHash: sha256Json({ note: note ?? null }),
-      },
-    });
-  });
 
-  revalidatePath(`/orders/${orderId}`);
-  revalidatePath("/orders");
-  revalidatePath("/kitchen");
-  revalidatePath("/queue/issuing");
+    revalidatePath(`/orders/${orderId}`);
+    revalidatePath("/orders");
+    revalidatePath("/kitchen");
+    revalidatePath("/queue/issuing");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function addChefRequisitionLine(requisitionId: string, raw: unknown) {
-  const session = await requireRole(REQUISITION_CREATE_ROLES);
-  const input = ChefRequisitionLineInput.parse(raw);
+export async function addChefRequisitionLine(requisitionId: string, raw: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireRole(REQUISITION_CREATE_ROLES);
+    const input = ChefRequisitionLineInput.parse(raw);
 
-  await db.$transaction(async (tx) => {
-    const req = await tx.chefRequisition.findUnique({ where: { id: requisitionId }, select: { status: true } });
-    if (!req) throw new Error("Requisition not found");
-    if (req.status !== ChefRequisitionStatus.DRAFT) {
-      throw new AuthorizationError("Lines can only be edited on DRAFT requisitions");
-    }
-    const ingredient = await tx.ingredient.findUnique({
-      where: { id: input.ingredientId },
-      select: { unit: true, avgUnitCost: true },
-    });
-    if (!ingredient) throw new Error("Ingredient not found");
+    await db.$transaction(async (tx) => {
+      const req = await tx.chefRequisition.findUnique({ where: { id: requisitionId }, select: { status: true } });
+      if (!req) throw new ActionError("Requisition not found");
+      if (req.status !== ChefRequisitionStatus.DRAFT) {
+        throw new ActionError("Lines can only be edited on DRAFT requisitions");
+      }
+      const ingredient = await tx.ingredient.findUnique({
+        where: { id: input.ingredientId },
+        select: { unit: true, avgUnitCost: true },
+      });
+      if (!ingredient) throw new ActionError("Ingredient not found");
 
-    await tx.chefRequisitionLine.create({
-      data: {
-        requisitionId,
-        ingredientId: input.ingredientId,
-        orderItemId: input.orderItemId ?? null,
-        requestedQty: input.requestedQty,
-        unit: input.unit ?? ingredient.unit,
-        unitCostSnapshot: ingredient.avgUnitCost.toString(),
-        notes: input.notes ?? null,
-      },
+      await tx.chefRequisitionLine.create({
+        data: {
+          requisitionId,
+          ingredientId: input.ingredientId,
+          orderItemId: input.orderItemId ?? null,
+          requestedQty: input.requestedQty,
+          unit: input.unit ?? ingredient.unit,
+          unitCostSnapshot: ingredient.avgUnitCost.toString(),
+          notes: input.notes ?? null,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "CHEF_REQUISITION_LINE_ADDED",
+          entity: "ChefRequisition",
+          entityId: requisitionId,
+          payloadHash: sha256Json({ ingredientId: input.ingredientId, qty: input.requestedQty }),
+        },
+      });
     });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "CHEF_REQUISITION_LINE_ADDED",
-        entity: "ChefRequisition",
-        entityId: requisitionId,
-        payloadHash: sha256Json({ ingredientId: input.ingredientId, qty: input.requestedQty }),
-      },
-    });
-  });
 
-  revalidatePath(`/requisitions/${requisitionId}`);
+    revalidatePath(`/requisitions/${requisitionId}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function removeChefRequisitionLine(lineId: string) {
-  const session = await requireRole(REQUISITION_CREATE_ROLES);
-  await db.$transaction(async (tx) => {
-    const line = await tx.chefRequisitionLine.findUnique({
-      where: { id: lineId },
-      include: { requisition: { select: { id: true, status: true } } },
+export async function removeChefRequisitionLine(lineId: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(REQUISITION_CREATE_ROLES);
+    await db.$transaction(async (tx) => {
+      const line = await tx.chefRequisitionLine.findUnique({
+        where: { id: lineId },
+        include: { requisition: { select: { id: true, status: true } } },
+      });
+      if (!line) throw new ActionError("Line not found");
+      if (line.requisition.status !== ChefRequisitionStatus.DRAFT) {
+        throw new ActionError("Lines can only be removed on DRAFT requisitions");
+      }
+      await tx.chefRequisitionLine.delete({ where: { id: lineId } });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "CHEF_REQUISITION_LINE_REMOVED",
+          entity: "ChefRequisition",
+          entityId: line.requisition.id,
+        },
+      });
     });
-    if (!line) throw new Error("Line not found");
-    if (line.requisition.status !== ChefRequisitionStatus.DRAFT) {
-      throw new AuthorizationError("Lines can only be removed on DRAFT requisitions");
-    }
-    await tx.chefRequisitionLine.delete({ where: { id: lineId } });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "CHEF_REQUISITION_LINE_REMOVED",
-        entity: "ChefRequisition",
-        entityId: line.requisition.id,
-      },
-    });
-  });
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 // =====================================================================
 // SUBMIT / FULFIL
 // =====================================================================
 
-export async function submitChefRequisition(id: string) {
+export async function submitChefRequisition(id: string): Promise<ActionResult> {
+  try {
+    return await submitChefRequisitionInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function submitChefRequisitionInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(REQUISITION_CREATE_ROLES);
 
   await db.$transaction(async (tx) => {
@@ -296,11 +348,11 @@ export async function submitChefRequisition(id: string) {
       where: { id },
       include: { lines: true, order: { select: { id: true, status: true } } },
     });
-    if (!req) throw new Error("Requisition not found");
+    if (!req) throw new ActionError("Requisition not found");
     if (req.status !== ChefRequisitionStatus.DRAFT) {
-      throw new AuthorizationError("Only DRAFT requisitions can be submitted");
+      throw new ActionError("Only DRAFT requisitions can be submitted");
     }
-    if (req.lines.length === 0) throw new Error("Add at least one line before submitting");
+    if (req.lines.length === 0) throw new ActionError("Add at least one line before submitting");
 
     await tx.chefRequisition.update({
       where: { id },
@@ -326,6 +378,7 @@ export async function submitChefRequisition(id: string) {
   revalidatePath(`/requisitions/${id}`);
   revalidatePath("/requisitions");
   revalidatePath("/queue/issuing");
+  return { ok: true };
 }
 
 /**
@@ -335,36 +388,60 @@ export async function submitChefRequisition(id: string) {
  * for the order is FULLY_ISSUED) auto-advances the order to
  * READY_FOR_PRODUCTION.
  */
-export async function issueChefRequisitionLine(raw: unknown) {
+export async function issueChefRequisitionLine(raw: unknown): Promise<ActionResult> {
+  try {
+    return await issueChefRequisitionLineInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function issueChefRequisitionLineInner(raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(REQUISITION_FULFIL_ROLES);
   const input = ChefRequisitionIssueInput.parse(raw);
 
   await db.$transaction(async (tx) => {
+    // Serialise concurrent issuers of the same line: lock the line row
+    // BEFORE reading it, so the loser waits here and then sees the
+    // winner's committed issuedQty/status instead of a stale snapshot.
+    await tx.$executeRaw`SELECT 1 FROM "ChefRequisitionLine" WHERE "id" = ${input.lineId} FOR UPDATE`;
     const line = await tx.chefRequisitionLine.findUnique({
       where: { id: input.lineId },
       include: {
-        ingredient: { select: { onHandQty: true, avgUnitCost: true, unit: true } },
         requisition: { select: { id: true, status: true, orderId: true } },
       },
     });
-    if (!line) throw new Error("Requisition line not found");
+    if (!line) throw new ActionError("Requisition line not found");
     if (line.status === ChefRequisitionLineStatus.CANCELLED) {
-      throw new Error("Line is cancelled");
+      throw new ActionError("Line is cancelled");
     }
     if (line.requisition.status !== ChefRequisitionStatus.SUBMITTED &&
         line.requisition.status !== ChefRequisitionStatus.PARTIALLY_ISSUED) {
-      throw new AuthorizationError(`Cannot issue against requisition with status ${line.requisition.status}`);
+      throw new ActionError(`Cannot issue against requisition with status ${line.requisition.status}`);
     }
 
-    const onHand = toDecimal(line.ingredient.onHandQty);
+    // Lock the parent requisition (status recompute below) and the
+    // ingredient (stock decrement below) — always in this order so
+    // concurrent issuers of sibling lines can't deadlock.
+    await tx.$executeRaw`SELECT 1 FROM "ChefRequisition" WHERE "id" = ${line.requisition.id} FOR UPDATE`;
+    await tx.$executeRaw`SELECT 1 FROM "Ingredient" WHERE "id" = ${line.ingredientId} FOR UPDATE`;
+    // Re-read stock AFTER taking the lock — a value fetched before it can
+    // be a stale snapshot from a concurrent receipt / issue / adjustment.
+    const ingredient = await tx.ingredient.findUnique({
+      where: { id: line.ingredientId },
+      select: { onHandQty: true, avgUnitCost: true },
+    });
+    if (!ingredient) throw new ActionError("Ingredient not found");
+
+    const onHand = toDecimal(ingredient.onHandQty);
     const toIssue = toDecimal(input.qtyToIssue);
-    if (toIssue.lte(0)) throw new Error("Issue quantity must be positive");
+    if (toIssue.lte(0)) throw new ActionError("Issue quantity must be positive");
     if (toIssue.gt(onHand)) {
-      throw new Error(`Insufficient stock. On hand ${onHand.toString()}, requested ${toIssue.toString()}`);
+      throw new ActionError(`Insufficient stock. On hand ${onHand.toString()}, requested ${toIssue.toString()}`);
     }
     const remaining = toDecimal(line.requestedQty).minus(toDecimal(line.issuedQty));
     if (toIssue.gt(remaining)) {
-      throw new Error(`Cannot issue more than remaining requested qty (${remaining.toString()})`);
+      throw new ActionError(`Cannot issue more than remaining requested qty (${remaining.toString()})`);
     }
 
     // 1. Create issue row
@@ -373,7 +450,7 @@ export async function issueChefRequisitionLine(raw: unknown) {
         ingredientId: line.ingredientId,
         orderId: line.requisition.orderId,
         qty: input.qtyToIssue,
-        unitCostAtIssue: line.ingredient.avgUnitCost.toString(),
+        unitCostAtIssue: ingredient.avgUnitCost.toString(),
         issuedById: session.user.id,
         issuedAt: new Date(),
         chefRequisitionLineId: line.id,
@@ -419,9 +496,13 @@ export async function issueChefRequisitionLine(raw: unknown) {
 
     // 5. If every requisition for the order is fully issued, advance the
     //    order. Standalone (order-less) requisitions have nothing to advance —
-    //    fulfilling them just decrements stock.
+    //    fulfilling them just decrements stock. Lock the order first and only
+    //    then check sibling requisitions, so two issuers finishing different
+    //    requisitions at once can't both read "everything done" and race the
+    //    transition (the status guard on the update backstops that too).
     const reqOrderId = line.requisition.orderId;
     if (allDone && reqOrderId) {
+      await tx.$executeRaw`SELECT 1 FROM "Order" WHERE "id" = ${reqOrderId} FOR UPDATE`;
       const allReqs = await tx.chefRequisition.findMany({
         where: { orderId: reqOrderId },
         select: { id: true, status: true },
@@ -432,12 +513,15 @@ export async function issueChefRequisitionLine(raw: unknown) {
           : r.status === ChefRequisitionStatus.FULLY_ISSUED || r.status === ChefRequisitionStatus.CANCELLED,
       );
       if (everyReqDone) {
-        await tx.order.update({
-          where: { id: reqOrderId },
+        const advanced = await tx.order.updateMany({
+          where: { id: reqOrderId, status: { not: OrderStatus.READY_FOR_PRODUCTION } },
           data: { status: OrderStatus.READY_FOR_PRODUCTION },
         });
-        // Auto-create the production job. Idempotent on order.
-        await createProductionJobForOrder(tx, reqOrderId);
+        // Auto-create the production job. Idempotent on order; only the
+        // caller that actually advanced the order attempts it.
+        if (advanced.count > 0) {
+          await createProductionJobForOrder(tx, reqOrderId);
+        }
       }
     }
 
@@ -456,6 +540,7 @@ export async function issueChefRequisitionLine(raw: unknown) {
   revalidatePath("/queue/issuing");
   revalidatePath("/inventory/ingredients");
   revalidatePath("/inventory/issues");
+  return { ok: true };
 }
 
 /**
@@ -465,40 +550,45 @@ export async function issueChefRequisitionLine(raw: unknown) {
  * Once the vendor delivers and the store records the GRN, stock comes back
  * in and the line becomes issuable again ("stock has arrived — issue now").
  */
-export async function sendChefRequisitionLineToProcurement(raw: unknown) {
-  const session = await requireRole(REQUISITION_FULFIL_ROLES);
-  const input = ChefRequisitionSendToProcurementInput.parse(raw);
+export async function sendChefRequisitionLineToProcurement(raw: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireRole(REQUISITION_FULFIL_ROLES);
+    const input = ChefRequisitionSendToProcurementInput.parse(raw);
 
-  await db.$transaction(async (tx) => {
-    const line = await tx.chefRequisitionLine.findUnique({
-      where: { id: input.lineId },
-      select: { id: true, status: true, requestedQty: true, issuedQty: true },
+    await db.$transaction(async (tx) => {
+      const line = await tx.chefRequisitionLine.findUnique({
+        where: { id: input.lineId },
+        select: { id: true, status: true, requestedQty: true, issuedQty: true },
+      });
+      if (!line) throw new ActionError("Line not found");
+      if (line.status === ChefRequisitionLineStatus.ISSUED) {
+        throw new ActionError("Line is already fully issued");
+      }
+      const shortfall = toDecimal(line.requestedQty).minus(toDecimal(line.issuedQty));
+      if (shortfall.lte(0)) throw new ActionError("No shortfall to procure");
+
+      await tx.chefRequisitionLine.update({
+        where: { id: line.id },
+        data: { status: ChefRequisitionLineStatus.AWAITING_PROCUREMENT, notes: input.reason },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "CHEF_REQUISITION_LINE_AWAITING_PURCHASE",
+          entity: "ChefRequisitionLine",
+          entityId: line.id,
+          payloadHash: sha256Json({ reason: input.reason, shortfall: shortfall.toString() }),
+        },
+      });
     });
-    if (!line) throw new Error("Line not found");
-    if (line.status === ChefRequisitionLineStatus.ISSUED) {
-      throw new Error("Line is already fully issued");
-    }
-    const shortfall = toDecimal(line.requestedQty).minus(toDecimal(line.issuedQty));
-    if (shortfall.lte(0)) throw new Error("No shortfall to procure");
 
-    await tx.chefRequisitionLine.update({
-      where: { id: line.id },
-      data: { status: ChefRequisitionLineStatus.AWAITING_PROCUREMENT, notes: input.reason },
-    });
-
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "CHEF_REQUISITION_LINE_AWAITING_PURCHASE",
-        entity: "ChefRequisitionLine",
-        entityId: line.id,
-        payloadHash: sha256Json({ reason: input.reason, shortfall: shortfall.toString() }),
-      },
-    });
-  });
-
-  revalidatePath("/requisitions");
-  revalidatePath("/queue/issuing");
+    revalidatePath("/requisitions");
+    revalidatePath("/queue/issuing");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 // =====================================================================

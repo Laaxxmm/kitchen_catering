@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface Props {
   chefNote: string;
   chefName: string;
-  onApprove: (note: string) => Promise<void>;
-  onReject: (note: string) => Promise<void>;
+  onApprove: (note: string) => Promise<ActionResult>;
+  onReject: (note: string) => Promise<ActionResult>;
 }
 
 /**
@@ -31,10 +32,14 @@ export function ManagerChangeBlock({ chefNote, chefName, onApprove, onReject }: 
   const router = useRouter();
   const [note, setNote] = useState("");
 
-  function run(fn: () => Promise<void>, successMsg: string) {
+  function run(fn: () => Promise<ActionResult>, successMsg: string) {
     startTransition(async () => {
       try {
-        await fn();
+        const res = await fn();
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(successMsg);
         setNote("");
         router.refresh();

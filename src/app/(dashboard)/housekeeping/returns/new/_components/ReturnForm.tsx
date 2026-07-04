@@ -37,7 +37,11 @@ export function ReturnForm({ items }: { items: Item[] }) {
     if (qty.trim() === "" || Number(qty) <= 0) return toast.error("Enter how many are coming back");
     startTransition(async () => {
       try {
-        await returnHousekeepingStock({ itemId, qty, outcome });
+        const res = await returnHousekeepingStock({ itemId, qty, outcome });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(outcome === "returned" ? "Returned to clean stock" : "Written off");
         router.push("/housekeeping");
       } catch (err) {

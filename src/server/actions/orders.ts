@@ -17,7 +17,6 @@ import {
 } from "@prisma/client";
 import { db } from "@/server/db";
 import {
-  AuthorizationError,
   hasRole,
   ORDER_KITCHEN_ROLES,
   ORDER_MANAGER_ROLES,
@@ -33,6 +32,12 @@ import {
   OrderStoreApprovalInput,
   OrderUpdateInput,
 } from "@/lib/validators";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
 import { nextOrderCode } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
@@ -42,8 +47,11 @@ import { getOrCreateHouseCustomerId } from "@/lib/house-customer";
 import { createNotification, notifyRoles } from "@/server/actions/notifications";
 import { formatIST, istToUtc } from "@/lib/time";
 
+// Every role the middleware lets onto /orders must be listed here, or the
+// page's listOrders call throws and the whole route crashes for that role.
 const READ_ROLES = [
-  Role.ADMIN, Role.MANAGER, Role.SALES, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.ACCOUNTS, Role.DELIVERY,
+  Role.ADMIN, Role.MANAGER, Role.SALES, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.ACCOUNTS,
+  Role.DELIVERY, Role.FNB_SERVICE,
 ];
 
 /**
@@ -57,6 +65,14 @@ const READ_ROLES = [
  * notifyRoles → createNotification so they never break the approval.
  */
 async function notifyOrderApproved(orderId: string) {
+  try {
+    await notifyOrderApprovedInner(orderId);
+  } catch (err) {
+    console.warn("[notify] order-approved fanout failed:", err);
+  }
+}
+
+async function notifyOrderApprovedInner(orderId: string) {
   const order = await db.order.findUnique({
     where: { id: orderId },
     select: {
@@ -98,6 +114,14 @@ async function notifyOrderApproved(orderId: string) {
  * change is needed; the chime in the notification bell does the rest.
  */
 async function notifyOrderSubmitted(orderId: string) {
+  try {
+    await notifyOrderSubmittedInner(orderId);
+  } catch (err) {
+    console.warn("[notify] order-submitted fanout failed:", err);
+  }
+}
+
+async function notifyOrderSubmittedInner(orderId: string) {
   const order = await db.order.findUnique({
     where: { id: orderId },
     select: {
@@ -140,6 +164,14 @@ async function notifyOrderSubmitted(orderId: string) {
  * F&B service an early heads-up that an order is coming through.
  */
 async function notifyOrderToChef(orderId: string) {
+  try {
+    await notifyOrderToChefInner(orderId);
+  } catch (err) {
+    console.warn("[notify] order-to-chef fanout failed:", err);
+  }
+}
+
+async function notifyOrderToChefInner(orderId: string) {
   const order = await db.order.findUnique({
     where: { id: orderId },
     select: { code: true, customer: { select: { name: true } } },
@@ -179,7 +211,15 @@ function computeLine(portions: string, unitPrice: string, discountPct?: string, 
 // CREATE / UPDATE / SUBMIT
 // =====================================================================
 
-export async function createOrder(raw: unknown) {
+export async function createOrder(raw: unknown): Promise<ActionResultWith<{ id: string; code: string }>> {
+  try {
+    return await createOrderInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createOrderInner(raw: unknown): Promise<{ ok: true; id: string; code: string }> {
   const session = await requireRole(ORDER_SALES_ROLES);
   const input = OrderCreateInput.parse(raw);
 
@@ -274,10 +314,18 @@ export async function createOrder(raw: unknown) {
   });
 
   revalidatePath("/orders");
-  return { id: order.id, code: order.code };
+  return { ok: true, id: order.id, code: order.code };
 }
 
-export async function updateOrderDraft(id: string, raw: unknown) {
+export async function updateOrderDraft(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    return await updateOrderDraftInner(id, raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function updateOrderDraftInner(id: string, raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(ORDER_SALES_ROLES);
   const input = OrderUpdateInput.parse(raw);
 
@@ -286,9 +334,9 @@ export async function updateOrderDraft(id: string, raw: unknown) {
       where: { id },
       select: { status: true, channel: true },
     });
-    if (!order) throw new Error("Order not found");
+    if (!order) throw new ActionError("Order not found");
     if (order.status !== OrderStatus.DRAFT) {
-      throw new AuthorizationError("Only DRAFT orders can be edited");
+      throw new ActionError("Only DRAFT orders can be edited");
     }
 
     // Header fields
@@ -361,6 +409,7 @@ export async function updateOrderDraft(id: string, raw: unknown) {
 
   revalidatePath(`/orders/${id}`);
   revalidatePath("/orders");
+  return { ok: true };
 }
 
 /**
@@ -373,7 +422,15 @@ export async function updateOrderDraft(id: string, raw: unknown) {
  * approve it to — it skips the gate and goes straight to the chef, with the
  * approval stamped on the record as the taker's own sign-off.
  */
-export async function submitOrder(id: string) {
+export async function submitOrder(id: string): Promise<ActionResult> {
+  try {
+    return await submitOrderInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function submitOrderInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(ORDER_SALES_ROLES);
   // A manager / admin taking the order self-approves the commercial gate.
   const selfApproves = hasRole(session, [Role.ADMIN, Role.MANAGER]);
@@ -388,18 +445,18 @@ export async function submitOrder(id: string) {
       where: { id },
       include: { items: true },
     });
-    if (!order) throw new Error("Order not found");
+    if (!order) throw new ActionError("Order not found");
     if (order.status !== OrderStatus.DRAFT) {
-      throw new AuthorizationError("Only DRAFT orders can be submitted");
+      throw new ActionError("Only DRAFT orders can be submitted");
     }
-    if (order.items.length === 0) throw new Error("Add at least one item before submitting");
+    if (order.items.length === 0) throw new ActionError("Add at least one item before submitting");
 
     const immediateChannel = isImmediateChannel(order.channel);
 
     if (!immediateChannel && order.eventDate.getTime() <= Date.now()) {
-      throw new Error("Event date must be in the future");
+      throw new ActionError("Event date must be in the future");
     }
-    if (!order.deliveryAddress.trim()) throw new Error("Delivery address is required");
+    if (!order.deliveryAddress.trim()) throw new ActionError("Delivery address is required");
 
     // Catering orders normally stop at the manager gate first; but if the
     // taker IS a manager/admin, skip straight to the chef. Immediate channels
@@ -411,8 +468,10 @@ export async function submitOrder(id: string) {
         ? OrderStatus.PENDING_CHEF_APPROVAL // straight to chef
         : OrderStatus.PENDING_ADMIN_APPROVAL; // catering: manager signs off first
 
-    await tx.order.update({
-      where: { id },
+    // Status guard: a double-submit (two tabs / double-click) loses the
+    // race and gets a clear message instead of double-transitioning.
+    const updated = await tx.order.updateMany({
+      where: { id, status: OrderStatus.DRAFT },
       data: {
         status: nextStatus,
         submittedAt: new Date(),
@@ -428,6 +487,9 @@ export async function submitOrder(id: string) {
           : {}),
       },
     });
+    if (updated.count === 0) {
+      throw new ActionError("This order was already submitted — refresh the page.");
+    }
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -464,6 +526,7 @@ export async function submitOrder(id: string) {
   } else {
     await notifyOrderSubmitted(id);
   }
+  return { ok: true };
 }
 
 /**
@@ -478,58 +541,64 @@ export async function submitOrder(id: string) {
 export async function adminApproveOrder(
   id: string,
   input: { decision: "APPROVED" | "REJECTED"; note: string },
-) {
-  const session = await requireRole([Role.MANAGER, Role.ADMIN]);
-  if (!input.note?.trim()) {
-    throw new Error("A note is required — record why you approved or rejected");
-  }
-  if (input.decision !== "APPROVED" && input.decision !== "REJECTED") {
-    throw new Error("Invalid decision");
-  }
-
-  await db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
-    if (!order) throw new Error("Order not found");
-    if (order.status !== OrderStatus.PENDING_ADMIN_APPROVAL) {
-      throw new AuthorizationError(
-        `Order is not awaiting manager approval (current: ${order.status})`,
-      );
+): Promise<ActionResult> {
+  try {
+    const session = await requireRole([Role.MANAGER, Role.ADMIN]);
+    if (!input.note?.trim()) {
+      throw new ActionError("A note is required — record why you approved or rejected");
+    }
+    if (input.decision !== "APPROVED" && input.decision !== "REJECTED") {
+      throw new ActionError("Invalid decision");
     }
 
-    const next =
-      input.decision === "APPROVED"
-        ? OrderStatus.PENDING_CHEF_APPROVAL
-        : OrderStatus.REJECTED_BY_ADMIN;
+    await db.$transaction(async (tx) => {
+      const next =
+        input.decision === "APPROVED"
+          ? OrderStatus.PENDING_CHEF_APPROVAL
+          : OrderStatus.REJECTED_BY_ADMIN;
 
-    await tx.order.update({
-      where: { id },
-      data: {
-        status: next,
-        adminReviewedById: session.user.id,
-        adminReviewedAt: new Date(),
-        adminDecision: input.decision === "APPROVED" ? "APPROVED" : "REJECTED",
-        adminReviewNote: input.note.trim(),
-      },
+      // Status lives in the WHERE clause so two managers acting at once
+      // can't both transition the order — the loser gets count 0.
+      const updated = await tx.order.updateMany({
+        where: { id, status: OrderStatus.PENDING_ADMIN_APPROVAL },
+        data: {
+          status: next,
+          adminReviewedById: session.user.id,
+          adminReviewedAt: new Date(),
+          adminDecision: input.decision === "APPROVED" ? "APPROVED" : "REJECTED",
+          adminReviewNote: input.note.trim(),
+        },
+      });
+      if (updated.count === 0) {
+        const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
+        if (!order) throw new ActionError("Order not found");
+        throw new ActionError(
+          `Order is not awaiting manager approval (current: ${order.status}) — someone may have just acted on it. Refresh the page.`,
+        );
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: input.decision === "APPROVED" ? "ORDER_ADMIN_APPROVED" : "ORDER_ADMIN_REJECTED",
+          entity: "Order",
+          entityId: id,
+          payloadHash: sha256Json({ decision: input.decision, note: input.note.trim() }),
+        },
+      });
     });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: input.decision === "APPROVED" ? "ORDER_ADMIN_APPROVED" : "ORDER_ADMIN_REJECTED",
-        entity: "Order",
-        entityId: id,
-        payloadHash: sha256Json({ decision: input.decision, note: input.note.trim() }),
-      },
-    });
-  });
 
-  revalidatePath(`/orders/${id}`);
-  revalidatePath("/orders");
-  revalidatePath("/queue/admin-approvals");
-  revalidatePath("/queue/chef-approvals");
+    revalidatePath(`/orders/${id}`);
+    revalidatePath("/orders");
+    revalidatePath("/queue/admin-approvals");
+    revalidatePath("/queue/chef-approvals");
 
-  // On approval the order moves to the chef — chime them.
-  if (input.decision === "APPROVED") {
-    await notifyOrderToChef(id);
+    // On approval the order moves to the chef — chime them.
+    if (input.decision === "APPROVED") {
+      await notifyOrderToChef(id);
+    }
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
   }
 }
 
@@ -550,67 +619,73 @@ export async function adminApproveOrder(
 export async function chefApproveOrder(
   id: string,
   input: { decision: "APPROVED" | "SUGGESTED_CHANGES"; note: string },
-) {
-  const session = await requireRole(ORDER_KITCHEN_ROLES);
-  if (!input.note?.trim()) throw new Error("A note is required");
+): Promise<ActionResult> {
+  try {
+    const session = await requireRole(ORDER_KITCHEN_ROLES);
+    if (!input.note?.trim()) throw new ActionError("A note is required");
 
-  let triggerProforma = false;
+    let triggerProforma = false;
 
-  await db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
-    if (!order) throw new Error("Order not found");
-    if (order.status !== OrderStatus.PENDING_CHEF_APPROVAL) {
-      throw new AuthorizationError("Order is not awaiting chef approval");
-    }
+    await db.$transaction(async (tx) => {
+      const nextStatus =
+        input.decision === "APPROVED"
+          ? OrderStatus.CHEF_REQUISITION_PENDING
+          : OrderStatus.CHANGES_PROPOSED_BY_CHEF;
 
-    const nextStatus =
-      input.decision === "APPROVED"
-        ? OrderStatus.CHEF_REQUISITION_PENDING
-        : OrderStatus.CHANGES_PROPOSED_BY_CHEF;
+      const updated = await tx.order.updateMany({
+        where: { id, status: OrderStatus.PENDING_CHEF_APPROVAL },
+        data: {
+          status: nextStatus,
+          chefReviewedById: session.user.id,
+          chefReviewedAt: new Date(),
+          chefDecision: input.decision === "APPROVED"
+            ? ApprovalDecision.APPROVED
+            : ApprovalDecision.SUGGESTED_CHANGES,
+          chefSuggestionNotes: input.note,
+        },
+      });
+      if (updated.count === 0) {
+        const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
+        if (!order) throw new ActionError("Order not found");
+        throw new ActionError(
+          `Order is not awaiting chef approval (current: ${order.status}) — refresh the page.`,
+        );
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: input.decision === "APPROVED" ? "ORDER_CHEF_APPROVED" : "ORDER_CHEF_SUGGESTED_CHANGES",
+          entity: "Order",
+          entityId: id,
+          payloadHash: sha256Json({ decision: input.decision, note: input.note }),
+        },
+      });
 
-    await tx.order.update({
-      where: { id },
-      data: {
-        status: nextStatus,
-        chefReviewedById: session.user.id,
-        chefReviewedAt: new Date(),
-        chefDecision: input.decision === "APPROVED"
-          ? ApprovalDecision.APPROVED
-          : ApprovalDecision.SUGGESTED_CHANGES,
-        chefSuggestionNotes: input.note,
-      },
+      if (input.decision === "APPROVED") {
+        triggerProforma = true;
+      }
     });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: input.decision === "APPROVED" ? "ORDER_CHEF_APPROVED" : "ORDER_CHEF_SUGGESTED_CHANGES",
-        entity: "Order",
-        entityId: id,
-        payloadHash: sha256Json({ decision: input.decision, note: input.note }),
-      },
-    });
 
-    if (input.decision === "APPROVED") {
-      triggerProforma = true;
+    revalidatePath(`/orders/${id}`);
+    revalidatePath("/orders");
+    revalidatePath("/queue/chef-approvals");
+    revalidatePath("/queue/manager-approvals");
+
+    // Auto-create + email the proforma invoice OUTSIDE the transaction so
+    // a slow SMTP / PDF render doesn't hold a row lock.
+    if (triggerProforma) {
+      const { createProformaInvoiceForOrder } = await import("./customer-invoices");
+      try {
+        await createProformaInvoiceForOrder(id);
+      } catch (err) {
+        console.error(`[proforma] order ${id} failed:`, err);
+      }
+      // Confirm to kitchen + delivery now that the order is going ahead.
+      await notifyOrderApproved(id);
     }
-  });
-
-  revalidatePath(`/orders/${id}`);
-  revalidatePath("/orders");
-  revalidatePath("/queue/chef-approvals");
-  revalidatePath("/queue/manager-approvals");
-
-  // Auto-create + email the proforma invoice OUTSIDE the transaction so
-  // a slow SMTP / PDF render doesn't hold a row lock.
-  if (triggerProforma) {
-    const { createProformaInvoiceForOrder } = await import("./customer-invoices");
-    try {
-      await createProformaInvoiceForOrder(id);
-    } catch (err) {
-      console.error(`[proforma] order ${id} failed:`, err);
-    }
-    // Confirm to kitchen + delivery now that the order is going ahead.
-    await notifyOrderApproved(id);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
   }
 }
 
@@ -626,60 +701,67 @@ export async function chefApproveOrder(
 export async function managerApproveChefSuggestion(
   id: string,
   input: { decision: "APPROVED" | "REJECTED"; note?: string },
-) {
-  const session = await requireRole(ORDER_MANAGER_ROLES);
+): Promise<ActionResult> {
+  try {
+    const session = await requireRole(ORDER_MANAGER_ROLES);
 
-  let triggerProforma = false;
+    let triggerProforma = false;
 
-  await db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
-    if (!order) throw new Error("Order not found");
-    if (order.status !== OrderStatus.CHANGES_PROPOSED_BY_CHEF) {
-      throw new AuthorizationError("Order does not have pending chef-proposed changes");
-    }
-    const nextStatus =
-      input.decision === "APPROVED"
-        ? OrderStatus.CHEF_REQUISITION_PENDING
-        : OrderStatus.REJECTED_BY_MANAGER;
+    await db.$transaction(async (tx) => {
+      const nextStatus =
+        input.decision === "APPROVED"
+          ? OrderStatus.CHEF_REQUISITION_PENDING
+          : OrderStatus.REJECTED_BY_MANAGER;
 
-    await tx.order.update({
-      where: { id },
-      data: {
-        status: nextStatus,
-        managerChangeReviewedById: session.user.id,
-        managerChangeReviewedAt: new Date(),
-        managerChangeDecision:
-          input.decision === "APPROVED" ? ApprovalDecision.APPROVED : ApprovalDecision.REJECTED,
-        managerChangeNote: input.note ?? null,
-      },
+      const updated = await tx.order.updateMany({
+        where: { id, status: OrderStatus.CHANGES_PROPOSED_BY_CHEF },
+        data: {
+          status: nextStatus,
+          managerChangeReviewedById: session.user.id,
+          managerChangeReviewedAt: new Date(),
+          managerChangeDecision:
+            input.decision === "APPROVED" ? ApprovalDecision.APPROVED : ApprovalDecision.REJECTED,
+          managerChangeNote: input.note ?? null,
+        },
+      });
+      if (updated.count === 0) {
+        const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
+        if (!order) throw new ActionError("Order not found");
+        throw new ActionError(
+          `Order no longer has pending chef-proposed changes (current: ${order.status}) — someone may have just reviewed it. Refresh the page.`,
+        );
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: input.decision === "APPROVED" ? "ORDER_MANAGER_APPROVED_CHANGES" : "ORDER_MANAGER_REJECTED_CHANGES",
+          entity: "Order",
+          entityId: id,
+          payloadHash: sha256Json({ decision: input.decision, note: input.note ?? null }),
+        },
+      });
+      if (input.decision === "APPROVED") {
+        triggerProforma = true;
+      }
     });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: input.decision === "APPROVED" ? "ORDER_MANAGER_APPROVED_CHANGES" : "ORDER_MANAGER_REJECTED_CHANGES",
-        entity: "Order",
-        entityId: id,
-        payloadHash: sha256Json({ decision: input.decision, note: input.note ?? null }),
-      },
-    });
-    if (input.decision === "APPROVED") {
-      triggerProforma = true;
-    }
-  });
 
-  revalidatePath(`/orders/${id}`);
-  revalidatePath("/orders");
-  revalidatePath("/queue/manager-approvals");
+    revalidatePath(`/orders/${id}`);
+    revalidatePath("/orders");
+    revalidatePath("/queue/manager-approvals");
 
-  if (triggerProforma) {
-    const { createProformaInvoiceForOrder } = await import("./customer-invoices");
-    try {
-      await createProformaInvoiceForOrder(id);
-    } catch (err) {
-      console.error(`[proforma] order ${id} failed:`, err);
+    if (triggerProforma) {
+      const { createProformaInvoiceForOrder } = await import("./customer-invoices");
+      try {
+        await createProformaInvoiceForOrder(id);
+      } catch (err) {
+        console.error(`[proforma] order ${id} failed:`, err);
+      }
+      // Manager OK'd the chef's changes — order is now going ahead.
+      await notifyOrderApproved(id);
     }
-    // Manager OK'd the chef's changes — order is now going ahead.
-    await notifyOrderApproved(id);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
   }
 }
 
@@ -690,142 +772,159 @@ export async function managerApproveChefSuggestion(
 // migration once there's confidence nothing references them.
 // =====================================================================
 
-export async function storeApproveOrder(id: string, raw: unknown) {
-  const session = await requireRole(ORDER_STORE_ROLES);
-  const input = OrderStoreApprovalInput.parse(raw);
+export async function storeApproveOrder(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireRole(ORDER_STORE_ROLES);
+    const input = OrderStoreApprovalInput.parse(raw);
 
-  await db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
-    if (!order) throw new Error("Order not found");
-    if (order.status !== OrderStatus.PENDING_STORE_APPROVAL) {
-      throw new AuthorizationError("Order is not awaiting store approval");
-    }
+    await db.$transaction(async (tx) => {
+      const nextStatus =
+        input.decision === "APPROVED"
+          ? OrderStatus.PENDING_MANAGER_APPROVAL
+          : OrderStatus.REJECTED_BY_STORE;
 
-    const nextStatus =
-      input.decision === "APPROVED"
-        ? OrderStatus.PENDING_MANAGER_APPROVAL
-        : OrderStatus.REJECTED_BY_STORE;
-
-    await tx.order.update({
-      where: { id },
-      data: {
-        status: nextStatus,
-        storeReviewedById: session.user.id,
-        storeReviewedAt: new Date(),
-        storeDecision: input.decision === "APPROVED" ? ApprovalDecision.APPROVED : ApprovalDecision.REJECTED,
-        storeApprovalNote: input.note,
-      },
+      const updated = await tx.order.updateMany({
+        where: { id, status: OrderStatus.PENDING_STORE_APPROVAL },
+        data: {
+          status: nextStatus,
+          storeReviewedById: session.user.id,
+          storeReviewedAt: new Date(),
+          storeDecision: input.decision === "APPROVED" ? ApprovalDecision.APPROVED : ApprovalDecision.REJECTED,
+          storeApprovalNote: input.note,
+        },
+      });
+      if (updated.count === 0) {
+        throw new ActionError("Order is not awaiting store approval — refresh the page.");
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: input.decision === "APPROVED" ? "ORDER_STORE_APPROVED" : "ORDER_STORE_REJECTED",
+          entity: "Order",
+          entityId: id,
+          payloadHash: sha256Json({ decision: input.decision, note: input.note }),
+        },
+      });
     });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: input.decision === "APPROVED" ? "ORDER_STORE_APPROVED" : "ORDER_STORE_REJECTED",
-        entity: "Order",
-        entityId: id,
-        payloadHash: sha256Json({ decision: input.decision, note: input.note }),
-      },
-    });
-  });
 
-  revalidatePath(`/orders/${id}`);
-  revalidatePath("/orders");
-  revalidatePath("/queue/store-approvals");
-  revalidatePath("/queue/manager-approvals");
+    revalidatePath(`/orders/${id}`);
+    revalidatePath("/orders");
+    revalidatePath("/queue/store-approvals");
+    revalidatePath("/queue/manager-approvals");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function managerApproveOrder(id: string, raw: unknown) {
-  const session = await requireRole(ORDER_MANAGER_ROLES);
-  const input = OrderManagerApprovalInput.parse(raw);
+export async function managerApproveOrder(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireRole(ORDER_MANAGER_ROLES);
+    const input = OrderManagerApprovalInput.parse(raw);
 
-  await db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
-    if (!order) throw new Error("Order not found");
-    if (order.status !== OrderStatus.PENDING_MANAGER_APPROVAL) {
-      throw new AuthorizationError("Order is not awaiting manager approval");
-    }
+    await db.$transaction(async (tx) => {
+      const nextStatus =
+        input.decision === "APPROVED"
+          ? OrderStatus.CHEF_REQUISITION_PENDING
+          : OrderStatus.REJECTED_BY_MANAGER;
 
-    const nextStatus =
-      input.decision === "APPROVED"
-        ? OrderStatus.CHEF_REQUISITION_PENDING
-        : OrderStatus.REJECTED_BY_MANAGER;
-
-    await tx.order.update({
-      where: { id },
-      data: {
-        status: nextStatus,
-        managerReviewedById: session.user.id,
-        managerReviewedAt: new Date(),
-        managerDecision:
-          input.decision === "APPROVED" ? ApprovalDecision.APPROVED : ApprovalDecision.REJECTED,
-        managerApprovalNote: input.note ?? null,
-      },
+      const updated = await tx.order.updateMany({
+        where: { id, status: OrderStatus.PENDING_MANAGER_APPROVAL },
+        data: {
+          status: nextStatus,
+          managerReviewedById: session.user.id,
+          managerReviewedAt: new Date(),
+          managerDecision:
+            input.decision === "APPROVED" ? ApprovalDecision.APPROVED : ApprovalDecision.REJECTED,
+          managerApprovalNote: input.note ?? null,
+        },
+      });
+      if (updated.count === 0) {
+        throw new ActionError("Order is not awaiting manager approval — refresh the page.");
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: input.decision === "APPROVED" ? "ORDER_MANAGER_APPROVED" : "ORDER_MANAGER_REJECTED",
+          entity: "Order",
+          entityId: id,
+          payloadHash: sha256Json({ decision: input.decision, note: input.note ?? null }),
+        },
+      });
     });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: input.decision === "APPROVED" ? "ORDER_MANAGER_APPROVED" : "ORDER_MANAGER_REJECTED",
-        entity: "Order",
-        entityId: id,
-        payloadHash: sha256Json({ decision: input.decision, note: input.note ?? null }),
-      },
-    });
-  });
 
-  revalidatePath(`/orders/${id}`);
-  revalidatePath("/orders");
-  revalidatePath("/queue/manager-approvals");
+    revalidatePath(`/orders/${id}`);
+    revalidatePath("/orders");
+    revalidatePath("/queue/manager-approvals");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function managerOverrideStoreRejection(id: string, raw: unknown) {
-  const session = await requireRole(ORDER_MANAGER_ROLES);
-  const input = OrderManagerOverrideInput.parse(raw);
+export async function managerOverrideStoreRejection(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireRole(ORDER_MANAGER_ROLES);
+    const input = OrderManagerOverrideInput.parse(raw);
 
-  await db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
-    if (!order) throw new Error("Order not found");
-    if (order.status !== OrderStatus.REJECTED_BY_STORE) {
-      throw new AuthorizationError("Only store-rejected orders can be overridden");
-    }
-    await tx.order.update({
-      where: { id },
-      data: {
-        status: OrderStatus.CHEF_REQUISITION_PENDING,
-        managerReviewedById: session.user.id,
-        managerReviewedAt: new Date(),
-        managerDecision: ApprovalDecision.OVERRIDDEN,
-        managerOverrideReason: input.reason,
-      },
+    await db.$transaction(async (tx) => {
+      const updated = await tx.order.updateMany({
+        where: { id, status: OrderStatus.REJECTED_BY_STORE },
+        data: {
+          status: OrderStatus.CHEF_REQUISITION_PENDING,
+          managerReviewedById: session.user.id,
+          managerReviewedAt: new Date(),
+          managerDecision: ApprovalDecision.OVERRIDDEN,
+          managerOverrideReason: input.reason,
+        },
+      });
+      if (updated.count === 0) {
+        throw new ActionError("Only store-rejected orders can be overridden — refresh the page.");
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "ORDER_MANAGER_OVERRIDE",
+          entity: "Order",
+          entityId: id,
+          payloadHash: sha256Json({ reason: input.reason }),
+        },
+      });
     });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "ORDER_MANAGER_OVERRIDE",
-        entity: "Order",
-        entityId: id,
-        payloadHash: sha256Json({ reason: input.reason }),
-      },
-    });
-  });
 
-  revalidatePath(`/orders/${id}`);
-  revalidatePath("/orders");
-  revalidatePath("/queue/manager-approvals");
+    revalidatePath(`/orders/${id}`);
+    revalidatePath("/orders");
+    revalidatePath("/queue/manager-approvals");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function cancelOrder(id: string, reason: string) {
+export async function cancelOrder(id: string, reason: string): Promise<ActionResult> {
+  try {
+    return await cancelOrderInner(id, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true }> {
   const session = await requireRole(ORDER_MANAGER_ROLES);
-  if (!reason.trim()) throw new Error("Cancellation reason is required");
+  if (!reason.trim()) throw new ActionError("Cancellation reason is required");
 
   await db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
-    if (!order) throw new Error("Order not found");
-    if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.COMPLETED) {
-      throw new Error(`Order is already ${order.status}`);
-    }
-    await tx.order.update({
-      where: { id },
+    // Status guard: terminal states can't be cancelled, and two concurrent
+    // cancels can't both proceed.
+    const updated = await tx.order.updateMany({
+      where: { id, status: { notIn: [OrderStatus.CANCELLED, OrderStatus.COMPLETED] } },
       data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancellationReason: reason },
     });
+    if (updated.count === 0) {
+      const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
+      if (!order) throw new ActionError("Order not found");
+      throw new ActionError(`Order is already ${order.status}`);
+    }
 
     // Close any open downstream work so it drops off the store / kitchen /
     // delivery queues — otherwise a cancelled order still shows a "hand over
@@ -908,6 +1007,7 @@ export async function cancelOrder(id: string, reason: string) {
   revalidatePath("/requisitions");
   revalidatePath("/kitchen");
   revalidatePath("/deliveries");
+  return { ok: true };
 }
 
 /**
@@ -916,9 +1016,23 @@ export async function cancelOrder(id: string, reason: string) {
  * notification, and the assignment is stamped on the order so it's visible.
  * Only makes sense once the order has been delivered/served.
  */
-export async function allocateOrderFeedback(orderId: string, assigneeId: string) {
+export async function allocateOrderFeedback(
+  orderId: string,
+  assigneeId: string,
+): Promise<ActionResultWith<{ taskId: string }>> {
+  try {
+    return await allocateOrderFeedbackInner(orderId, assigneeId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function allocateOrderFeedbackInner(
+  orderId: string,
+  assigneeId: string,
+): Promise<{ ok: true; taskId: string }> {
   const session = await requireRole(ORDER_MANAGER_ROLES);
-  if (!assigneeId) throw new Error("Pick a person to collect the feedback.");
+  if (!assigneeId) throw new ActionError("Pick a person to collect the feedback.");
 
   const [order, assignee] = await Promise.all([
     db.order.findUnique({
@@ -927,8 +1041,8 @@ export async function allocateOrderFeedback(orderId: string, assigneeId: string)
     }),
     db.user.findUnique({ where: { id: assigneeId }, select: { id: true, active: true, name: true } }),
   ]);
-  if (!order) throw new Error("Order not found");
-  if (!assignee || !assignee.active) throw new Error("Pick an active staff member.");
+  if (!order) throw new ActionError("Order not found");
+  if (!assignee || !assignee.active) throw new ActionError("Pick an active staff member.");
   const eligible: OrderStatus[] = [
     OrderStatus.DELIVERED,
     OrderStatus.INVOICED,
@@ -936,7 +1050,7 @@ export async function allocateOrderFeedback(orderId: string, assigneeId: string)
     OrderStatus.COMPLETED,
   ];
   if (!eligible.includes(order.status)) {
-    throw new AuthorizationError("Feedback can be allocated once the order has been delivered/served.");
+    throw new ActionError("Feedback can be allocated once the order has been delivered/served.");
   }
 
   const task = await db.$transaction(async (tx) => {
@@ -981,7 +1095,7 @@ export async function allocateOrderFeedback(orderId: string, assigneeId: string)
   });
 
   revalidatePath(`/orders/${orderId}`);
-  return { taskId: task.id };
+  return { ok: true, taskId: task.id };
 }
 
 /**
@@ -992,63 +1106,71 @@ export async function allocateOrderFeedback(orderId: string, assigneeId: string)
  * room-service billing screen lists. Tolerant of a double-tap (already
  * served/billed = no-op). Mints the feedback-link token like a real delivery.
  */
-export async function markInHouseServed(orderId: string) {
-  const session = await requireRole([
-    Role.ADMIN,
-    Role.MANAGER,
-    Role.KITCHEN_HEAD,
-    Role.FNB_SERVICE,
-    Role.DELIVERY,
-  ]);
-  await db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({
-      where: { id: orderId },
-      select: { id: true, code: true, status: true, channel: true, feedbackToken: true },
+export async function markInHouseServed(orderId: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole([
+      Role.ADMIN,
+      Role.MANAGER,
+      Role.KITCHEN_HEAD,
+      Role.FNB_SERVICE,
+      Role.DELIVERY,
+    ]);
+    await db.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: { id: true, code: true, status: true, channel: true, feedbackToken: true },
+      });
+      if (!order) throw new ActionError("Order not found");
+      if (!isImmediateChannel(order.channel)) {
+        throw new ActionError(
+          "Only in-house orders (room service / à la carte / management) are served this way.",
+        );
+      }
+      // Already served / billed — harmless no-op so a double-tap doesn't error.
+      if (
+        order.status === OrderStatus.DELIVERED ||
+        order.status === OrderStatus.INVOICED ||
+        order.status === OrderStatus.PAID ||
+        order.status === OrderStatus.COMPLETED
+      ) {
+        return;
+      }
+      if (order.status !== OrderStatus.READY) {
+        throw new ActionError(
+          `Order ${order.code} isn't ready to serve yet (it's ${order.status}). It needs to be cooked first.`,
+        );
+      }
+      const wantsFeedback = !order.feedbackToken && channelWantsFeedback(order.channel);
+      // Guarded transition: a concurrent double-tap that already flipped the
+      // order to DELIVERED simply matches zero rows (no-op, same as above).
+      const updated = await tx.order.updateMany({
+        where: { id: orderId, status: OrderStatus.READY },
+        data: {
+          status: OrderStatus.DELIVERED,
+          ...(wantsFeedback
+            ? { feedbackToken: randomBytes(24).toString("base64url"), feedbackSentAt: new Date() }
+            : {}),
+        },
+      });
+      if (updated.count === 0) return;
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "ORDER_SERVED_INHOUSE",
+          entity: "Order",
+          entityId: orderId,
+        },
+      });
     });
-    if (!order) throw new Error("Order not found");
-    if (!isImmediateChannel(order.channel)) {
-      throw new AuthorizationError(
-        "Only in-house orders (room service / à la carte / management) are served this way.",
-      );
-    }
-    // Already served / billed — harmless no-op so a double-tap doesn't error.
-    if (
-      order.status === OrderStatus.DELIVERED ||
-      order.status === OrderStatus.INVOICED ||
-      order.status === OrderStatus.PAID ||
-      order.status === OrderStatus.COMPLETED
-    ) {
-      return;
-    }
-    if (order.status !== OrderStatus.READY) {
-      throw new AuthorizationError(
-        `Order ${order.code} isn't ready to serve yet (it's ${order.status}). It needs to be cooked first.`,
-      );
-    }
-    const wantsFeedback = !order.feedbackToken && channelWantsFeedback(order.channel);
-    await tx.order.update({
-      where: { id: orderId },
-      data: {
-        status: OrderStatus.DELIVERED,
-        ...(wantsFeedback
-          ? { feedbackToken: randomBytes(24).toString("base64url"), feedbackSentAt: new Date() }
-          : {}),
-      },
-    });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "ORDER_SERVED_INHOUSE",
-        entity: "Order",
-        entityId: orderId,
-      },
-    });
-  });
 
-  revalidatePath("/kitchen");
-  revalidatePath("/orders");
-  revalidatePath(`/orders/${orderId}`);
-  revalidatePath("/invoices/room-service");
+    revalidatePath("/kitchen");
+    revalidatePath("/orders");
+    revalidatePath(`/orders/${orderId}`);
+    revalidatePath("/invoices/room-service");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 /**
@@ -1064,14 +1186,27 @@ export async function swapOrderItemDish(
   orderItemId: string,
   newDishId: string,
   reason?: string | null,
-) {
+): Promise<ActionResult> {
+  try {
+    return await swapOrderItemDishInner(orderId, orderItemId, newDishId, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function swapOrderItemDishInner(
+  orderId: string,
+  orderItemId: string,
+  newDishId: string,
+  reason?: string | null,
+): Promise<{ ok: true }> {
   const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD]);
   await db.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: orderId },
       select: { id: true, status: true, channel: true },
     });
-    if (!order) throw new Error("Order not found");
+    if (!order) throw new ActionError("Order not found");
     const SWAPPABLE: OrderStatus[] = [
       OrderStatus.PENDING_CHEF_APPROVAL,
       OrderStatus.CHANGES_PROPOSED_BY_CHEF,
@@ -1080,7 +1215,7 @@ export async function swapOrderItemDish(
       OrderStatus.READY_FOR_PRODUCTION,
     ];
     if (!SWAPPABLE.includes(order.status)) {
-      throw new AuthorizationError(
+      throw new ActionError(
         `Can't swap a dish once the order is ${order.status.toLowerCase()}.`,
       );
     }
@@ -1088,12 +1223,12 @@ export async function swapOrderItemDish(
       where: { id: orderItemId, orderId },
       select: { id: true, portions: true, discountPct: true, dish: { select: { name: true } } },
     });
-    if (!item) throw new Error("That dish isn't on this order.");
+    if (!item) throw new ActionError("That dish isn't on this order.");
     const newDish = await tx.dish.findUnique({
       where: { id: newDishId },
       select: { id: true, name: true, unitPrice: true, gstRatePct: true },
     });
-    if (!newDish) throw new Error("Replacement dish not found.");
+    if (!newDish) throw new ActionError("Replacement dish not found.");
 
     const c = computeLine(
       item.portions.toString(),
@@ -1137,23 +1272,29 @@ export async function swapOrderItemDish(
   revalidatePath(`/orders/${orderId}`);
   revalidatePath(`/orders/${orderId}/requisition`);
   revalidatePath("/orders");
+  return { ok: true };
 }
 
-export async function assignKitchenSupervisor(id: string, userId: string) {
-  const session = await requireRole([...ORDER_MANAGER_ROLES, ...ORDER_KITCHEN_ROLES]);
-  await db.$transaction(async (tx) => {
-    await tx.order.update({ where: { id }, data: { kitchenSupervisorId: userId } });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "ORDER_KITCHEN_SUPERVISOR_ASSIGNED",
-        entity: "Order",
-        entityId: id,
-        payloadHash: sha256Json({ kitchenSupervisorId: userId }),
-      },
+export async function assignKitchenSupervisor(id: string, userId: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole([...ORDER_MANAGER_ROLES, ...ORDER_KITCHEN_ROLES]);
+    await db.$transaction(async (tx) => {
+      await tx.order.update({ where: { id }, data: { kitchenSupervisorId: userId } });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "ORDER_KITCHEN_SUPERVISOR_ASSIGNED",
+          entity: "Order",
+          entityId: id,
+          payloadHash: sha256Json({ kitchenSupervisorId: userId }),
+        },
+      });
     });
-  });
-  revalidatePath(`/orders/${id}`);
+    revalidatePath(`/orders/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 // =====================================================================

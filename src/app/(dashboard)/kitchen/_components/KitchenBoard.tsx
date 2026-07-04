@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { formatIST } from "@/lib/time";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 import { startCookingOrder, markOrderCooked } from "@/server/actions/production-jobs";
 import { handToDelivery } from "@/server/actions/deliveries";
 import { markInHouseServed } from "@/server/actions/orders";
@@ -98,7 +99,11 @@ function JobCard({ job }: { job: KitchenJob }) {
   function run(fn: () => Promise<unknown>, msg: string) {
     startTransition(async () => {
       try {
-        await fn();
+        const res = (await fn()) as ActionResult | undefined;
+        if (res && res.ok === false) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(msg);
         router.refresh();
       } catch (err) {

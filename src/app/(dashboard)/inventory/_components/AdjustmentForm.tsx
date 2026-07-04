@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { IngredientAdjustmentInputT } from "@/lib/validators";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResultWith } from "@/lib/action-result";
 
 interface IngredientOption {
   id: string;
@@ -20,7 +21,7 @@ interface IngredientOption {
 
 interface Props {
   ingredients: IngredientOption[];
-  onSubmit: (input: IngredientAdjustmentInputT) => Promise<{ id: string }>;
+  onSubmit: (input: IngredientAdjustmentInputT) => Promise<ActionResultWith<{ id: string }>>;
   redirectOnSuccess?: string;
 }
 
@@ -82,7 +83,11 @@ export function AdjustmentForm({ ingredients, onSubmit, redirectOnSuccess }: Pro
 
     startTransition(async () => {
       try {
-        await onSubmit(payload);
+        const res = await onSubmit(payload);
+        if (res && res.ok === false) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Stock adjusted");
         if (redirectOnSuccess) router.push(redirectOnSuccess);
         router.refresh();

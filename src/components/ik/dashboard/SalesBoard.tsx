@@ -133,7 +133,11 @@ function SalesCard({ order, highlight }: { order: SalesOrder; highlight: boolean
   function submit() {
     startTransition(async () => {
       try {
-        await submitOrder(order.id);
+        const res = await submitOrder(order.id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Order submitted");
         router.refresh();
       } catch (err) {

@@ -7,6 +7,7 @@ import { Decimal } from "decimal.js";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface Ingredient { id: string; name: string; sku: string; unit: string; avgCost: string }
 interface OrderItem { id: string; dishName: string }
@@ -14,7 +15,7 @@ interface OrderItem { id: string; dishName: string }
 interface Props {
   ingredients: Ingredient[];
   orderItems: OrderItem[];
-  onSubmit: (lines: Array<{ ingredientId: string; requestedQty: string; orderItemId: string | null; notes: string | null }>) => Promise<void>;
+  onSubmit: (lines: Array<{ ingredientId: string; requestedQty: string; orderItemId: string | null; notes: string | null }>) => Promise<ActionResult | void>;
 }
 
 interface DraftLine {
@@ -67,7 +68,11 @@ export function RequisitionDraftForm({ ingredients, orderItems, onSubmit }: Prop
     if (payload.length === 0) return toast.error("Add at least one line");
     startTransition(async () => {
       try {
-        await onSubmit(payload);
+        const res = await onSubmit(payload);
+        if (res && res.ok === false) {
+          toast.error(res.error);
+          return;
+        }
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");

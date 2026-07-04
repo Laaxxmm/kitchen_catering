@@ -32,11 +32,11 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
   }
   async function doIssue(lineId: string, qty: string) {
     "use server";
-    await issueChefRequisitionLine({ lineId, qtyToIssue: qty });
+    return await issueChefRequisitionLine({ lineId, qtyToIssue: qty });
   }
   async function doSendToProcurement(lineId: string, reason: string) {
     "use server";
-    await sendChefRequisitionLineToProcurement({ lineId, reason });
+    return await sendChefRequisitionLineToProcurement({ lineId, reason });
   }
 
   const canSubmit = isChef && requisition.status === ChefRequisitionStatus.DRAFT;

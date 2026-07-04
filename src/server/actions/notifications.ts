@@ -63,13 +63,21 @@ export async function notifyRoles(
   roles: Role[],
   payload: Omit<CreateNotificationInput, "userId">,
 ) {
-  const recipients = await db.user.findMany({
-    where: { role: { in: roles }, active: true },
-    select: { id: true },
-  });
-  for (const r of recipients) {
-    await createNotification({ ...payload, userId: r.id });
+  // Never let notification plumbing take down the business action that
+  // triggered it — swallow and log, same contract as createNotification.
+  let recipients: Array<{ id: string }> = [];
+  try {
+    recipients = await db.user.findMany({
+      where: { role: { in: roles }, active: true },
+      select: { id: true },
+    });
+  } catch (err) {
+    console.warn("[notify] notifyRoles recipient lookup failed", err);
+    return;
   }
+  await Promise.all(
+    recipients.map((r) => createNotification({ ...payload, userId: r.id })),
+  );
 }
 
 // ─── Read APIs ────────────────────────────────────────────────────────

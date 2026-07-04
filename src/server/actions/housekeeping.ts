@@ -13,6 +13,26 @@ import {
   HousekeepingStaffInput,
   RoomInput,
 } from "@/lib/validators";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
+
+/**
+ * Row-lock housekeeping items for the rest of the transaction. Every stock
+ * movement (receipt / issue / return) reads or updates currentStock /
+ * inCirculation — without the lock two concurrent movements read the same
+ * snapshot and one update is silently lost (stock can even go negative past
+ * the availability check). FOR UPDATE serialises them; ids are locked in a
+ * stable order so concurrent multi-line movements can't deadlock.
+ */
+async function lockHousekeepingItemRows(tx: Prisma.TransactionClient, ids: string[]) {
+  for (const id of [...new Set(ids)].sort()) {
+    await tx.$executeRaw`SELECT 1 FROM "HousekeepingItem" WHERE "id" = ${id} FOR UPDATE`;
+  }
+}
 
 // Housekeeping is a self-contained stockroom for hotel guest supplies.
 // Distinct from kitchen inventory — runs on its own catalog (HousekeepingItem),
@@ -376,7 +396,15 @@ export async function listHousekeepingItems(opts: { activeOnly?: boolean } = {})
 
 // ─── Receipts (maintenance → housekeeping) ────────────────────────────
 
-export async function recordHousekeepingReceipt(raw: unknown) {
+export async function recordHousekeepingReceipt(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await recordHousekeepingReceiptInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function recordHousekeepingReceiptInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = HousekeepingReceiptInput.parse(raw);
 
@@ -387,10 +415,11 @@ export async function recordHousekeepingReceipt(raw: unknown) {
     costPerUnit: l.costPerUnit ? new Prisma.Decimal(l.costPerUnit) : null,
   }));
   for (const l of lines) {
-    if (l.qty.lessThanOrEqualTo(0)) throw new Error("Quantity must be > 0");
+    if (l.qty.lessThanOrEqualTo(0)) throw new ActionError("Quantity must be > 0");
   }
 
   const receipt = await db.$transaction(async (tx) => {
+    await lockHousekeepingItemRows(tx, lines.map((l) => l.itemId));
     const created = await tx.housekeepingReceipt.create({
       data: {
         receivedAt: istToUtc(input.receivedAt),
@@ -427,7 +456,7 @@ export async function recordHousekeepingReceipt(raw: unknown) {
   revalidatePath("/housekeeping/receipts");
   revalidatePath("/housekeeping/items");
   revalidatePath("/housekeeping");
-  return { id: receipt.id };
+  return { ok: true, id: receipt.id };
 }
 
 export async function listHousekeepingReceipts(opts: { limit?: number } = {}) {
@@ -446,7 +475,15 @@ export async function listHousekeepingReceipts(opts: { limit?: number } = {}) {
 
 // ─── Issues (housekeeping → room via staff) ───────────────────────────
 
-export async function recordHousekeepingIssue(raw: unknown) {
+export async function recordHousekeepingIssue(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await recordHousekeepingIssueInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function recordHousekeepingIssueInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = HousekeepingIssueInput.parse(raw);
 
@@ -455,28 +492,31 @@ export async function recordHousekeepingIssue(raw: unknown) {
     qty: new Prisma.Decimal(l.quantity),
   }));
   for (const l of lines) {
-    if (l.qty.lessThanOrEqualTo(0)) throw new Error("Quantity must be > 0");
+    if (l.qty.lessThanOrEqualTo(0)) throw new ActionError("Quantity must be > 0");
   }
 
-  // Pre-check stock availability — fail fast with a friendly message.
   const itemIds = [...new Set(lines.map((l) => l.itemId))];
-  const items = await db.housekeepingItem.findMany({
-    where: { id: { in: itemIds } },
-    select: { id: true, name: true, currentStock: true, unit: true, active: true, reusable: true },
-  });
-  const byId = new Map(items.map((i) => [i.id, i]));
-  for (const l of lines) {
-    const it = byId.get(l.itemId);
-    if (!it) throw new Error("Item not found");
-    if (!it.active) throw new Error(`Item ${it.name} is inactive`);
-    if (new Decimal(it.currentStock.toString()).lt(new Decimal(l.qty.toString()))) {
-      throw new Error(
-        `Not enough ${it.name} in stock (have ${it.currentStock.toString()} ${it.unit})`
-      );
-    }
-  }
 
   const issue = await db.$transaction(async (tx) => {
+    // Check stock availability under the row lock — a pre-check outside the
+    // txn could pass for two concurrent issues that together overdraw.
+    await lockHousekeepingItemRows(tx, itemIds);
+    const items = await tx.housekeepingItem.findMany({
+      where: { id: { in: itemIds } },
+      select: { id: true, name: true, currentStock: true, unit: true, active: true, reusable: true },
+    });
+    const byId = new Map(items.map((i) => [i.id, i]));
+    for (const l of lines) {
+      const it = byId.get(l.itemId);
+      if (!it) throw new ActionError("Item not found");
+      if (!it.active) throw new ActionError(`Item ${it.name} is inactive`);
+      if (new Decimal(it.currentStock.toString()).lt(new Decimal(l.qty.toString()))) {
+        throw new ActionError(
+          `Not enough ${it.name} in stock (have ${it.currentStock.toString()} ${it.unit})`
+        );
+      }
+    }
+
     const created = await tx.housekeepingIssue.create({
       data: {
         issuedAt: istToUtc(input.issuedAt),
@@ -516,7 +556,7 @@ export async function recordHousekeepingIssue(raw: unknown) {
   revalidatePath("/housekeeping/issues");
   revalidatePath("/housekeeping/items");
   revalidatePath("/housekeeping");
-  return { id: issue.id };
+  return { ok: true, id: issue.id };
 }
 
 /** Reusable items that have units out in circulation — powers the Return picker. */
@@ -547,21 +587,35 @@ export async function returnHousekeepingStock(input: {
   qty: string;
   outcome: "returned" | "lost";
   note?: string;
-}) {
+}): Promise<ActionResult> {
+  try {
+    return await returnHousekeepingStockInner(input);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function returnHousekeepingStockInner(input: {
+  itemId: string;
+  qty: string;
+  outcome: "returned" | "lost";
+  note?: string;
+}): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const qty = new Prisma.Decimal(input.qty || "0");
-  if (qty.lessThanOrEqualTo(0)) throw new Error("Quantity must be greater than 0");
+  if (qty.lessThanOrEqualTo(0)) throw new ActionError("Quantity must be greater than 0");
 
   await db.$transaction(async (tx) => {
+    await lockHousekeepingItemRows(tx, [input.itemId]);
     const item = await tx.housekeepingItem.findUnique({
       where: { id: input.itemId },
       select: { id: true, name: true, unit: true, reusable: true, inCirculation: true },
     });
-    if (!item) throw new Error("Item not found");
-    if (!item.reusable) throw new Error(`${item.name} isn't a reusable item`);
+    if (!item) throw new ActionError("Item not found");
+    if (!item.reusable) throw new ActionError(`${item.name} isn't a reusable item`);
     const circ = new Decimal(item.inCirculation.toString());
     if (new Decimal(qty.toString()).gt(circ)) {
-      throw new Error(`Only ${circ.toString()} ${item.unit} of ${item.name} are out in use — can't return ${qty.toString()}.`);
+      throw new ActionError(`Only ${circ.toString()} ${item.unit} of ${item.name} are out in use — can't return ${qty.toString()}.`);
     }
 
     await tx.housekeepingItem.update({
@@ -583,6 +637,7 @@ export async function returnHousekeepingStock(input: {
 
   revalidatePath("/housekeeping/items");
   revalidatePath("/housekeeping");
+  return { ok: true };
 }
 
 export interface ListIssuesOpts {

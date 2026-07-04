@@ -7,6 +7,7 @@ import { ChefRequisitionLineStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Decimal } from "decimal.js";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface Props {
   lineId: string;
@@ -14,8 +15,8 @@ interface Props {
   issuedQty: string;
   onHand: string;
   status: ChefRequisitionLineStatus;
-  onIssue: (lineId: string, qty: string) => Promise<void>;
-  onSendToProcurement: (lineId: string, reason: string) => Promise<void>;
+  onIssue: (lineId: string, qty: string) => Promise<ActionResult>;
+  onSendToProcurement: (lineId: string, reason: string) => Promise<ActionResult>;
 }
 
 export function LineFulfilControls({ lineId, requestedQty, issuedQty, onHand, status, onIssue, onSendToProcurement }: Props) {
@@ -40,10 +41,14 @@ export function LineFulfilControls({ lineId, requestedQty, issuedQty, onHand, st
   const partialOverIssue =
     partialQty !== "" && partialQtyDec.gt(maxIssuable);
 
-  function call(fn: () => Promise<void>) {
+  function call(fn: () => Promise<ActionResult>) {
     startTransition(async () => {
       try {
-        await fn();
+        const res = await fn();
+        if (res && res.ok === false) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Saved");
         router.refresh();
       } catch (err) {

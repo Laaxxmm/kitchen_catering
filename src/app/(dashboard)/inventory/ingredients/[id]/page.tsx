@@ -15,8 +15,9 @@ export default async function IngredientDetailPage({ params }: { params: Promise
 
   async function update(input: IngredientInputT) {
     "use server";
-    await updateIngredient(id, input);
-    return { id };
+    const res = await updateIngredient(id, input);
+    if (!res.ok) return res;
+    return { ok: true as const, id };
   }
   async function deactivate() {
     "use server";

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { Decimal } from "decimal.js";
-import { PettyCashVoucherStatus, Role } from "@prisma/client";
+import { PettyCashVoucherStatus, Role, type Prisma } from "@prisma/client";
 import { db } from "@/server/db";
 import { AuthorizationError, requireRole } from "@/server/rbac";
 import {
@@ -13,6 +13,12 @@ import {
 import { nextPettyCashVoucherNo } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
 
 // Petty cash is a finance-desk responsibility — the accounts team runs it
 // end to end (create floats, top up, reverse) alongside admin/manager.
@@ -20,9 +26,29 @@ const PETTY_MANAGE = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
 const ANY_WRITE = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.ACCOUNTS];
 const TOPUP_APPROVAL_THRESHOLD = new Decimal(10000); // ₹10k — requires manager+ approval
 
+/**
+ * Row-lock a float for the rest of the transaction. Every balance movement
+ * (voucher / top-up / reversal) reads currentBalance, computes, then writes
+ * back — without the lock two concurrent movements read the same snapshot
+ * and one update is silently lost (the balance can even go negative past
+ * the "insufficient balance" check). FOR UPDATE serialises them: the second
+ * caller waits, then reads the committed value.
+ */
+async function lockFloatRow(tx: Prisma.TransactionClient, id: string) {
+  await tx.$executeRaw`SELECT 1 FROM "PettyCashFloat" WHERE "id" = ${id} FOR UPDATE`;
+}
+
 // ─── Float CRUD ──────────────────────────────────────────────────────────
 
-export async function createPettyCashFloat(raw: unknown) {
+export async function createPettyCashFloat(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await createPettyCashFloatInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createPettyCashFloatInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(PETTY_MANAGE);
   const input = PettyCashFloatInput.parse(raw);
   const f = await db.$transaction(async (tx) => {
@@ -46,7 +72,7 @@ export async function createPettyCashFloat(raw: unknown) {
     return created;
   });
   revalidatePath("/petty-cash");
-  return { id: f.id };
+  return { ok: true, id: f.id };
 }
 
 export async function listPettyCashFloats() {
@@ -79,17 +105,30 @@ export async function getPettyCashFloat(id: string) {
 
 // ─── Voucher ─────────────────────────────────────────────────────────────
 
-export async function createPettyCashVoucher(raw: unknown) {
+export async function createPettyCashVoucher(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string; voucherNo: string }>> {
+  try {
+    return await createPettyCashVoucherInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createPettyCashVoucherInner(
+  raw: unknown,
+): Promise<{ ok: true; id: string; voucherNo: string }> {
   const session = await requireRole(ANY_WRITE);
   const input = PettyCashVoucherInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {
+    await lockFloatRow(tx, input.floatId);
     const float = await tx.pettyCashFloat.findUnique({
       where: { id: input.floatId },
       select: { id: true, custodianId: true, currentBalance: true, active: true },
     });
-    if (!float) throw new Error("Float not found");
-    if (!float.active) throw new Error("Float is inactive");
+    if (!float) throw new ActionError("Float not found");
+    if (!float.active) throw new ActionError("Float is inactive");
     // The custodian is the primary author. ADMIN/MANAGER can also draft on
     // behalf of the custodian.
     if (
@@ -101,10 +140,10 @@ export async function createPettyCashVoucher(raw: unknown) {
       throw new AuthorizationError("Only the float custodian (or admin/manager/accounts) can create vouchers");
     }
     const amount = toDecimal(input.amount);
-    if (amount.lte(0)) throw new Error("Voucher amount must be positive");
+    if (amount.lte(0)) throw new ActionError("Voucher amount must be positive");
     const remaining = toDecimal(float.currentBalance);
     if (amount.gt(remaining)) {
-      throw new Error(`Insufficient float balance. ₹${remaining.toString()} available, ₹${amount.toString()} requested`);
+      throw new ActionError(`Insufficient float balance. ₹${remaining.toString()} available, ₹${amount.toString()} requested`);
     }
 
     const voucherNo = await nextPettyCashVoucherNo(tx);
@@ -141,20 +180,37 @@ export async function createPettyCashVoucher(raw: unknown) {
 
   revalidatePath("/petty-cash");
   revalidatePath(`/petty-cash/floats/${input.floatId}`);
-  return { id: result.id, voucherNo: result.voucherNo };
+  return { ok: true, id: result.id, voucherNo: result.voucherNo };
 }
 
-export async function reversePettyCashVoucher(id: string, reason: string) {
+export async function reversePettyCashVoucher(id: string, reason: string): Promise<ActionResult> {
+  try {
+    return await reversePettyCashVoucherInner(id, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function reversePettyCashVoucherInner(id: string, reason: string): Promise<{ ok: true }> {
   const session = await requireRole(PETTY_MANAGE);
-  if (!reason.trim()) throw new Error("Reason required");
+  if (!reason.trim()) throw new ActionError("Reason required");
   await db.$transaction(async (tx) => {
+    // Resolve the parent float, then lock it BEFORE reading the voucher's
+    // status or the float's balance — two concurrent reversals of the same
+    // voucher would otherwise both see POSTED and credit the float twice.
+    const ref = await tx.pettyCashVoucher.findUnique({
+      where: { id },
+      select: { floatId: true },
+    });
+    if (!ref) throw new ActionError("Voucher not found");
+    await lockFloatRow(tx, ref.floatId);
     const voucher = await tx.pettyCashVoucher.findUnique({
       where: { id },
       select: { id: true, floatId: true, amount: true, status: true, reversedAt: true },
     });
-    if (!voucher) throw new Error("Voucher not found");
+    if (!voucher) throw new ActionError("Voucher not found");
     if (voucher.reversedAt || voucher.status === PettyCashVoucherStatus.REVERSED) {
-      throw new Error("Voucher already reversed");
+      throw new ActionError("Voucher already reversed");
     }
     await tx.pettyCashVoucher.update({
       where: { id },
@@ -168,7 +224,7 @@ export async function reversePettyCashVoucher(id: string, reason: string) {
       where: { id: voucher.floatId },
       select: { currentBalance: true },
     });
-    if (!float) throw new Error("Parent float missing");
+    if (!float) throw new ActionError("Parent float missing");
     await tx.pettyCashFloat.update({
       where: { id: voucher.floatId },
       data: {
@@ -186,15 +242,24 @@ export async function reversePettyCashVoucher(id: string, reason: string) {
     });
   });
   revalidatePath("/petty-cash");
+  return { ok: true };
 }
 
 // ─── Top-up ──────────────────────────────────────────────────────────────
 
-export async function topUpPettyCash(raw: unknown) {
+export async function topUpPettyCash(raw: unknown): Promise<ActionResult> {
+  try {
+    return await topUpPettyCashInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function topUpPettyCashInner(raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(PETTY_MANAGE);
   const input = PettyCashTopUpInput.parse(raw);
   const amount = toDecimal(input.amount);
-  if (amount.lte(0)) throw new Error("Top-up amount must be positive");
+  if (amount.lte(0)) throw new ActionError("Top-up amount must be positive");
 
   // Anything over the threshold needs MANAGER+ approval; we already gate
   // entry to this action behind MANAGER/ADMIN, so the threshold is more
@@ -202,11 +267,12 @@ export async function topUpPettyCash(raw: unknown) {
   const needsApproval = amount.gt(TOPUP_APPROVAL_THRESHOLD);
 
   await db.$transaction(async (tx) => {
+    await lockFloatRow(tx, input.floatId);
     const float = await tx.pettyCashFloat.findUnique({
       where: { id: input.floatId },
       select: { id: true, currentBalance: true, active: true },
     });
-    if (!float || !float.active) throw new Error("Float not found or inactive");
+    if (!float || !float.active) throw new ActionError("Float not found or inactive");
     await tx.pettyCashTopUp.create({
       data: {
         floatId: float.id,
@@ -236,4 +302,5 @@ export async function topUpPettyCash(raw: unknown) {
 
   revalidatePath("/petty-cash");
   revalidatePath(`/petty-cash/floats/${input.floatId}`);
+  return { ok: true };
 }

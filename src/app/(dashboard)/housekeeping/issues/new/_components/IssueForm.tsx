@@ -82,7 +82,7 @@ export function IssueForm({
     }
     startTransition(async () => {
       try {
-        await recordHousekeepingIssue({
+        const res = await recordHousekeepingIssue({
           issuedAt,
           staffId,
           roomId,
@@ -90,6 +90,10 @@ export function IssueForm({
           notes: notes.trim() || null,
           lines: cleanLines,
         });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Issue recorded — stock updated");
         router.push("/housekeeping/issues");
         router.refresh();

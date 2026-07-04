@@ -67,13 +67,17 @@ export function IssueForm({ items, events }: { items: Item[]; events: EventOptio
 
     startTransition(async () => {
       try {
-        await recordBanquetIssue({
+        const res = await recordBanquetIssue({
           issuedAt,
           purpose: purpose.trim(),
           orderId: orderId.trim() || null,
           notes: notes.trim() || null,
           lines: cleanLines,
         });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Issue recorded — stock updated");
         router.push("/banquet/issues");
         router.refresh();

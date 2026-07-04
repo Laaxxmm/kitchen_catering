@@ -14,6 +14,25 @@ import {
   BanquetIssueInput,
   BanquetReceiptInput,
 } from "@/lib/validators";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResultWith,
+} from "@/server/action-result";
+
+/**
+ * Row-lock banquet items for the rest of the transaction. Every stock
+ * movement (receipt / issue) reads or updates currentStock — without the
+ * lock two concurrent movements read the same snapshot and one update is
+ * silently lost (stock can even go negative past the availability check).
+ * FOR UPDATE serialises them; ids are locked in a stable order so
+ * concurrent multi-line movements can't deadlock.
+ */
+async function lockBanquetItemRows(tx: Prisma.TransactionClient, ids: string[]) {
+  for (const id of [...new Set(ids)].sort()) {
+    await tx.$executeRaw`SELECT 1 FROM "BanquetItem" WHERE "id" = ${id} FOR UPDATE`;
+  }
+}
 
 // Banquet store — service-side disposables (cups, trays, tissue, foil,
 // takeaway boxes …). Same shape as housekeeping but the issues link to
@@ -167,7 +186,15 @@ export async function listBanquetItems(opts: { activeOnly?: boolean } = {}) {
 
 // ─── Receipts ─────────────────────────────────────────────────────────
 
-export async function recordBanquetReceipt(raw: unknown) {
+export async function recordBanquetReceipt(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await recordBanquetReceiptInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function recordBanquetReceiptInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = BanquetReceiptInput.parse(raw);
 
@@ -177,10 +204,11 @@ export async function recordBanquetReceipt(raw: unknown) {
     costPerUnit: l.costPerUnit ? new Prisma.Decimal(l.costPerUnit) : null,
   }));
   for (const l of lines) {
-    if (l.qty.lessThanOrEqualTo(0)) throw new Error("Quantity must be > 0");
+    if (l.qty.lessThanOrEqualTo(0)) throw new ActionError("Quantity must be > 0");
   }
 
   const receipt = await db.$transaction(async (tx) => {
+    await lockBanquetItemRows(tx, lines.map((l) => l.itemId));
     const created = await tx.banquetReceipt.create({
       data: {
         receivedAt: istToUtc(input.receivedAt),
@@ -216,7 +244,7 @@ export async function recordBanquetReceipt(raw: unknown) {
   revalidatePath("/banquet/receipts");
   revalidatePath("/banquet/items");
   revalidatePath("/banquet");
-  return { id: receipt.id };
+  return { ok: true, id: receipt.id };
 }
 
 export async function listBanquetReceipts(opts: { limit?: number } = {}) {
@@ -233,7 +261,15 @@ export async function listBanquetReceipts(opts: { limit?: number } = {}) {
 
 // ─── Issues (to service area / event) ─────────────────────────────────
 
-export async function recordBanquetIssue(raw: unknown) {
+export async function recordBanquetIssue(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await recordBanquetIssueInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function recordBanquetIssueInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(ISSUE_ROLES);
   const input = BanquetIssueInput.parse(raw);
 
@@ -242,28 +278,31 @@ export async function recordBanquetIssue(raw: unknown) {
     qty: new Prisma.Decimal(l.quantity),
   }));
   for (const l of lines) {
-    if (l.qty.lessThanOrEqualTo(0)) throw new Error("Quantity must be > 0");
+    if (l.qty.lessThanOrEqualTo(0)) throw new ActionError("Quantity must be > 0");
   }
 
-  // Pre-check stock availability.
   const itemIds = [...new Set(lines.map((l) => l.itemId))];
-  const items = await db.banquetItem.findMany({
-    where: { id: { in: itemIds } },
-    select: { id: true, name: true, currentStock: true, unit: true, active: true },
-  });
-  const byId = new Map(items.map((i) => [i.id, i]));
-  for (const l of lines) {
-    const it = byId.get(l.itemId);
-    if (!it) throw new Error("Item not found");
-    if (!it.active) throw new Error(`Item ${it.name} is inactive`);
-    if (new Decimal(it.currentStock.toString()).lt(new Decimal(l.qty.toString()))) {
-      throw new Error(
-        `Not enough ${it.name} in stock (have ${it.currentStock.toString()} ${it.unit})`
-      );
-    }
-  }
 
   const issue = await db.$transaction(async (tx) => {
+    // Check stock availability under the row lock — a pre-check outside the
+    // txn could pass for two concurrent issues that together overdraw.
+    await lockBanquetItemRows(tx, itemIds);
+    const items = await tx.banquetItem.findMany({
+      where: { id: { in: itemIds } },
+      select: { id: true, name: true, currentStock: true, unit: true, active: true },
+    });
+    const byId = new Map(items.map((i) => [i.id, i]));
+    for (const l of lines) {
+      const it = byId.get(l.itemId);
+      if (!it) throw new ActionError("Item not found");
+      if (!it.active) throw new ActionError(`Item ${it.name} is inactive`);
+      if (new Decimal(it.currentStock.toString()).lt(new Decimal(l.qty.toString()))) {
+        throw new ActionError(
+          `Not enough ${it.name} in stock (have ${it.currentStock.toString()} ${it.unit})`
+        );
+      }
+    }
+
     const created = await tx.banquetIssue.create({
       data: {
         issuedAt: istToUtc(input.issuedAt),
@@ -294,7 +333,7 @@ export async function recordBanquetIssue(raw: unknown) {
   revalidatePath("/banquet/issues");
   revalidatePath("/banquet/items");
   revalidatePath("/banquet");
-  return { id: issue.id };
+  return { ok: true, id: issue.id };
 }
 
 export interface ListBanquetIssuesOpts {

@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { isNextNavigationError } from "@/lib/next-error";
 import type { IngredientIssueInputT } from "@/lib/validators";
+import type { ActionResultWith } from "@/lib/action-result";
 
 interface IngredientOption {
   id: string;
@@ -27,7 +28,7 @@ interface Props {
   ingredients: IngredientOption[];
   orders: OrderOption[];
   initialOrderId?: string | null;
-  onSubmit: (input: IngredientIssueInputT) => Promise<{ id: string }>;
+  onSubmit: (input: IngredientIssueInputT) => Promise<ActionResultWith<{ id: string }>>;
 }
 
 export function IssueForm({ ingredients, orders, initialOrderId, onSubmit }: Props) {
@@ -50,12 +51,16 @@ export function IssueForm({ ingredients, orders, initialOrderId, onSubmit }: Pro
     if (!qty || Number(qty) <= 0) return toast.error("Enter a positive quantity");
     startTransition(async () => {
       try {
-        await onSubmit({
+        const res = await onSubmit({
           ingredientId,
           orderId,
           qty,
           note: note.trim() || null,
         });
+        if (res && res.ok === false) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Stock recorded against the order");
         router.push(`/orders/${orderId}`);
         router.refresh();

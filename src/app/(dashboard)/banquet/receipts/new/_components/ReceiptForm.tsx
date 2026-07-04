@@ -46,12 +46,16 @@ export function ReceiptForm({ items }: { items: Item[] }) {
     }
     startTransition(async () => {
       try {
-        await recordBanquetReceipt({
+        const res = await recordBanquetReceipt({
           receivedAt,
           sourceContact: sourceContact.trim() || null,
           sourceNote: sourceNote.trim() || null,
           lines: cleanLines,
         });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Receipt recorded");
         router.push("/banquet/receipts");
         router.refresh();

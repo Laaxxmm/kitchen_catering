@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Combobox, type ComboOption } from "@/components/ui/combobox";
 import type { OrderCreateInputT, OrderItemInputT } from "@/lib/validators";
+import type { ActionResultWith } from "@/lib/action-result";
 import { isImmediateChannel } from "@/lib/order-channels";
 import { isNextNavigationError } from "@/lib/next-error";
 import { QuickAddCustomer, type QuickCustomerInput } from "@/components/ik/QuickAddCustomer";
@@ -43,7 +44,7 @@ interface Props {
   customers: CustomerOption[];
   dishes: DishOption[];
   defaults?: Partial<OrderCreateInputT>;
-  onSubmit: (input: OrderCreateInputT) => Promise<{ id: string; code: string }>;
+  onSubmit: (input: OrderCreateInputT) => Promise<ActionResultWith<{ id: string; code: string }>>;
   submitLabel?: string;
   redirectOnSuccess?: string;
   /** F&B Service: only in-house room orders (room service / à la carte /
@@ -227,6 +228,10 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
     startTransition(async () => {
       try {
         const result = await onSubmit(payload);
+        if (!result.ok) {
+          toast.error(result.error);
+          return;
+        }
         toast.success(`Saved ${result.code}`);
         if (redirectOnSuccess) router.push(redirectOnSuccess.replace(":id", result.id));
         router.refresh();

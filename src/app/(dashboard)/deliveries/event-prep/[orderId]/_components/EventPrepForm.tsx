@@ -49,13 +49,17 @@ export function EventPrepForm({ order, items }: { order: Order; items: Item[] })
     if (clean.length === 0) return toast.error("Pick at least one item with a quantity");
     startIssue(async () => {
       try {
-        await recordBanquetIssue({
+        const res = await recordBanquetIssue({
           issuedAt: nowLocal(),
           purpose: `Event cutlery — ${order.customerName} · ${order.code}`,
           orderId: order.id,
           notes: null,
           lines: clean.map((l) => ({ itemId: l.itemId, quantity: l.quantity.trim() })),
         });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Issued to the event — stock updated");
         setLines([{ itemId: "", quantity: "" }]);
         router.refresh();

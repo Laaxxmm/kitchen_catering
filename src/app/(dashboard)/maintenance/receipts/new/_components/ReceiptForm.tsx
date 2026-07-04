@@ -62,12 +62,16 @@ export function ReceiptForm({ items }: { items: Item[] }) {
     }
     startTransition(async () => {
       try {
-        await recordMaintenanceReceipt({
+        const res = await recordMaintenanceReceipt({
           receivedAt,
           sourceContact: sourceContact.trim() || null,
           sourceNote: sourceNote.trim() || null,
           lines: cleanLines,
         });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Receipt recorded");
         router.push("/maintenance/receipts");
         router.refresh();

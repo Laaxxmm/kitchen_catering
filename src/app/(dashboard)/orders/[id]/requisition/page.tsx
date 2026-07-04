@@ -26,6 +26,7 @@ export default async function RaiseRequisitionPage({ params }: { params: Promise
         notes: l.notes,
       })),
     });
+    if (!result.ok) return result;
     redirect(`/requisitions/${result.id}`);
   }
 
