@@ -86,10 +86,20 @@ export function NotificationBell({ placement = "up" }: { placement?: "up" | "dow
       }
     }
     refresh();
-    const t = window.setInterval(refresh, 30_000);
+    // 60s cadence, and skip ticks while the tab is hidden — with every
+    // signed-in user polling, this halves the background query load and
+    // stops parked tabs from hammering the server all day.
+    const t = window.setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 

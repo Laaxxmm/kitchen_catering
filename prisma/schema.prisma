@@ -1539,6 +1539,8 @@ model CustomerInvoice {
   @@index([eInvoiceStatus])
   @@index([customerId])
   @@index([createdAt])
+  // Overdue-receivables checks (nav badge, dashboard AR) filter on dueAt.
+  @@index([dueAt])
 }
 
 model CustomerInvoiceLine {

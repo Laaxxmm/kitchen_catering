@@ -11,7 +11,6 @@ import {
   VendorBillStatus,
   VendorPOStatus,
 } from "@prisma/client";
-import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { hasRole, requireSession } from "@/server/rbac";
 import { toDecimal } from "@/lib/money";
@@ -86,22 +85,23 @@ export async function getDashboardSummary() {
         status: DeliveryStatus.DELIVERED,
       },
     }),
-    db.customerInvoice.findMany({
+    // Aggregate in SQL — fetching every open invoice / ingredient row on
+    // every dashboard load was a large part of the page's latency.
+    db.customerInvoice.aggregate({
       where: { status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] } },
-      select: { grandTotal: true, amountPaid: true },
+      _sum: { grandTotal: true, amountPaid: true },
+      _count: { _all: true },
     }),
-    db.ingredient.findMany({
-      where: { active: true },
-      select: { onHandQty: true, reorderLevel: true },
-    }),
+    db.$queryRaw<Array<{ count: number }>>`
+      SELECT COUNT(*)::int AS count FROM "Ingredient"
+      WHERE "active" = true AND "onHandQty" <= "reorderLevel"`,
   ]);
 
-  const outstandingAR = openInvoices
-    .reduce((s, inv) => s.plus(toDecimal(inv.grandTotal).minus(toDecimal(inv.amountPaid))), new Decimal(0))
+  const outstandingAR = toDecimal(openInvoices._sum.grandTotal ?? "0")
+    .minus(toDecimal(openInvoices._sum.amountPaid ?? "0"))
     .toDecimalPlaces(2);
-  const lowStockCount = lowStockIngredients
-    .filter((i) => toDecimal(i.onHandQty).lte(toDecimal(i.reorderLevel)))
-    .length;
+  const openInvoiceCount = openInvoices._count._all;
+  const lowStockCount = lowStockIngredients[0]?.count ?? 0;
 
   // ─── My queue ─────────────────────────────────────────────────────────
   let myQueue: { count: number; label: string; href: string } | null = null;
@@ -143,8 +143,7 @@ export async function getDashboardSummary() {
     });
     myQueue = { count: c, label: "My deliveries", href: "/deliveries" };
   } else if (hasRole(session, [Role.ACCOUNTS, Role.ADMIN])) {
-    const c = openInvoices.length;
-    myQueue = { count: c, label: "Open invoices", href: "/payments/receivables" };
+    myQueue = { count: openInvoiceCount, label: "Open invoices", href: "/payments/receivables" };
   }
 
   // ─── AR breakdown for admin/manager/accounts ─────────────────────────
@@ -157,23 +156,22 @@ export async function getDashboardSummary() {
   if (hasRole(session, [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS])) {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const monthPayments = await db.customerInvoicePayment.findMany({
-      where: { paidAt: { gte: monthStart, lt: monthEnd }, reversedAt: null },
-      select: { amount: true },
-    });
-    const collected = monthPayments
-      .reduce((s, p) => s.plus(toDecimal(p.amount)), new Decimal(0))
-      .toDecimalPlaces(2);
-
-    const overdueInvoices = await db.customerInvoice.findMany({
-      where: {
-        status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] },
-        dueAt: { lt: now },
-      },
-      select: { grandTotal: true, amountPaid: true },
-    });
-    const overdue = overdueInvoices
-      .reduce((s, inv) => s.plus(toDecimal(inv.grandTotal).minus(toDecimal(inv.amountPaid))), new Decimal(0))
+    const [monthPayments, overdueInvoices] = await Promise.all([
+      db.customerInvoicePayment.aggregate({
+        where: { paidAt: { gte: monthStart, lt: monthEnd }, reversedAt: null },
+        _sum: { amount: true },
+      }),
+      db.customerInvoice.aggregate({
+        where: {
+          status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] },
+          dueAt: { lt: now },
+        },
+        _sum: { grandTotal: true, amountPaid: true },
+      }),
+    ]);
+    const collected = toDecimal(monthPayments._sum.amount ?? "0").toDecimalPlaces(2);
+    const overdue = toDecimal(overdueInvoices._sum.grandTotal ?? "0")
+      .minus(toDecimal(overdueInvoices._sum.amountPaid ?? "0"))
       .toDecimalPlaces(2);
 
     ar = {
@@ -194,11 +192,11 @@ export async function getDashboardSummary() {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const [monthBillPayments, openBills, overdueBills] = await Promise.all([
-      db.vendorBillPayment.findMany({
+      db.vendorBillPayment.aggregate({
         where: { paidAt: { gte: monthStart, lt: monthEnd }, reversedAt: null },
-        select: { amount: true },
+        _sum: { amount: true },
       }),
-      db.vendorBill.findMany({
+      db.vendorBill.aggregate({
         where: {
           status: {
             in: [
@@ -209,26 +207,24 @@ export async function getDashboardSummary() {
             ],
           },
         },
-        select: { grandTotal: true, amountPaid: true },
+        _sum: { grandTotal: true, amountPaid: true },
       }),
-      db.vendorBill.findMany({
+      db.vendorBill.aggregate({
         where: {
           status: {
             in: [VendorBillStatus.MATCHED, VendorBillStatus.APPROVED, VendorBillStatus.OVERDUE],
           },
           dueDate: { lt: now },
         },
-        select: { grandTotal: true, amountPaid: true },
+        _sum: { grandTotal: true, amountPaid: true },
       }),
     ]);
-    const paid = monthBillPayments
-      .reduce((s, p) => s.plus(toDecimal(p.amount)), new Decimal(0))
+    const paid = toDecimal(monthBillPayments._sum.amount ?? "0").toDecimalPlaces(2);
+    const pending = toDecimal(openBills._sum.grandTotal ?? "0")
+      .minus(toDecimal(openBills._sum.amountPaid ?? "0"))
       .toDecimalPlaces(2);
-    const pending = openBills
-      .reduce((s, b) => s.plus(toDecimal(b.grandTotal).minus(toDecimal(b.amountPaid))), new Decimal(0))
-      .toDecimalPlaces(2);
-    const overdueAP = overdueBills
-      .reduce((s, b) => s.plus(toDecimal(b.grandTotal).minus(toDecimal(b.amountPaid))), new Decimal(0))
+    const overdueAP = toDecimal(overdueBills._sum.grandTotal ?? "0")
+      .minus(toDecimal(overdueBills._sum.amountPaid ?? "0"))
       .toDecimalPlaces(2);
     ap = {
       paidThisMonth: paid.toString(),

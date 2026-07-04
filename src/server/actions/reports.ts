@@ -1,6 +1,5 @@
 "use server";
 
-import { Decimal } from "decimal.js";
 import { Role } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
@@ -19,34 +18,34 @@ interface MonthMetrics {
 }
 
 async function monthMetrics(periodStart: Date, periodEnd: Date): Promise<MonthMetrics> {
-  const [invoices, orders, issues, bills] = await Promise.all([
-    db.customerInvoice.findMany({
+  // Aggregate in SQL — fetching every invoice/issue/bill row just to sum it
+  // in JS made each month cost four table scans of data transfer.
+  const [invoiceAgg, orders, issueSum, billAgg] = await Promise.all([
+    db.customerInvoice.aggregate({
       where: { issuedAt: { gte: periodStart, lt: periodEnd }, status: { notIn: ["DRAFT", "CANCELLED"] } },
-      select: { grandTotal: true, amountPaid: true },
+      _sum: { grandTotal: true, amountPaid: true },
+      _count: { _all: true },
     }),
     db.order.count({
       where: { createdAt: { gte: periodStart, lt: periodEnd } },
     }),
-    db.ingredientIssue.findMany({
-      where: { issuedAt: { gte: periodStart, lt: periodEnd } },
-      select: { qty: true, unitCostAtIssue: true },
-    }),
-    db.vendorBill.findMany({
+    // Product of two columns — not expressible with Prisma aggregate.
+    db.$queryRaw<Array<{ total: string | null }>>`
+      SELECT COALESCE(SUM("qty" * "unitCostAtIssue"), 0)::text AS total
+      FROM "IngredientIssue"
+      WHERE "issuedAt" >= ${periodStart} AND "issuedAt" < ${periodEnd}`,
+    db.vendorBill.aggregate({
       where: { issueDate: { gte: periodStart, lt: periodEnd } },
-      select: { grandTotal: true },
+      _sum: { grandTotal: true },
     }),
   ]);
-  const revenue = invoices.reduce((s, i) => s.plus(toDecimal(i.grandTotal)), new Decimal(0));
-  const collected = invoices.reduce((s, i) => s.plus(toDecimal(i.amountPaid)), new Decimal(0));
-  const ingredientIssued = issues.reduce((s, i) => s.plus(toDecimal(i.qty).times(toDecimal(i.unitCostAtIssue))), new Decimal(0));
-  const billed = bills.reduce((s, b) => s.plus(toDecimal(b.grandTotal)), new Decimal(0));
   return {
-    revenue: revenue.toDecimalPlaces(2).toString(),
-    collected: collected.toDecimalPlaces(2).toString(),
-    invoiceCount: invoices.length,
+    revenue: toDecimal(invoiceAgg._sum.grandTotal ?? "0").toDecimalPlaces(2).toString(),
+    collected: toDecimal(invoiceAgg._sum.amountPaid ?? "0").toDecimalPlaces(2).toString(),
+    invoiceCount: invoiceAgg._count._all,
     orderCount: orders,
-    ingredientIssued: ingredientIssued.toDecimalPlaces(2).toString(),
-    vendorBills: billed.toDecimalPlaces(2).toString(),
+    ingredientIssued: toDecimal(issueSum[0]?.total ?? "0").toDecimalPlaces(2).toString(),
+    vendorBills: toDecimal(billAgg._sum.grandTotal ?? "0").toDecimalPlaces(2).toString(),
   };
 }
 
@@ -82,17 +81,19 @@ export async function getRevenueTrend(months = 12) {
   const from = new Date(now);
   from.setUTCMonth(from.getUTCMonth() - (months - 1));
   const boundaries = istMonthsInRange(from, now);
-  const rows: Array<{ label: string; periodStart: Date; revenue: string; orderCount: number }> = [];
-  for (const start of boundaries) {
-    const end = istMonthEnd(start);
-    const lt = new Date(end.getTime() + 1);
-    const m = await monthMetrics(start, lt);
-    rows.push({
-      label: `${start.toLocaleString("en-GB", { month: "short", year: "2-digit" })}`,
-      periodStart: start,
-      revenue: m.revenue,
-      orderCount: m.orderCount,
-    });
-  }
-  return rows;
+  // All months in parallel — serially this was months × 4 queries back to
+  // back (~48 round-trips), which is what made the reports page crawl.
+  const metrics = await Promise.all(
+    boundaries.map((start) => {
+      const end = istMonthEnd(start);
+      const lt = new Date(end.getTime() + 1);
+      return monthMetrics(start, lt);
+    }),
+  );
+  return boundaries.map((start, i) => ({
+    label: `${start.toLocaleString("en-GB", { month: "short", year: "2-digit" })}`,
+    periodStart: start,
+    revenue: metrics[i].revenue,
+    orderCount: metrics[i].orderCount,
+  }));
 }

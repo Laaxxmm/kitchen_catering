@@ -11,7 +11,6 @@ import {
 } from "@prisma/client";
 import { db } from "@/server/db";
 import { hasRole, requireSession } from "@/server/rbac";
-import { toDecimal } from "@/lib/money";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import type { NavBadges } from "@/lib/nav-config";
 
@@ -35,7 +34,7 @@ const computeNavBadges = unstable_cache(
   async (): Promise<NavBadges> => {
   const now = new Date();
 
-  const [pendingOrders, openReqs, ingredients, poPending, billsMatch, billsPay, openInvoices] =
+  const [pendingOrders, openReqs, lowStockRows, poPending, billsMatch, billsPay, openInvoices, overdueInvoices] =
     await Promise.all([
       db.order.count({
         where: {
@@ -54,7 +53,11 @@ const computeNavBadges = unstable_cache(
           order: { status: { notIn: INACTIVE_ORDER_STATUSES } },
         },
       }),
-      db.ingredient.findMany({ where: { active: true }, select: { onHandQty: true, reorderLevel: true } }),
+      // Column-to-column comparison isn't expressible in Prisma's where —
+      // count in SQL rather than fetching every ingredient to filter in JS.
+      db.$queryRaw<Array<{ count: number }>>`
+        SELECT COUNT(*)::int AS count FROM "Ingredient"
+        WHERE "active" = true AND "onHandQty" <= "reorderLevel"`,
       db.vendorPO.count({ where: { status: VendorPOStatus.PENDING_APPROVAL } }),
       db.vendorBill.count({
         where: { status: { in: [VendorBillStatus.DRAFT, VendorBillStatus.PENDING_MATCH, VendorBillStatus.DISCREPANCY] } },
@@ -62,15 +65,19 @@ const computeNavBadges = unstable_cache(
       db.vendorBill.count({
         where: { status: { in: [VendorBillStatus.MATCHED, VendorBillStatus.APPROVED, VendorBillStatus.OVERDUE] } },
       }),
-      db.customerInvoice.findMany({
+      db.customerInvoice.count({
         where: { status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] } },
-        select: { dueAt: true },
+      }),
+      db.customerInvoice.count({
+        where: {
+          status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] },
+          dueAt: { lt: now },
+        },
       }),
     ]);
 
-  const lowStock = ingredients.filter((i) => toDecimal(i.onHandQty).lte(toDecimal(i.reorderLevel))).length;
+  const lowStock = lowStockRows[0]?.count ?? 0;
   const buy = poPending + billsMatch + billsPay;
-  const overdueInvoices = openInvoices.filter((i) => i.dueAt && i.dueAt < now).length;
 
   const badges: NavBadges = {};
   if (pendingOrders > 0) badges.sell = { count: pendingOrders, tone: "red" };
@@ -78,7 +85,7 @@ const computeNavBadges = unstable_cache(
   if (lowStock > 0) badges.stores = { count: lowStock, tone: "red" };
   if (buy > 0) badges.buy = { count: buy, tone: "red" };
   if (overdueInvoices > 0) badges.money = { count: overdueInvoices, tone: "red" };
-  else if (openInvoices.length > 0) badges.money = { count: openInvoices.length, tone: "amber" };
+  else if (openInvoices > 0) badges.money = { count: openInvoices, tone: "amber" };
   return badges;
   },
   ["nav-badges-v1"],
