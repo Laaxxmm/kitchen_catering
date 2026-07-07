@@ -18,7 +18,7 @@ export default async function NewAdjustmentPage() {
       <PageHeader
         eyebrow="Inventory"
         title="Adjust stock"
-        description="Manual on-hand correction (write-off, opening fix, spoilage). Average cost is not changed — for that, record a fresh receipt."
+        description="Manual on-hand correction for ONE item (write-off, opening fix, spoilage). Setting many items? Use Stock count (bulk) — every ingredient in one table, enter quantities row-wise, post once. Average cost is not changed — for that, record a fresh receipt."
       />
       <AdjustmentForm
         ingredients={ingredients.map((i) => ({

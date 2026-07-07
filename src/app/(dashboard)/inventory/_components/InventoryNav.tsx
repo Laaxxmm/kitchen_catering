@@ -10,7 +10,7 @@ const BASE_TABS = [
   { key: "ingredients", label: "Ingredients", href: "/inventory/ingredients" },
   { key: "receipts", label: "Receipts (add stock)", href: "/inventory/receipts" },
   { key: "issues", label: "Issues", href: "/inventory/issues" },
-  { key: "audit", label: "Monthly audit", href: "/inventory/audit" },
+  { key: "audit", label: "Stock count (bulk)", href: "/inventory/audit" },
 ] as const;
 
 const ADJUSTMENTS_TAB = {
