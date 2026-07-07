@@ -9,7 +9,7 @@ import { IssueForm } from "./_components/IssueForm";
 export const dynamic = "force-dynamic";
 
 export default async function NewBanquetIssuePage() {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
   const [items, events] = await Promise.all([
     listBanquetItems({ activeOnly: true }),
     listBanquetEvents(),

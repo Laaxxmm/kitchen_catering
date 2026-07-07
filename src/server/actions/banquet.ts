@@ -52,11 +52,12 @@ async function lockBanquetItemRows(tx: Prisma.TransactionClient, ids: string[]) 
 // F&B Service is one team now (role DELIVERY, FNB_SERVICE its retired alias):
 // they run the banquet store end to end — catalogue, receipts, issues.
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY];
-const ISSUE_ROLES = WRITE_ROLES;
-// The store keeper loads and corrects F&B/cutlery stock too: they can see
-// the store and record receipts (stock IN). Issues/returns stay with the
-// F&B team who physically run events; direct stock-set goes through
-// adjustStoreStock, which enforces the stock.storeDirectEdit admin toggle.
+// Stock movements (issue out / return in) include the store keeper — in
+// this operation they physically run the store counter alongside F&B.
+const ISSUE_ROLES = [...WRITE_ROLES, Role.STORE_KEEPER];
+// The store keeper also records receipts (stock IN). Catalogue management
+// (add/edit/delete items) stays with WRITE_ROLES; direct stock-set goes
+// through adjustStoreStock, which enforces the stock.storeDirectEdit toggle.
 const RECEIPT_ROLES = [...WRITE_ROLES, Role.STORE_KEEPER];
 const READ_ROLES: Role[] = [...WRITE_ROLES, Role.STORE_KEEPER];
 

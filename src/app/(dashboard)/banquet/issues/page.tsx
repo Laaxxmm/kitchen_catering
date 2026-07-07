@@ -24,7 +24,7 @@ export default async function BanquetIssuesListPage({
 }: {
   searchParams: Promise<{ from?: string; to?: string; item?: string }>;
 }) {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
   const sp = await searchParams;
 
   const [issues, items] = await Promise.all([
