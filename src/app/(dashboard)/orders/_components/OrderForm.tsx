@@ -387,7 +387,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
               />
             </div>
           )}
-          {(channel === OrderChannel.ODC || channel === OrderChannel.PACKET) && (
+          {isPackage && (
             <div className="grid gap-1">
               <Label htmlFor="packageTotal">Package total (₹)</Label>
               <Input
