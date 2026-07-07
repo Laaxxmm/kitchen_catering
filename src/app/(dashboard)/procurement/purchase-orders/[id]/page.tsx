@@ -14,6 +14,7 @@ import {
   submitVendorPO,
 } from "@/server/actions/procurement";
 import { formatINR } from "@/lib/money";
+import { Decimal } from "decimal.js";
 import { formatIST } from "@/lib/time";
 import { NotifyVendorBlock } from "./_components/NotifyVendorBlock";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
@@ -145,11 +146,38 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
                 ))}
               </TableBody>
             </Table>
-            <div className="mt-2 text-right font-mono text-[13px]">
-              <div><span className="text-ik-ink-3">Subtotal</span> {po.subtotal.toString()}</div>
-              <div><span className="text-ik-ink-3">Tax</span> {po.taxTotal.toString()}</div>
-              <div className="font-medium"><span className="text-ik-ink-3">Total</span> {formatINR(po.grandTotal)}</div>
-            </div>
+            {(() => {
+              // The PO total is the ORDERED commitment. When receipts are
+              // partial, also show the value of what actually arrived —
+              // that's the amount the supplier's bill should carry (the
+              // 3-way match checks the bill against received qty, so a
+              // full-value bill for a short delivery gets flagged).
+              const receivedValue = po.lines.reduce((sum, l) => {
+                const qty = new Decimal(l.receivedQty.toString());
+                const unit = new Decimal(l.unitPrice.toString());
+                const gst = new Decimal(l.gstRatePct.toString()).div(100);
+                return sum.plus(qty.times(unit).times(gst.plus(1)));
+              }, new Decimal(0)).toDecimalPlaces(2);
+              const ordered = new Decimal(po.grandTotal.toString());
+              const partial = receivedValue.lt(ordered);
+              return (
+                <div className="mt-2 text-right font-mono text-[13px]">
+                  <div><span className="text-ik-ink-3">Subtotal (ordered)</span> {po.subtotal.toString()}</div>
+                  <div><span className="text-ik-ink-3">Tax (ordered)</span> {po.taxTotal.toString()}</div>
+                  <div className="font-medium"><span className="text-ik-ink-3">Ordered total</span> {formatINR(po.grandTotal)}</div>
+                  {partial && (
+                    <>
+                      <div className="mt-1 font-medium text-amber-700">
+                        <span className="text-ik-ink-3">Received so far (incl. GST)</span> {formatINR(receivedValue.toString())}
+                      </div>
+                      <div className="text-[11.5px] text-ik-ink-3">
+                        Supplier should bill the received value — the bill match checks against received qty, not ordered.
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {po.grns.length > 0 && (
