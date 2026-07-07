@@ -42,7 +42,7 @@ export function QuickAddDish({ onCreate, onCreated }: Props) {
   const [name, setName] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [gstRatePct, setGstRatePct] = useState("5");
-  const [unit, setUnit] = useState("portion");
+  const unit = "portion"; // fixed for quick-adds; edit on the dish page if needed
   const [category, setCategory] = useState("");
 
   function submit() {
