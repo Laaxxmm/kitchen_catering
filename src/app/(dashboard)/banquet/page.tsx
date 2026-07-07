@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function BanquetLandingPage() {
   // The F&B Service team (role DELIVERY, FNB_SERVICE its retired alias) runs
   // the banquet store end to end — catalogue, receipts, issues, adjustments.
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
   const stock = await getStoreStock("banquet");
 
   return (

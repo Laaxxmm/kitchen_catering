@@ -9,7 +9,7 @@ import { StoreAdjustForm } from "@/components/ik/StoreAdjustForm";
 export const dynamic = "force-dynamic";
 
 export default async function BanquetAdjustPage() {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
   const items = await listStoreItems("banquet");
 
   return (

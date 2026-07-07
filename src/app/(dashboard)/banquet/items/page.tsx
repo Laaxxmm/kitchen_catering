@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default async function BanquetItemsPage() {
   // The whole F&B Service team manages the banquet catalogue.
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
   const items = await listBanquetItems({ activeOnly: false });
   const serialised = items.map((i) => ({
     id: i.id,

@@ -20,10 +20,11 @@ const ADJUSTMENTS_TAB = {
 } as const;
 
 export function InventoryNav({ active, role }: Props) {
-  // Adjustments tab is admin/manager only — storekeeper doesn't see it,
-  // matching the middleware gate on /inventory/adjustments.
+  // Adjustments: admin/manager always; the store keeper also gets the tab
+  // (the action itself enforces the stock.storeDirectEdit admin toggle, so
+  // with the toggle off they get a clear refusal message, not a dead end).
   const tabs =
-    role === "ADMIN" || role === "MANAGER"
+    role === "ADMIN" || role === "MANAGER" || role === "STORE_KEEPER"
       ? [...BASE_TABS.slice(0, 3), ADJUSTMENTS_TAB, BASE_TABS[3]]
       : BASE_TABS;
 

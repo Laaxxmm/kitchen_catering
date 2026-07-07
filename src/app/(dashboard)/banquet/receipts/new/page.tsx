@@ -9,7 +9,7 @@ import { ReceiptForm } from "./_components/ReceiptForm";
 export const dynamic = "force-dynamic";
 
 export default async function NewBanquetReceiptPage() {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
   const items = await listBanquetItems({ activeOnly: true });
 
   return (
