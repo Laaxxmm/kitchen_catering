@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { OrderStatus, Role } from "@prisma/client";
+import { OrderStatus, ProductionJobItemStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -19,12 +19,13 @@ import {
 import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoices";
 import { listDishes } from "@/server/actions/dishes";
 import { listAssignableUsers } from "@/server/actions/users";
-import { isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
+import { isEventDeliveryChannel, isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
 import { REVISABLE_ORDER_STATUSES } from "@/lib/order-status";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
+import { HandoverChecklist } from "@/components/ik/HandoverChecklist";
 import type { ActionResult } from "@/lib/action-result";
 import { AdminApprovalBlock } from "./_components/AdminApprovalBlock";
 import { ChefApprovalBlock } from "./_components/ChefApprovalBlock";
@@ -67,6 +68,54 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     where: { orderId: id, kind: "PROFORMA", status: { not: "CANCELLED" } },
     select: { id: true, invoiceNo: true, shareToken: true, emailedAt: true, emailedTo: true, grandTotal: true },
   });
+
+  // ─── Kitchen → delivery handover (per dish) ──────────────────────────
+  // Each dish is ticked the moment it's physically given to the delivery
+  // team; the order-level handedToDeliveryAt completes when the last one is
+  // ticked — so a late dish is attributable to the kitchen, not the driver.
+  const productionJob = order.productionJobs[0] ?? null;
+  const handoverItems = (productionJob?.items ?? []).map((it) => ({
+    id: it.id,
+    dishName: it.dish.name,
+    portions: it.portions.toString(),
+    status: it.status,
+    handedOverAt: it.handedOverAt ? it.handedOverAt.toISOString() : null,
+    handedOverBy: it.handedOverBy?.name ?? null,
+  }));
+  const READY_OR_LATER: OrderStatus[] = [
+    OrderStatus.READY,
+    OrderStatus.OUT_FOR_DELIVERY,
+    OrderStatus.DELIVERED,
+    OrderStatus.INVOICED,
+    OrderStatus.PAID,
+    OrderStatus.COMPLETED,
+  ];
+  const showHandoverChecklist =
+    productionJob !== null &&
+    handoverItems.length > 0 &&
+    isEventDeliveryChannel(order.channel) &&
+    READY_OR_LATER.includes(order.status);
+  // Whether the viewer may actually tick items (server re-checks anyway).
+  const canHandOver =
+    isManager || isChef || role === Role.DELIVERY || role === Role.FNB_SERVICE;
+  // Accountability timeline: every handed dish, in handover order.
+  const handedTimeline = (productionJob?.items ?? [])
+    .filter((it) => it.handedOverAt != null)
+    .sort((a, b) => a.handedOverAt!.getTime() - b.handedOverAt!.getTime());
+  // "Last dish handed over X min before/after the delivery window start" —
+  // only meaningful once every live dish is out the door.
+  const liveHandoverItems = (productionJob?.items ?? []).filter(
+    (it) => it.status !== ProductionJobItemStatus.CANCELLED,
+  );
+  const allItemsHanded =
+    liveHandoverItems.length > 0 && liveHandoverItems.every((it) => it.handedOverAt != null);
+  const lastHandedAt = allItemsHanded
+    ? handedTimeline[handedTimeline.length - 1].handedOverAt!
+    : null;
+  const windowDeltaMin =
+    lastHandedAt != null
+      ? Math.round((lastHandedAt.getTime() - order.deliveryWindowStart.getTime()) / 60000)
+      : null;
 
   // ─── Server-action shims ───────────────────────────────────────────
   async function doSubmit() {
@@ -229,6 +278,23 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             />
           )}
 
+          {/* Kitchen → delivery handover checklist — per-dish ticks so a
+              late dish is attributable to the kitchen, not the driver. */}
+          {showHandoverChecklist && productionJob && (
+            <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+              <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Handover to delivery</h3>
+              <p className="mb-2 text-[11.5px] text-ik-ink-3">
+                Tick each dish the moment it&apos;s physically handed to the delivery team. The
+                order-level handover completes automatically when the last dish is ticked.
+              </p>
+              <HandoverChecklist
+                jobId={productionJob.id}
+                items={handoverItems}
+                readOnly={!canHandOver}
+              />
+            </section>
+          )}
+
           {/* Decision history */}
           <section className="rounded-md border border-ik-rule bg-ik-card p-4">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Decision history</h3>
@@ -274,6 +340,34 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                       {order.managerChangeNote}
                     </div>
                   )}
+                </li>
+              )}
+              {/* Per-item handover timeline — dish → time → by whom. Shows
+                  up as soon as the first dish goes out, so a late dish is
+                  visible (and attributable) immediately. */}
+              {handedTimeline.map((it) => (
+                <li key={it.id}>
+                  <span className="text-ik-ink-3">Handed to delivery</span>{" "}
+                  <span className="font-medium">{it.dish.name}</span>{" "}
+                  <span className="font-mono">{formatIST(it.handedOverAt!, "HH:mm")}</span>
+                  {it.handedOverBy?.name && (
+                    <span className="text-ik-ink-3"> · by {it.handedOverBy.name}</span>
+                  )}
+                </li>
+              ))}
+              {windowDeltaMin != null && (
+                <li
+                  className={
+                    windowDeltaMin <= 0
+                      ? "text-positive"
+                      : windowDeltaMin <= 15
+                        ? "text-amber"
+                        : "text-alert"
+                  }
+                >
+                  Last dish handed over{" "}
+                  <span className="font-mono">{Math.abs(windowDeltaMin)}</span> min{" "}
+                  {windowDeltaMin <= 0 ? "before" : "after"} the delivery window start
                 </li>
               )}
               {order.cancelledAt && (

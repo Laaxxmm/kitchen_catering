@@ -1655,6 +1655,25 @@ export async function getOrder(id: string) {
       kitchenSupervisor: { select: { name: true } },
       feedbackAssignee: { select: { name: true } },
       chefRequisitions: { select: { id: true, requisitionNo: true, status: true } },
+      // Per-dish kitchen → delivery handover state (an order has at most
+      // one production job). Lean select: only what the handover checklist
+      // + accountability timeline need.
+      productionJobs: {
+        select: {
+          id: true,
+          items: {
+            select: {
+              id: true,
+              status: true,
+              portions: true,
+              handedOverAt: true,
+              dish: { select: { name: true } },
+              handedOverBy: { select: { name: true } },
+            },
+          },
+        },
+        take: 1,
+      },
     },
   });
 }

@@ -3,7 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
-import { DeliveryStatus, OrderChannel, OrderStatus, PaymentMethod, Role } from "@prisma/client";
+import {
+  DeliveryStatus,
+  OrderChannel,
+  OrderStatus,
+  PaymentMethod,
+  ProductionJobItemStatus,
+  Role,
+} from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { toDecimal } from "@/lib/money";
@@ -25,6 +32,7 @@ import { sha256Json } from "@/lib/audit";
 import { istToUtc } from "@/lib/time";
 import { channelWantsFeedback, isEventDeliveryChannel } from "@/lib/order-channels";
 import { notifyRoles } from "@/server/actions/notifications";
+import { markAllItemsHandedOver } from "@/server/actions/production-jobs";
 
 // Off-site catering orders (banquet / ODC / packed) move through these
 // statuses once they're confirmed and in the kitchen, up to the moment
@@ -113,6 +121,37 @@ async function handToDeliveryInner(orderId: string): Promise<{ ok: true }> {
     throw new ActionError(
       `Order ${order.code} isn't ready to dispatch yet (it's ${order.status}).`,
     );
+  }
+  // Itemized handover: when the order's production job tracks per-dish
+  // items, the handover is driven dish by dish (markItemHandedOver) and the
+  // order-level stamp completes when the LAST item is ticked. The old
+  // one-tap button delegates: if every dish is READY it hands everything
+  // over in one go (markAllItemsHandedOver — also a safe no-op when all
+  // dishes are already ticked); otherwise it refuses and points at the
+  // per-dish checklist. Orders with no production job items (legacy) keep
+  // the old order-level behaviour below.
+  const job = await db.productionJob.findFirst({
+    where: { orderId },
+    select: {
+      id: true,
+      items: { select: { status: true, handedOverAt: true } },
+    },
+  });
+  const liveItems =
+    job?.items.filter((it) => it.status !== ProductionJobItemStatus.CANCELLED) ?? [];
+  if (job && liveItems.length > 0) {
+    const allReady = liveItems.every(
+      (it) => it.status === ProductionJobItemStatus.READY,
+    );
+    if (!allReady) {
+      const pending = liveItems.filter((it) => !it.handedOverAt).length;
+      throw new ActionError(
+        `Tick each dish as it's handed over — ${pending} of ${liveItems.length} still pending`,
+      );
+    }
+    const res = await markAllItemsHandedOver(job.id);
+    if (!res.ok) throw new ActionError(res.error);
+    return { ok: true };
   }
   // Stamp the intimation so the kitchen card flips to "Delivery informed".
   // Status guard in the WHERE: if the order moved on since the read (a

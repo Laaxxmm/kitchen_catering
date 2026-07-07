@@ -125,6 +125,19 @@ export default async function DashboardPage({
               handedToDelivery: o.handedToDeliveryAt != null,
               customerName: o.customer.name,
               items: o.items.map((it) => ({ label: it.dish.name, portions: it.portions.toString() })),
+              handover: o.productionJobs[0]
+                ? {
+                    jobId: o.productionJobs[0].id,
+                    items: o.productionJobs[0].items.map((it) => ({
+                      id: it.id,
+                      dishName: it.dish.name,
+                      portions: it.portions.toString(),
+                      status: it.status,
+                      handedOverAt: it.handedOverAt ? it.handedOverAt.toISOString() : null,
+                      handedOverBy: it.handedOverBy?.name ?? null,
+                    })),
+                  }
+                : null,
             }))}
           />
         </div>

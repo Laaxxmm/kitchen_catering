@@ -181,6 +181,9 @@ export default async function KitchenPage({
               dishName: it.dish.name,
               portions: it.portions.toString(),
               ready: it.status === ProductionJobItemStatus.READY,
+              status: it.status,
+              handedOverAt: it.handedOverAt ? it.handedOverAt.toISOString() : null,
+              handedOverBy: it.handedOverBy?.name ?? null,
             })),
           }))}
         />

@@ -12,9 +12,20 @@ import { startCookingOrder, markOrderCooked } from "@/server/actions/production-
 import { handToDelivery } from "@/server/actions/deliveries";
 import { markInHouseServed } from "@/server/actions/orders";
 import { isImmediateChannel } from "@/lib/order-channels";
-import type { OrderChannel } from "@prisma/client";
+import type { OrderChannel, ProductionJobItemStatus } from "@prisma/client";
+import { HandoverChecklist } from "@/components/ik/HandoverChecklist";
 
 type Stage = "QUEUED" | "PREP" | "COOKING" | "READY";
+
+export interface KitchenJobItem {
+  id: string;
+  dishName: string;
+  portions: string;
+  ready: boolean;
+  status: ProductionJobItemStatus;
+  handedOverAt: string | null;
+  handedOverBy: string | null;
+}
 
 export interface KitchenJob {
   id: string;
@@ -25,7 +36,7 @@ export interface KitchenJob {
   handedToDelivery: boolean;
   customerName: string;
   scheduledReady: string;
-  items: { id: string; dishName: string; portions: string; ready: boolean }[];
+  items: KitchenJobItem[];
 }
 
 const STAGES: { key: Stage; label: string }[] = [
@@ -115,14 +126,20 @@ function JobCard({ job }: { job: KitchenJob }) {
 
   // One stage-appropriate primary action per card. In-house orders (room
   // service / à la carte / management) skip the driver dispatch — once
-  // ready they're served straight to the room/table.
+  // ready they're served straight to the room/table. Ready delivery orders
+  // with per-dish items get the handover checklist instead of a button:
+  // each dish is ticked as it's physically handed over.
   const inHouse = isImmediateChannel(job.channel);
-  let action: { label: string; fn: () => Promise<unknown>; msg: string };
+  const itemizedHandover = isReady && !inHouse && job.items.length > 0;
+  let action: { label: string; fn: () => Promise<unknown>; msg: string } | null;
   if (job.status === "QUEUED") action = { label: "Start cooking", fn: () => startCookingOrder(job.orderId), msg: "Cooking started" };
   else if (isReady && inHouse) action = { label: "Mark served", fn: () => markInHouseServed(job.orderId), msg: "Served — ready to bill" };
+  else if (itemizedHandover) action = null; // checklist below drives it
   else if (isReady && job.handedToDelivery) action = { label: "✓ Delivery informed", fn: () => handToDelivery(job.orderId), msg: "Delivery reminded" };
   else if (isReady) action = { label: "Send to dispatch", fn: () => handToDelivery(job.orderId), msg: "Delivery team notified" };
   else action = { label: "Mark ready", fn: () => markOrderCooked(job.orderId), msg: "Marked ready" };
+  // const binding so the narrowing survives into the onClick closure.
+  const primaryAction = action;
 
   return (
     <div className={"rounded-md border bg-ik-card p-3 " + (isReady ? "border-positive/50" : "border-ik-rule")}>
@@ -155,15 +172,36 @@ function JobCard({ job }: { job: KitchenJob }) {
         <span className="whitespace-nowrap">{readyCount}/{job.items.length} ready · {portions} pax</span>
       </div>
 
+      {/* Per-dish handover checklist replaces the one-shot dispatch button
+          — tick each dish the moment it's physically handed to delivery. */}
+      {itemizedHandover && (
+        <div className="mt-2.5">
+          <HandoverChecklist
+            compact
+            jobId={job.id}
+            items={job.items.map((it) => ({
+              id: it.id,
+              dishName: it.dishName,
+              portions: it.portions,
+              status: it.status,
+              handedOverAt: it.handedOverAt,
+              handedOverBy: it.handedOverBy,
+            }))}
+          />
+        </div>
+      )}
+
       <div className="mt-2.5 flex items-center gap-2">
-        <Button
-          size="sm"
-          variant={isReady && job.handedToDelivery && !inHouse ? "outline" : "default"}
-          disabled={pending}
-          onClick={() => run(action.fn, action.msg)}
-        >
-          {action.label}
-        </Button>
+        {primaryAction && (
+          <Button
+            size="sm"
+            variant={isReady && job.handedToDelivery && !inHouse ? "outline" : "default"}
+            disabled={pending}
+            onClick={() => run(primaryAction.fn, primaryAction.msg)}
+          >
+            {primaryAction.label}
+          </Button>
+        )}
         <Link href={`/kitchen/${job.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open checklist</Link>
       </div>
     </div>

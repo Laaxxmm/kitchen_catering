@@ -16,6 +16,10 @@ import { markIngredientsAvailable } from "@/server/actions/chef-requisitions";
 import { startCookingOrder, markOrderCooked } from "@/server/actions/production-jobs";
 import { handToDelivery } from "@/server/actions/deliveries";
 import { isImmediateChannel } from "@/lib/order-channels";
+import {
+  HandoverChecklist,
+  type HandoverChecklistItem,
+} from "@/components/ik/HandoverChecklist";
 
 interface BoardItem {
   label: string;
@@ -34,6 +38,8 @@ export interface ChefBoardOrder {
   handedToDelivery: boolean;
   customerName: string;
   items: BoardItem[];
+  /** Per-dish handover checklist (null for legacy orders without a job). */
+  handover: { jobId: string; items: HandoverChecklistItem[] } | null;
 }
 
 interface Props {
@@ -353,6 +359,10 @@ function ChefOrderCard({ order, highlight = false }: { order: ChefBoardOrder; hi
             >
               Mark served
             </Button>
+          ) : order.handover && order.handover.items.length > 0 ? (
+            // Itemized handover — the per-dish checklist renders below the
+            // action row, so no button here.
+            null
           ) : order.handedToDelivery ? (
             // Already intimated — show it's done (still re-notifiable).
             <Button
@@ -382,6 +392,18 @@ function ChefOrderCard({ order, highlight = false }: { order: ChefBoardOrder; hi
           Open
         </Link>
       </div>
+
+      {/* Per-dish handover checklist — each dish is ticked the moment it's
+          physically given to the delivery team; the order-level handover
+          completes automatically when the last one is ticked. */}
+      {order.status === OrderStatus.READY &&
+        !isImmediateChannel(order.channel) &&
+        order.handover &&
+        order.handover.items.length > 0 && (
+          <div className="mt-2.5">
+            <HandoverChecklist jobId={order.handover.jobId} items={order.handover.items} />
+          </div>
+        )}
 
       {/* Reject path — a short note is required so the manager has context. */}
       {showReject && order.status === OrderStatus.PENDING_CHEF_APPROVAL && (

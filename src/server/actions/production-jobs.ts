@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import {
+  OrderChannel,
   OrderStatus,
   ProductionJobItemStatus,
   ProductionJobStatus,
@@ -18,7 +19,10 @@ import {
 import { ProductionJobItemAssignInput } from "@/lib/validators";
 import { nextProductionJobNo } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
+import { formatIST } from "@/lib/time";
 import { ActionError, actionFailure, type ActionResult } from "@/server/action-result";
+import { deferAfterResponse } from "@/server/defer";
+import { notifyRoles } from "@/server/actions/notifications";
 
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD, Role.STORE_KEEPER, Role.SALES, Role.ACCOUNTS,
@@ -227,6 +231,252 @@ async function markProductionItemReadyInner(itemId: string): Promise<{ ok: true 
   return { ok: true };
 }
 
+// ─── Kitchen → delivery handover (per dish) ────────────────────────────────
+// Each dish is ticked "Handed over" at the moment it's physically given to
+// the delivery team (timestamp + who). The ORDER-level handover
+// (handedToDeliveryAt) completes automatically when the LAST item is ticked
+// — so a late fifth dish is attributable to the kitchen, not the driver.
+
+// Both sides of the counter may tap the tick — kitchen hands, delivery/F&B
+// receives; handedOverById records who actually did.
+const HANDOVER_ROLES = [
+  Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD, Role.DELIVERY, Role.FNB_SERVICE,
+];
+
+/** Everything the post-commit "ready to dispatch" notification needs. */
+interface HandoverNotifyPayload {
+  orderId: string;
+  code: string;
+  channel: OrderChannel;
+  roomNumber: string | null;
+  customerName: string;
+}
+
+/**
+ * Inside the caller's transaction: if every live (non-cancelled) item of the
+ * job is now handed over, stamp the order's handedToDeliveryAt — the exact
+ * side-effects of the legacy order-level hand-off in
+ * `@/server/actions/deliveries` (guarded stamp + ORDER_HANDED_TO_DELIVERY
+ * audit). Returns the notification payload when this call performed the
+ * stamp, so the caller can defer the SAME "ready to dispatch" fan-out after
+ * commit (dedupeKey `order-ready-dispatch:<orderId>` keeps it to one
+ * notification per user however many paths fire).
+ */
+async function completeOrderHandoverIfAllHanded(
+  tx: Prisma.TransactionClient,
+  jobId: string,
+  userId: string,
+): Promise<HandoverNotifyPayload | null> {
+  const job = await tx.productionJob.findUnique({
+    where: { id: jobId },
+    select: {
+      orderId: true,
+      items: { select: { status: true, handedOverAt: true } },
+      order: {
+        select: {
+          id: true, code: true, channel: true, roomNumber: true,
+          customer: { select: { name: true } },
+        },
+      },
+    },
+  });
+  if (!job) return null;
+  const live = job.items.filter((it) => it.status !== ProductionJobItemStatus.CANCELLED);
+  if (live.length === 0 || live.some((it) => !it.handedOverAt)) return null;
+
+  // Guarded stamp — mirrors handToDelivery: only a READY order that hasn't
+  // been stamped yet. A concurrent tap (or an order that already moved on)
+  // matches zero rows and skips the audit + notify.
+  const updated = await tx.order.updateMany({
+    where: { id: job.orderId, status: OrderStatus.READY, handedToDeliveryAt: null },
+    data: { handedToDeliveryAt: new Date() },
+  });
+  if (updated.count === 0) return null;
+  await tx.auditLog.create({
+    data: {
+      userId,
+      action: "ORDER_HANDED_TO_DELIVERY",
+      entity: "Order",
+      entityId: job.orderId,
+    },
+  });
+  return {
+    orderId: job.orderId,
+    code: job.order.code,
+    channel: job.order.channel,
+    roomNumber: job.order.roomNumber,
+    customerName: job.order.customer.name,
+  };
+}
+
+/**
+ * Post-commit fan-out for a completed order handover. Identical payload +
+ * dedupeKey to the legacy handToDelivery notification, so whichever path
+ * completes the handover, the delivery/manager team is pinged exactly once.
+ */
+function scheduleHandoverNotify(n: HandoverNotifyPayload): void {
+  const where = n.roomNumber ? ` · Room ${n.roomNumber}` : "";
+  deferAfterResponse("hand-to-delivery:notify", () =>
+    notifyRoles([Role.DELIVERY, Role.ADMIN, Role.MANAGER], {
+      kind: "GENERIC",
+      title: `Order ${n.code} ready to dispatch`,
+      body: `${n.customerName} · ${n.channel}${where}. Cooked and ready — schedule the delivery.`,
+      link: `/deliveries/new?orderId=${n.orderId}`,
+      dedupeKey: `order-ready-dispatch:${n.orderId}`,
+    }),
+  );
+}
+
+function revalidateHandoverPaths(orderId: string): void {
+  revalidatePath("/dashboard");
+  revalidatePath("/kitchen");
+  revalidatePath("/deliveries");
+  revalidatePath(`/orders/${orderId}`);
+}
+
+/**
+ * Tick one dish "Handed over" at the moment it's physically given to the
+ * delivery team. Stamps who + when on the item; when this was the LAST
+ * un-handed item of the job, the order-level handover completes in the same
+ * transaction (handedToDeliveryAt + audit + the one deferred notification).
+ */
+export async function markItemHandedOver(
+  productionJobItemId: string,
+): Promise<ActionResult> {
+  try {
+    return await markItemHandedOverInner(productionJobItemId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function markItemHandedOverInner(itemId: string): Promise<{ ok: true }> {
+  const session = await requireRole(HANDOVER_ROLES);
+  let orderId = "";
+  let notify: HandoverNotifyPayload | null = null;
+  await db.$transaction(async (tx) => {
+    const item = await tx.productionJobItem.findUnique({
+      where: { id: itemId },
+      select: {
+        id: true,
+        status: true,
+        jobId: true,
+        handedOverAt: true,
+        dish: { select: { name: true } },
+        handedOverBy: { select: { name: true } },
+        job: { select: { orderId: true, order: { select: { code: true } } } },
+      },
+    });
+    if (!item) throw new ActionError("Production item not found");
+    orderId = item.job.orderId;
+    if (item.handedOverAt) {
+      // Friendly refusal, not a crash — a stale card / double-tap just
+      // learns when and by whom it already went out.
+      throw new ActionError(
+        `Already handed over at ${formatIST(item.handedOverAt, "HH:mm")} by ${item.handedOverBy?.name ?? "someone"}`,
+      );
+    }
+    if (item.status !== ProductionJobItemStatus.READY) {
+      throw new ActionError("Cook and mark this dish ready before handing it over");
+    }
+    // Guarded write: a concurrent tap that already stamped it matches zero
+    // rows — the loser gets the friendly message instead of double-writing.
+    const updated = await tx.productionJobItem.updateMany({
+      where: { id: itemId, handedOverAt: null },
+      data: { handedOverAt: new Date(), handedOverById: session.user.id },
+    });
+    if (updated.count === 0) {
+      throw new ActionError("This dish was just handed over — refresh the page.");
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "PRODUCTION_ITEM_HANDED_OVER",
+        entity: "ProductionJobItem",
+        entityId: itemId,
+        payloadHash: sha256Json({ dish: item.dish.name, orderCode: item.job.order.code }),
+      },
+    });
+    notify = await completeOrderHandoverIfAllHanded(tx, item.jobId, session.user.id);
+  });
+  if (notify) scheduleHandoverNotify(notify);
+  revalidateHandoverPaths(orderId);
+  return { ok: true };
+}
+
+/**
+ * Convenience: everything goes out together. Stamps every un-handed READY
+ * item of the job with ONE timestamp and completes the order handover.
+ * Refuses while any live dish is still cooking; a re-tap with everything
+ * already handed is a harmless no-op.
+ */
+export async function markAllItemsHandedOver(jobId: string): Promise<ActionResult> {
+  try {
+    return await markAllItemsHandedOverInner(jobId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function markAllItemsHandedOverInner(jobId: string): Promise<{ ok: true }> {
+  const session = await requireRole(HANDOVER_ROLES);
+  let orderId = "";
+  let notify: HandoverNotifyPayload | null = null;
+  await db.$transaction(async (tx) => {
+    const job = await tx.productionJob.findUnique({
+      where: { id: jobId },
+      select: {
+        id: true,
+        orderId: true,
+        order: { select: { code: true } },
+        items: {
+          select: {
+            id: true, status: true, handedOverAt: true,
+            dish: { select: { name: true } },
+          },
+        },
+      },
+    });
+    if (!job) throw new ActionError("Production job not found");
+    orderId = job.orderId;
+    const live = job.items.filter((it) => it.status !== ProductionJobItemStatus.CANCELLED);
+    const unhanded = live.filter((it) => !it.handedOverAt);
+    if (unhanded.length > 0) {
+      const notReady = unhanded.filter((it) => it.status !== ProductionJobItemStatus.READY);
+      if (notReady.length > 0) {
+        throw new ActionError(
+          notReady.length === 1
+            ? `${notReady[0].dish.name} isn't ready yet — cook and mark it ready before handing it over.`
+            : `${notReady.length} dishes aren't ready yet — cook and mark them ready before handing over.`,
+        );
+      }
+      // One timestamp for the whole batch — they left the counter together.
+      const ts = new Date();
+      const updated = await tx.productionJobItem.updateMany({
+        where: { jobId, status: ProductionJobItemStatus.READY, handedOverAt: null },
+        data: { handedOverAt: ts, handedOverById: session.user.id },
+      });
+      if (updated.count > 0) {
+        await tx.auditLog.createMany({
+          data: unhanded.map((it) => ({
+            userId: session.user.id,
+            action: "PRODUCTION_ITEM_HANDED_OVER",
+            entity: "ProductionJobItem",
+            entityId: it.id,
+            payloadHash: sha256Json({ dish: it.dish.name, orderCode: job.order.code }),
+          })),
+        });
+      }
+    }
+    // Everything is handed now (or already was) — complete the order-level
+    // handover if it hasn't been stamped yet.
+    notify = await completeOrderHandoverIfAllHanded(tx, jobId, session.user.id);
+  });
+  if (notify) scheduleHandoverNotify(notify);
+  revalidateHandoverPaths(orderId);
+  return { ok: true };
+}
+
 // ─── Order-level convenience actions (chef work-screen) ────────────────────
 // One-tap wrappers so the chef can drive the whole order from their
 // dashboard without touching the per-item kitchen board.
@@ -395,6 +645,24 @@ export async function listChefBoardOrders(
       handedToDeliveryAt: true,
       customer: { select: { name: true } },
       items: { select: { id: true, portions: true, dish: { select: { name: true } } }, orderBy: { sortOrder: "asc" } },
+      // Per-dish handover state for the READY-tab checklist. Lean: just
+      // what the HandoverChecklist needs (an order has at most one job).
+      productionJobs: {
+        select: {
+          id: true,
+          items: {
+            select: {
+              id: true,
+              status: true,
+              portions: true,
+              handedOverAt: true,
+              dish: { select: { name: true } },
+              handedOverBy: { select: { name: true } },
+            },
+          },
+        },
+        take: 1,
+      },
     },
     orderBy: [{ eventDate: "asc" }],
     take: 100,
@@ -453,6 +721,7 @@ export async function listProductionJobs(
         include: {
           dish: { select: { name: true } },
           chef: { select: { name: true } },
+          handedOverBy: { select: { name: true } },
         },
       },
     },
