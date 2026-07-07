@@ -1,0 +1,2 @@
+-- New meal option: HIGH_TEA.
+ALTER TYPE "MealType" ADD VALUE IF NOT EXISTS 'HIGH_TEA';

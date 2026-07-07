@@ -68,6 +68,7 @@ enum MealType {
   BREAKFAST
   LUNCH
   DINNER
+  HIGH_TEA
   SNACKS
   CUSTOM
 }

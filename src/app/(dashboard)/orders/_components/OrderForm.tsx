@@ -335,7 +335,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
               onChange={(e) => setMealType(e.target.value as MealType)}
               className="h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
             >
-              {Object.values(MealType).map((m) => <option key={m} value={m}>{m}</option>)}
+              {Object.values(MealType).map((m) => <option key={m} value={m}>{m.replaceAll("_", " ")}</option>)}
             </select>
           </div>
         </div>

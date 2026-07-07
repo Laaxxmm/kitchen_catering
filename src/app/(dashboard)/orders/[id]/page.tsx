@@ -142,8 +142,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         title={`${order.code} · ${order.customer.name}`}
         description={
           chefOnlyView
-            ? `${formatIST(order.eventDate, "EEE d MMM yyyy")} · ${order.mealType.toLowerCase()} for ${order.headcount}`
-            : `${formatIST(order.eventDate, "EEE d MMM yyyy")} · ${order.mealType.toLowerCase()} for ${order.headcount} · ${formatINR(order.contractValue)}`
+            ? `${formatIST(order.eventDate, "EEE d MMM yyyy")} · ${order.mealType.toLowerCase().replaceAll("_", " ")} for ${order.headcount}`
+            : `${formatIST(order.eventDate, "EEE d MMM yyyy")} · ${order.mealType.toLowerCase().replaceAll("_", " ")} for ${order.headcount} · ${formatINR(order.contractValue)}`
         }
         actions={
           <div className="flex gap-2">
