@@ -53,7 +53,12 @@ async function lockBanquetItemRows(tx: Prisma.TransactionClient, ids: string[]) 
 // they run the banquet store end to end — catalogue, receipts, issues.
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY];
 const ISSUE_ROLES = WRITE_ROLES;
-const READ_ROLES: Role[] = [...WRITE_ROLES];
+// The store keeper loads and corrects F&B/cutlery stock too: they can see
+// the store and record receipts (stock IN). Issues/returns stay with the
+// F&B team who physically run events; direct stock-set goes through
+// adjustStoreStock, which enforces the stock.storeDirectEdit admin toggle.
+const RECEIPT_ROLES = [...WRITE_ROLES, Role.STORE_KEEPER];
+const READ_ROLES: Role[] = [...WRITE_ROLES, Role.STORE_KEEPER];
 
 // ─── Items ────────────────────────────────────────────────────────────
 
@@ -197,7 +202,7 @@ export async function recordBanquetReceipt(raw: unknown): Promise<ActionResultWi
 }
 
 async function recordBanquetReceiptInner(raw: unknown): Promise<{ ok: true; id: string }> {
-  const session = await requireRole(WRITE_ROLES);
+  const session = await requireRole(RECEIPT_ROLES);
   const input = BanquetReceiptInput.parse(raw);
 
   const lines = input.lines.map((l) => ({

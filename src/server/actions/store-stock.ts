@@ -17,6 +17,9 @@ const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER, Role.MAINTENANCE_MANAGER,
   // F&B Service (role DELIVERY, FNB_SERVICE its retired alias) runs the banquet store.
   Role.FNB_SERVICE, Role.DELIVERY,
+  // Store keeper: loads/corrects F&B stock (writes gated per store below +
+  // the stock.storeDirectEdit toggle for banquet).
+  Role.STORE_KEEPER,
 ];
 // Who may correct on-hand for a given store: admin/manager + the store's
 // own manager. Mirrors the receipt-write roles for each module.
