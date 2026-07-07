@@ -31,6 +31,11 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
   if (!bill) notFound();
   const role = session?.user?.role;
   const canMatch = bill.status === VendorBillStatus.DRAFT && !!bill.poId && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER || role === Role.ACCOUNTS);
+  // Edits allowed only pre-match — same finance desk as bill creation
+  // (BILL_WRITE_ROLES in the action; middleware gates the route).
+  const canEdit =
+    (bill.status === VendorBillStatus.DRAFT || bill.status === VendorBillStatus.PENDING_MATCH) &&
+    (role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS);
   const canApprove = (bill.status === VendorBillStatus.MATCHED || bill.status === VendorBillStatus.DISCREPANCY) && (role === Role.ADMIN || role === Role.MANAGER);
   const canPay = bill.status === VendorBillStatus.APPROVED && (role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS);
 
@@ -79,6 +84,7 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
         actions={
           <div className="flex gap-2">
             <Link href="/procurement/vendor-bills"><Button variant="outline">Back</Button></Link>
+            {canEdit && <Link href={`/procurement/vendor-bills/${bill.id}/edit`}><Button variant="outline">Edit</Button></Link>}
             {canMatch && <ActionResultButton action={doMatch} successMessage="3-way match complete">Run 3-way match</ActionResultButton>}
             {canApprove && <ActionResultButton action={doApprove} successMessage="Bill approved">Approve</ActionResultButton>}
             {canPay && (

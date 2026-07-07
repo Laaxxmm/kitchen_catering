@@ -10,8 +10,10 @@ import {
   cancelCustomerInvoice,
   emailTaxInvoice,
   getCustomerInvoice,
+  holdCustomerInvoice,
   issueCustomerInvoice,
   markCustomerInvoicePaid,
+  releaseCustomerInvoiceHold,
 } from "@/server/actions/customer-invoices";
 import { recordCustomerInvoicePayment } from "@/server/actions/payments";
 import { RecordPaymentForm } from "./_components/RecordPaymentForm";
@@ -34,6 +36,10 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   // only, since they're commercial decisions.
   const canMarkPaid = role === Role.ADMIN || role === Role.MANAGER;
   const canPay = canIssue;
+  // Billing hold — while held, payment + email controls disappear and a
+  // banner explains why. Hold/release is the finance desk (WRITE_ROLES).
+  const isHeld = !!invoice.onHoldAt;
+  const canHold = canIssue;
 
   async function doIssue() {
     "use server";
@@ -62,6 +68,14 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     "use server";
     return await cancelCustomerInvoice(id, reason);
   }
+  async function doHold(reason: string) {
+    "use server";
+    return await holdCustomerInvoice(id, reason);
+  }
+  async function doReleaseHold(note: string) {
+    "use server";
+    return await releaseCustomerInvoiceHold(id, note || undefined);
+  }
   async function doRecordPayment(input: { amount: string; method: PaymentMethod; reference: string | null; notes: string | null; paidAt: string }) {
     "use server";
     return recordCustomerInvoicePayment({
@@ -83,12 +97,13 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           <div className="flex gap-2">
             <Link href={`/api/invoices/${invoice.id}/pdf`} target="_blank"><Button variant="outline">Download PDF</Button></Link>
             <Link href={`/i/${invoice.shareToken}`} target="_blank"><Button variant="outline">Public view</Button></Link>
-            {invoice.status !== CustomerInvoiceStatus.DRAFT && invoice.status !== CustomerInvoiceStatus.CANCELLED && canMarkPaid && (
+            {!isHeld && invoice.status !== CustomerInvoiceStatus.DRAFT && invoice.status !== CustomerInvoiceStatus.CANCELLED && canMarkPaid && (
               <ActionResultButton action={doEmailToCustomer} successMessage="Invoice emailed to customer">
                 {invoice.emailedAt ? "Resend by email" : "Send to customer"}
               </ActionResultButton>
             )}
-            {invoice.status !== CustomerInvoiceStatus.PAID
+            {!isHeld
+              && invoice.status !== CustomerInvoiceStatus.PAID
               && invoice.status !== CustomerInvoiceStatus.CANCELLED
               && invoice.status !== CustomerInvoiceStatus.DRAFT
               && canMarkPaid && (
@@ -115,6 +130,30 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         {invoice.issuedAt && <span className="text-ik-ink-3">Issued {formatIST(invoice.issuedAt)}</span>}
         {invoice.order && <span className="text-ik-ink-3">· Order <Link href={`/orders/${invoice.order.id}`} className="font-mono text-brand hover:underline">{invoice.order.code}</Link></span>}
       </div>
+
+      {isHeld && (
+        <div className="mb-4 rounded-md border border-amber-wash bg-amber-wash p-4 text-[13px]">
+          <div className="font-semibold uppercase tracking-wide text-amber">On hold — {invoice.onHoldReason}</div>
+          <div className="mt-1 text-ik-ink-2">
+            Put on hold by {invoice.onHoldBy?.name ?? "—"}
+            {invoice.onHoldAt && <> on {formatIST(invoice.onHoldAt)}</>}.
+            Payments and customer emails are blocked until the hold is released.
+          </div>
+          {canHold && (
+            <div className="mt-3 max-w-md">
+              <ActionReasonForm
+                action={doReleaseHold}
+                heading="Release hold"
+                submitLabel="Release hold"
+                successMessage="Hold released"
+                placeholder="Note (optional)"
+                required={false}
+                tone="warning"
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {invoice.irn && (
         <div className="mb-4 rounded-md border border-positive-wash bg-positive-wash p-3 text-[12.5px]">
@@ -202,7 +241,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
             </div>
           )}
 
-          {invoice.status === CustomerInvoiceStatus.ISSUED && canPay && (
+          {!isHeld && invoice.status === CustomerInvoiceStatus.ISSUED && canPay && (
             <RecordPaymentForm
               outstanding={Number(invoice.grandTotal) - Number(invoice.amountPaid)}
               onSubmit={doRecordPayment}
@@ -218,6 +257,19 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
             <div className="text-ik-ink-2">{invoice.customer.billingAddress}</div>
             <div className="text-ik-ink-3">State {invoice.placeOfSupplyStateCode}</div>
           </div>
+
+          {!isHeld
+            && (invoice.status === CustomerInvoiceStatus.ISSUED || invoice.status === CustomerInvoiceStatus.PARTIAL)
+            && canHold && (
+              <ActionReasonForm
+                action={doHold}
+                heading="Put on hold"
+                submitLabel="Put on hold"
+                successMessage="Invoice put on hold"
+                placeholder="Reason — wrong address / wrong client / wrong items / payment dispute"
+                tone="warning"
+              />
+            )}
 
           {invoice.status === CustomerInvoiceStatus.DRAFT && canPay && (
             <ActionReasonForm

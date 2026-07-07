@@ -8,11 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { VoucherForm } from "./_components/VoucherForm";
 import { TopUpForm } from "./_components/TopUpForm";
+import { VoucherRowActions } from "./_components/VoucherRowActions";
 import {
   createPettyCashVoucher,
+  deletePettyCashVoucher,
   getPettyCashFloat,
   reversePettyCashVoucher,
   topUpPettyCash,
+  updatePettyCashVoucher,
 } from "@/server/actions/petty-cash";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
@@ -24,9 +27,20 @@ export default async function PettyCashFloatDetailPage({ params }: { params: Pro
   const float = await getPettyCashFloat(id);
   if (!float) notFound();
 
-  async function newVoucher(input: { amount: string; category: string; paidTo: string; reason: string }) {
+  async function newVoucher(input: { amount: string; category: string; paidTo: string; reason: string; paidAt: string }) {
     "use server";
     return await createPettyCashVoucher({ floatId: id, ...input });
+  }
+  async function editVoucher(
+    voucherId: string,
+    input: { amount: string; category: string; paidTo: string; reason: string; paidAt: string },
+  ) {
+    "use server";
+    return await updatePettyCashVoucher(voucherId, input);
+  }
+  async function removeVoucher(voucherId: string, reason: string) {
+    "use server";
+    return await deletePettyCashVoucher(voucherId, reason);
   }
   async function newTopUp(input: { amount: string; source: string; reference: string | null }) {
     "use server";
@@ -98,6 +112,19 @@ export default async function PettyCashFloatDetailPage({ params }: { params: Pro
                           action={reverse.bind(null, v.id)}
                           submitLabel="Reverse"
                           successMessage="Voucher reversed"
+                        />
+                      )}
+                      {v.status !== PettyCashVoucherStatus.REVERSED && (
+                        <VoucherRowActions
+                          initial={{
+                            amount: v.amount.toString(),
+                            category: v.category,
+                            paidTo: v.paidTo,
+                            reason: v.reason,
+                            paidAt: formatIST(v.paidAt, "yyyy-MM-dd'T'HH:mm"),
+                          }}
+                          onUpdate={editVoucher.bind(null, v.id)}
+                          onDelete={removeVoucher.bind(null, v.id)}
                         />
                       )}
                     </div>

@@ -30,19 +30,31 @@ interface Props {
   initialVendorId?: string | null;
   initialPoId?: string | null;
   initialLines?: DraftLine[] | null;
+  // Edit mode (existing DRAFT / PENDING_MATCH bill): header fields come
+  // pre-filled and the vendor + PO linkage is locked — same defaults
+  // pattern as the customer/order forms.
+  mode?: "create" | "edit";
+  defaults?: {
+    vendorBillNo?: string;
+    issueDate?: string;
+    dueDate?: string;
+    notes?: string;
+  };
+  submitLabel?: string;
 }
 
 function empty(): DraftLine { return { description: "", quantity: "1", unit: "kg", unitPrice: "0", gstRatePct: "5" }; }
 
-export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initialPoId, initialLines }: Props) {
+export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initialPoId, initialLines, mode = "create", defaults, submitLabel }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+  const isEdit = mode === "edit";
   const [vendorId, setVendorId] = useState(initialVendorId || vendors[0]?.id || "");
   const [poId, setPoId] = useState<string>(initialPoId || "");
-  const [vendorBillNo, setVendorBillNo] = useState("");
-  const [issueDate, setIssueDate] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const [notes, setNotes] = useState("");
+  const [vendorBillNo, setVendorBillNo] = useState(defaults?.vendorBillNo ?? "");
+  const [issueDate, setIssueDate] = useState(defaults?.issueDate ?? "");
+  const [dueDate, setDueDate] = useState(defaults?.dueDate ?? "");
+  const [notes, setNotes] = useState(defaults?.notes ?? "");
   const [lines, setLines] = useState<DraftLine[]>(
     initialLines && initialLines.length > 0 ? initialLines : [empty()],
   );
@@ -100,13 +112,13 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="grid gap-1">
             <Label htmlFor="vendorId">Vendor<span className="text-gold" aria-hidden> *</span></Label>
-            <select id="vendorId" value={vendorId} onChange={(e) => { setVendorId(e.target.value); setPoId(""); }} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
+            <select id="vendorId" value={vendorId} onChange={(e) => { setVendorId(e.target.value); setPoId(""); }} disabled={isEdit} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px] disabled:opacity-60">
               {vendors.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
             </select>
           </div>
           <div className="grid gap-1">
             <Label htmlFor="poId">Linked PO (optional, enables 3-way match)</Label>
-            <select id="poId" value={poId} onChange={(e) => setPoId(e.target.value)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
+            <select id="poId" value={poId} onChange={(e) => setPoId(e.target.value)} disabled={isEdit} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px] disabled:opacity-60">
               <option value="">— no PO —</option>
               {filteredPos.map((p) => <option key={p.id} value={p.id}>{p.poNo}</option>)}
             </select>
@@ -176,10 +188,14 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
       </div>
 
       <div className="sticky bottom-0 z-10 -mx-4 mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-ik-rule bg-ik-paper/90 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-ik-paper/75 md:-mx-6 md:px-6">
-        <span className="text-[11.5px] text-ik-ink-3">{poId ? "3-way match (bill ↔ PO ↔ GRN) runs on save." : "Link a PO above to enable the 3-way match."}</span>
+        <span className="text-[11.5px] text-ik-ink-3">
+          {isEdit
+            ? "Saving replaces the bill's lines and clears any previous match result — re-run the 3-way match after."
+            : poId ? "3-way match (bill ↔ PO ↔ GRN) runs on save." : "Link a PO above to enable the 3-way match."}
+        </span>
         <div className="flex gap-2">
           <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>
-          <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create draft bill"}</Button>
+          <Button type="submit" disabled={pending}>{pending ? "Saving…" : submitLabel ?? "Create draft bill"}</Button>
         </div>
       </div>
     </form>

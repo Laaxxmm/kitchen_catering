@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
-import { deactivateIngredient, getIngredient, updateIngredient } from "@/server/actions/inventory";
+import { deactivateIngredient, getIngredient, reactivateIngredient, updateIngredient } from "@/server/actions/inventory";
 import { IngredientForm } from "../../_components/IngredientForm";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import type { IngredientInputT } from "@/lib/validators";
@@ -24,6 +24,10 @@ export default async function IngredientDetailPage({ params }: { params: Promise
     "use server";
     return await deactivateIngredient(id);
   }
+  async function reactivate() {
+    "use server";
+    return await reactivateIngredient(id);
+  }
 
   return (
     <>
@@ -34,9 +38,13 @@ export default async function IngredientDetailPage({ params }: { params: Promise
         actions={
           <div className="flex gap-2">
             <Link href="/inventory/ingredients"><Button variant="outline">Back</Button></Link>
-            {ingredient.active && (
-              <ActionResultButton action={deactivate} variant="outline" successMessage="Ingredient deactivated">
-                Deactivate
+            {ingredient.active ? (
+              <ActionResultButton action={deactivate} variant="outline" successMessage="Ingredient hidden — reactivate any time">
+                Hide (deactivate)
+              </ActionResultButton>
+            ) : (
+              <ActionResultButton action={reactivate} successMessage="Ingredient visible again">
+                Unhide (reactivate)
               </ActionResultButton>
             )}
           </div>

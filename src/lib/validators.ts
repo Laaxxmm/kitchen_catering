@@ -570,6 +570,15 @@ export const VendorBillCreateInput = z.object({
 });
 export type VendorBillCreateInputT = z.infer<typeof VendorBillCreateInput>;
 
+// Editing an existing bill: vendor + PO linkage are fixed at creation
+// (changing them would orphan the 3-way-match context); everything else
+// is a full replace.
+export const VendorBillUpdateInput = VendorBillCreateInput.omit({
+  vendorId: true,
+  poId: true,
+});
+export type VendorBillUpdateInputT = z.infer<typeof VendorBillUpdateInput>;
+
 export const InventoryAuditLineInput = z.object({
   ingredientId: z.string(),
   physicalCount: decimalString,

@@ -7,6 +7,7 @@ import {
   CustomerInvoiceKind,
   CustomerInvoiceStatus,
   EInvoiceStatus,
+  NotificationKind,
   OrderChannel,
   OrderStatus,
   PaymentMethod,
@@ -769,6 +770,16 @@ export async function emailTaxInvoice(
       }
       return { ok: true };
     }
+    // A held invoice must not reach the customer. Manual click gets a
+    // refusal; the auto-send pass skips quietly (best-effort contract).
+    if (invoice.onHoldAt) {
+      if (opts.force) {
+        throw new ActionError(
+          `Invoice is on hold: ${invoice.onHoldReason ?? "no reason recorded"} — release the hold first`,
+        );
+      }
+      return { ok: true };
+    }
     // Silent skip when called as the auto-send pass; force=true means
     // the user clicked "Resend by email" deliberately.
     if (invoice.emailedAt && !opts.force) return { ok: true };
@@ -862,9 +873,19 @@ async function markCustomerInvoicePaidInner(input: MarkPaidInput): Promise<{ ok:
   await db.$transaction(async (tx) => {
     const invoice = await tx.customerInvoice.findUnique({
       where: { id: invoiceId },
-      select: { id: true, status: true, grandTotal: true, amountPaid: true, orderId: true },
+      select: {
+        id: true, status: true, grandTotal: true, amountPaid: true, orderId: true,
+        onHoldAt: true, onHoldReason: true,
+      },
     });
     if (!invoice) throw new ActionError("Invoice not found");
+    // Billing hold blocks every payment path, one-click included —
+    // otherwise "Mark paid" would be a hold bypass.
+    if (invoice.onHoldAt) {
+      throw new ActionError(
+        `Invoice is on hold: ${invoice.onHoldReason ?? "no reason recorded"} — release the hold first`,
+      );
+    }
     if (invoice.status === CustomerInvoiceStatus.PAID) {
       throw new ActionError("Invoice is already marked paid");
     }
@@ -957,9 +978,14 @@ async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
   await db.$transaction(async (tx) => {
     const invoice = await tx.customerInvoice.findUnique({
       where: { id },
-      select: { status: true, orderId: true },
+      select: { status: true, orderId: true, onHoldAt: true, onHoldReason: true },
     });
     if (!invoice) throw new ActionError("Invoice not found");
+    if (invoice.onHoldAt) {
+      throw new ActionError(
+        `Invoice is on hold: ${invoice.onHoldReason ?? "no reason recorded"} — release the hold first`,
+      );
+    }
     if (invoice.status !== CustomerInvoiceStatus.DRAFT) {
       throw new ActionError(`Cannot issue an invoice in status ${invoice.status}`);
     }
@@ -1159,6 +1185,138 @@ export async function cancelCustomerInvoice(id: string, reason: string): Promise
   }
 }
 
+// ─── Billing hold ────────────────────────────────────────────────────────
+
+/**
+ * Put an invoice on billing hold — wrong address, wrong client, wrong
+ * items or a payment dispute. While held the invoice can't take payments,
+ * be issued, or be emailed to the customer until the hold is released.
+ * PAID and CANCELLED invoices can't be held; neither can an already-held
+ * one.
+ */
+export async function holdCustomerInvoice(id: string, reason: string): Promise<ActionResult> {
+  try {
+    return await holdCustomerInvoiceInner(id, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function holdCustomerInvoiceInner(id: string, reason: string): Promise<{ ok: true }> {
+  const session = await requireRole(WRITE_ROLES);
+  const trimmed = reason?.trim();
+  if (!trimmed) {
+    throw new ActionError(
+      "Reason required — e.g. wrong address, wrong client, wrong items, payment dispute.",
+    );
+  }
+
+  const heldAt = new Date();
+  await db.$transaction(async (tx) => {
+    const invoice = await tx.customerInvoice.findUnique({
+      where: { id },
+      select: { status: true, onHoldAt: true },
+    });
+    if (!invoice) throw new ActionError("Invoice not found");
+    if (invoice.onHoldAt) throw new ActionError("Invoice is already on hold");
+    if (invoice.status === CustomerInvoiceStatus.CANCELLED) {
+      throw new ActionError("Cannot hold a cancelled invoice");
+    }
+    if (invoice.status === CustomerInvoiceStatus.PAID) {
+      throw new ActionError("Invoice is already fully paid — nothing to hold");
+    }
+    // State guard: two people acting at once (or a payment landing mid-
+    // click) — the loser matches zero rows and gets a clear message.
+    const updated = await tx.customerInvoice.updateMany({
+      where: {
+        id,
+        onHoldAt: null,
+        status: { notIn: [CustomerInvoiceStatus.CANCELLED, CustomerInvoiceStatus.PAID] },
+      },
+      data: { onHoldAt: heldAt, onHoldReason: trimmed, onHoldById: session.user.id },
+    });
+    if (updated.count === 0) {
+      throw new ActionError("This invoice just changed — refresh the page.");
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "CUSTOMER_INVOICE_HELD",
+        entity: "CustomerInvoice",
+        entityId: id,
+        payloadHash: sha256Json({ reason: trimmed }),
+      },
+    });
+  });
+
+  // Fan-out to the finance/management desks after the response — the
+  // holder's button shouldn't wait on N notification inserts.
+  deferAfterResponse("invoice-hold:notify", async () => {
+    const invoice = await db.customerInvoice.findUnique({
+      where: { id },
+      select: { invoiceNo: true, customer: { select: { name: true } } },
+    });
+    if (!invoice) return;
+    await notifyRoles([Role.ACCOUNTS, Role.MANAGER, Role.ADMIN], {
+      kind: NotificationKind.GENERIC,
+      title: `Invoice ${invoice.invoiceNo} put on hold`,
+      body: `${invoice.customer.name} — ${trimmed}. Payments and emails are blocked until the hold is released.`,
+      link: `/invoices/${id}`,
+      // Timestamped so a later hold→release→hold cycle notifies again.
+      dedupeKey: `customer-invoice-hold:${id}:${heldAt.getTime()}`,
+    });
+  });
+
+  revalidatePath("/invoices");
+  revalidatePath(`/invoices/${id}`);
+  return { ok: true };
+}
+
+/** Release a billing hold. The optional note lands in the audit log. */
+export async function releaseCustomerInvoiceHold(id: string, note?: string): Promise<ActionResult> {
+  try {
+    return await releaseCustomerInvoiceHoldInner(id, note);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function releaseCustomerInvoiceHoldInner(id: string, note?: string): Promise<{ ok: true }> {
+  const session = await requireRole(WRITE_ROLES);
+  await db.$transaction(async (tx) => {
+    const invoice = await tx.customerInvoice.findUnique({
+      where: { id },
+      select: { onHoldAt: true, onHoldReason: true },
+    });
+    if (!invoice) throw new ActionError("Invoice not found");
+    if (!invoice.onHoldAt) throw new ActionError("Invoice is not on hold");
+    // State guard: a concurrent release loses the race cleanly.
+    const updated = await tx.customerInvoice.updateMany({
+      where: { id, onHoldAt: { not: null } },
+      data: { onHoldAt: null, onHoldReason: null, onHoldById: null },
+    });
+    if (updated.count === 0) {
+      throw new ActionError("This hold was already released — refresh the page.");
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "CUSTOMER_INVOICE_HOLD_RELEASED",
+        entity: "CustomerInvoice",
+        entityId: id,
+        payloadHash: sha256Json({
+          heldReason: invoice.onHoldReason,
+          note: note?.trim() || null,
+        }),
+      },
+    });
+  });
+
+  revalidatePath("/invoices");
+  revalidatePath(`/invoices/${id}`);
+  return { ok: true };
+}
+
 // ─── Queries ─────────────────────────────────────────────────────────────
 
 export async function listCustomerInvoices(opts: { status?: CustomerInvoiceStatus[]; customerId?: string } = {}) {
@@ -1174,6 +1332,54 @@ export async function listCustomerInvoices(opts: { status?: CustomerInvoiceStatu
     },
     orderBy: { createdAt: "desc" },
     take: 200,
+  });
+}
+
+/**
+ * Billing history for one customer, optionally filtered to a date range.
+ * Filters on the commercial date — issuedAt when the invoice was issued,
+ * falling back to createdAt for never-issued drafts. `from`/`to` arrive as
+ * yyyy-MM-dd strings from <input type="date">; `to` is inclusive (we filter
+ * strictly-before the following midnight). Invalid dates are ignored.
+ */
+export async function listCustomerInvoicesForCustomer(
+  customerId: string,
+  opts: { from?: string; to?: string } = {},
+) {
+  // Same read desk as the other receivables lists — finance + management
+  // + the sales team who own the customer relationship.
+  await requireRole([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.SALES]);
+  const fromRaw = opts.from ? new Date(opts.from) : null;
+  const toRaw = opts.to ? new Date(opts.to) : null;
+  const from = fromRaw && !Number.isNaN(fromRaw.getTime()) ? fromRaw : null;
+  const toEnd =
+    toRaw && !Number.isNaN(toRaw.getTime())
+      ? new Date(toRaw.getTime() + 24 * 60 * 60 * 1000)
+      : null;
+  const range = {
+    ...(from ? { gte: from } : {}),
+    ...(toEnd ? { lt: toEnd } : {}),
+  };
+  return db.customerInvoice.findMany({
+    where: {
+      customerId,
+      ...(from || toEnd
+        ? { OR: [{ issuedAt: range }, { issuedAt: null, createdAt: range }] }
+        : {}),
+    },
+    select: {
+      id: true,
+      invoiceNo: true,
+      kind: true,
+      status: true,
+      issuedAt: true,
+      createdAt: true,
+      grandTotal: true,
+      amountPaid: true,
+      onHoldAt: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: 500,
   });
 }
 
@@ -1407,6 +1613,7 @@ export async function getCustomerInvoice(id: string) {
       customer: true,
       order: { select: { id: true, code: true } },
       createdBy: { select: { name: true } },
+      onHoldBy: { select: { name: true } },
       lines: { orderBy: { sortOrder: "asc" } },
       payments: {
         where: { reversedAt: null },

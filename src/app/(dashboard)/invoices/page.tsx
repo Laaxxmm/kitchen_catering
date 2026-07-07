@@ -101,7 +101,12 @@ function InvSection({ title, rows, now, canMarkPaid }: { title: string; rows: In
                 <TableCell>{inv.customer.name}</TableCell>
                 <TableCell className="text-right font-mono">{formatINRWhole(inv.grandTotal)}</TableCell>
                 <TableCell className="text-right font-mono text-ik-ink-3">{formatINRWhole(inv.amountPaid)}</TableCell>
-                <TableCell><StatusPill tone={tone}>{label}</StatusPill></TableCell>
+                <TableCell>
+                  <span className="inline-flex items-center gap-1">
+                    <StatusPill tone={tone}>{label}</StatusPill>
+                    {inv.onHoldAt && <StatusPill tone="red">ON HOLD</StatusPill>}
+                  </span>
+                </TableCell>
                 {canMarkPaid && (
                   <TableCell>
                     <Link href={`/invoices/${inv.id}`}>

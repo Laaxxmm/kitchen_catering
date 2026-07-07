@@ -28,7 +28,12 @@ export default async function PettyCashPage() {
         eyebrow="Money"
         title="Petty cash"
         description="Float ledger. Balance updates atomically with every voucher / top-up."
-        actions={<Link href="/petty-cash/new"><Button>New float</Button></Link>}
+        actions={
+          <div className="flex gap-2">
+            <Link href="/petty-cash/report"><Button variant="outline">Report</Button></Link>
+            <Link href="/petty-cash/new"><Button>New float</Button></Link>
+          </div>
+        }
       />
 
       {floats.length > 0 && (

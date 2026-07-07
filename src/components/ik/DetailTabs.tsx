@@ -15,8 +15,13 @@ export interface DetailTab {
  * of being buried below the edit form. Server-rendered content is passed in
  * as `content` — this client shell just toggles which one shows.
  */
-export function DetailTabs({ tabs }: { tabs: DetailTab[] }) {
-  const [active, setActive] = useState(tabs[0]?.key ?? "");
+export function DetailTabs({ tabs, defaultKey }: { tabs: DetailTab[]; defaultKey?: string }) {
+  // defaultKey lets a page deep-link into a tab (e.g. ?tab=invoices, so a
+  // filter-form submit reloads the route on the right tab). Unknown keys
+  // fall back to the first tab.
+  const initial =
+    defaultKey && tabs.some((t) => t.key === defaultKey) ? defaultKey : tabs[0]?.key ?? "";
+  const [active, setActive] = useState(initial);
   const activeTab = tabs.find((t) => t.key === active) ?? tabs[0];
 
   return (

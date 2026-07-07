@@ -58,9 +58,19 @@ async function recordCustomerInvoicePaymentInner(raw: unknown): Promise<{ ok: tr
   const result = await db.$transaction(async (tx) => {
     const invoice = await tx.customerInvoice.findUnique({
       where: { id: input.invoiceId },
-      select: { id: true, status: true, grandTotal: true, orderId: true },
+      select: {
+        id: true, status: true, grandTotal: true, orderId: true,
+        onHoldAt: true, onHoldReason: true,
+      },
     });
     if (!invoice) throw new ActionError("Invoice not found");
+    // Billing hold — wrong address / wrong client / wrong items / payment
+    // dispute. No payments can land until accounts releases the hold.
+    if (invoice.onHoldAt) {
+      throw new ActionError(
+        `Invoice is on hold: ${invoice.onHoldReason ?? "no reason recorded"} — release the hold first`,
+      );
+    }
     if (
       invoice.status !== CustomerInvoiceStatus.ISSUED &&
       invoice.status !== CustomerInvoiceStatus.PARTIAL

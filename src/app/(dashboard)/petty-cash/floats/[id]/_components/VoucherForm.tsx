@@ -15,7 +15,15 @@ interface Props {
     category: string;
     paidTo: string;
     reason: string;
+    paidAt: string;
   }) => Promise<ActionResult>;
+}
+
+/** Current local clock as a `datetime-local` input value (YYYY-MM-DDTHH:mm). */
+function nowLocalInput() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
 }
 
 /**
@@ -31,10 +39,13 @@ export function VoucherForm({ onSubmit }: Props) {
   const [category, setCategory] = useState("");
   const [paidTo, setPaidTo] = useState("");
   const [reason, setReason] = useState("");
+  // Defaults to "now" but stays editable so a late entry can be recorded on
+  // the day the cash actually went out.
+  const [paidAt, setPaidAt] = useState(nowLocalInput);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!amount || !category.trim() || !paidTo.trim() || !reason.trim()) {
+    if (!amount || !category.trim() || !paidTo.trim() || !reason.trim() || !paidAt) {
       toast.error("Please fill in all fields");
       return;
     }
@@ -45,6 +56,7 @@ export function VoucherForm({ onSubmit }: Props) {
           category: category.trim(),
           paidTo: paidTo.trim(),
           reason: reason.trim(),
+          paidAt,
         });
         if (!res.ok) {
           toast.error(res.error);
@@ -55,6 +67,7 @@ export function VoucherForm({ onSubmit }: Props) {
         setCategory("");
         setPaidTo("");
         setReason("");
+        setPaidAt(nowLocalInput());
         router.refresh();
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
@@ -82,6 +95,10 @@ export function VoucherForm({ onSubmit }: Props) {
       <div className="grid gap-1">
         <Label htmlFor="reason">Reason</Label>
         <Input id="reason" required value={reason} onChange={(e) => setReason(e.target.value)} />
+      </div>
+      <div className="grid gap-1">
+        <Label htmlFor="paidAt">Paid on</Label>
+        <Input id="paidAt" type="datetime-local" required value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
       </div>
       <Button type="submit" size="sm" disabled={pending}>{pending ? "Saving…" : "Record voucher"}</Button>
     </form>

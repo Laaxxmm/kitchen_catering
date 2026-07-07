@@ -66,7 +66,9 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Requisitions: chef raises, store fulfils.
   { pattern: /^\/requisitions(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "STORE_KEEPER"] },
   // Manual stock adjustments are admin/manager only (write-offs, opening fixes).
-  { pattern: /^\/inventory\/adjustments(\/|$)/, allow: ["ADMIN", "MANAGER"] },
+  // STORE_KEEPER allowed through statically; the adjust actions enforce the
+  // stock.storeDirectEdit admin toggle server-side (middleware has no DB).
+  { pattern: /^\/inventory\/adjustments(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
   // Issuing stock out is the store's job (not the chef, not accounts).
   { pattern: /^\/inventory\/issues(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
   // Recording incoming stock — store + accounts (books-side receipt). The
@@ -104,7 +106,7 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Banquet — the F&B Service store (role DELIVERY, FNB_SERVICE its retired
   // alias). The whole team runs it end to end: catalogue, receipts, issues,
   // adjustments.
-  { pattern: /^\/banquet(\/|$)/, allow: ["ADMIN", "MANAGER", "FNB_SERVICE", "DELIVERY"] },
+  { pattern: /^\/banquet(\/|$)/, allow: ["ADMIN", "MANAGER", "FNB_SERVICE", "DELIVERY", "STORE_KEEPER"] },
 
   // Finance — invoices are accounts/management. The in-house (room service)
   // billing screen + viewing a generated bill are also open to F&B service

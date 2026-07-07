@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Role, type Prisma } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
+import { getSettingOr } from "@/lib/settings";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
 import {
@@ -163,7 +164,15 @@ async function adjustStoreStockInner(input: {
   reason: string;
   note?: string;
 }): Promise<{ ok: true }> {
-  const session = await requireRole(WRITE_ROLES_BY_STORE[input.store]);
+  // Admin toggle: store keeper may set F&B (banquet) stock directly
+  // during the stock-loading phase.
+  const directEdit =
+    input.store === "banquet" ? await getSettingOr<boolean>("stock.storeDirectEdit", false) : false;
+  const session = await requireRole(
+    directEdit
+      ? [...WRITE_ROLES_BY_STORE[input.store], Role.STORE_KEEPER]
+      : WRITE_ROLES_BY_STORE[input.store],
+  );
   if (!input.reason?.trim()) throw new ActionError("A reason is required");
   const amount = toDecimal(input.qty || "0");
 

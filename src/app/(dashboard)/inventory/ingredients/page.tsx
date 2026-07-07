@@ -18,12 +18,12 @@ type Status = "out" | "low" | "in";
 export default async function IngredientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; hidden?: string }>;
 }) {
   const sp = await searchParams;
   const [session, ingredients] = await Promise.all([
     auth(),
-    listIngredients({ query: sp.q, active: true }),
+    listIngredients({ query: sp.q, active: sp.hidden === "1" ? false : true }),
   ]);
   const role = session?.user?.role as Role | undefined;
   const canEdit = role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER;
@@ -61,6 +61,9 @@ export default async function IngredientsPage({
         description="What's low and what needs reordering — at a glance. Set each item's reorder level so the alerts mean something."
         actions={
           <div className="flex flex-wrap gap-2">
+            <Link href={sp.hidden === "1" ? "/inventory/ingredients" : "/inventory/ingredients?hidden=1"}>
+              <Button variant="ghost">{sp.hidden === "1" ? "← Back to active items" : "Show hidden items"}</Button>
+            </Link>
             {(role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS) && (
               <a href="/api/export/stock"><Button variant="outline">Download Excel</Button></a>
             )}
@@ -73,6 +76,11 @@ export default async function IngredientsPage({
         }
       />
       <InventoryNav active="ingredients" role={role} />
+      {sp.hidden === "1" && (
+        <p className="mb-3 rounded-md border border-amber bg-amber-wash px-3 py-2 text-[12.5px] text-amber-700">
+          Showing hidden (deactivated) ingredients — open one to unhide it.
+        </p>
+      )}
 
       <div className="mb-4">
         <SummaryStrip

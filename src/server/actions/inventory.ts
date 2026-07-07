@@ -13,6 +13,7 @@ import {
 import { newMovingAverage } from "@/lib/inventory-cost";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
+import { getSettingOr } from "@/lib/settings";
 import {
   ActionError,
   actionFailure,
@@ -203,6 +204,28 @@ export async function deactivateIngredient(id: string): Promise<ActionResult> {
   }
 }
 
+export async function reactivateIngredient(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(CATALOG_ROLES);
+    await db.$transaction(async (tx) => {
+      await tx.ingredient.update({ where: { id }, data: { active: true } });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "INGREDIENT_REACTIVATED",
+          entity: "Ingredient",
+          entityId: id,
+        },
+      });
+    });
+    revalidatePath("/inventory/ingredients");
+    revalidatePath(`/inventory/ingredients/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
 /**
  * Record a receipt and apply moving-average to the ingredient.
  *   newQty  = onHand + receiptQty
@@ -366,7 +389,12 @@ export async function adjustIngredientStock(raw: unknown): Promise<ActionResultW
 }
 
 async function adjustIngredientStockInner(raw: unknown): Promise<{ ok: true; id: string }> {
-  const session = await requireRole(ADJUST_ROLES);
+  // Admin toggle (Admin → Settings → stock.storeDirectEdit): during the
+  // stock-loading phase the store keeper may set on-hand directly.
+  const directEdit = await getSettingOr<boolean>("stock.storeDirectEdit", false);
+  const session = await requireRole(
+    directEdit ? [...ADJUST_ROLES, Role.STORE_KEEPER] : ADJUST_ROLES,
+  );
   const input = IngredientAdjustmentInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {

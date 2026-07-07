@@ -22,7 +22,9 @@ import { deferAfterResponse } from "@/server/defer";
 import {
   GRNCreateInput,
   VendorBillCreateInput,
+  VendorBillUpdateInput,
   VendorPOCreateInput,
+  type VendorBillLineInputT,
 } from "@/lib/validators";
 import {
   nextGRNNumber,
@@ -682,33 +684,43 @@ export async function createVendorBill(
   }
 }
 
+/**
+ * Compute line rows + totals for a vendor bill. Single source of truth
+ * shared by createVendorBill and updateVendorBill so an edited bill's
+ * totals are recomputed exactly the way they were at creation.
+ */
+function computeVendorBillLines(lines: VendorBillLineInputT[]) {
+  let subtotal = new Decimal(0);
+  let taxTotal = new Decimal(0);
+  const linesData = lines.map((l, idx) => {
+    const q = toDecimal(l.quantity);
+    const u = toDecimal(l.unitPrice);
+    const g = toDecimal(l.gstRatePct ?? "0").div(100);
+    const sub = q.times(u);
+    const tax = sub.times(g);
+    subtotal = subtotal.plus(sub);
+    taxTotal = taxTotal.plus(tax);
+    return {
+      sortOrder: idx,
+      description: l.description,
+      quantity: l.quantity,
+      unit: l.unit,
+      unitPrice: l.unitPrice,
+      gstRatePct: l.gstRatePct ?? "0",
+      lineSubtotal: sub.toDecimalPlaces(2).toString(),
+      lineTax: tax.toDecimalPlaces(2).toString(),
+      lineTotal: sub.plus(tax).toDecimalPlaces(2).toString(),
+    };
+  });
+  return { linesData, subtotal, taxTotal };
+}
+
 async function createVendorBillInner(raw: unknown): Promise<{ ok: true; id: string; billNo: string }> {
   const session = await requireRole(BILL_WRITE_ROLES);
   const input = VendorBillCreateInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {
-    let subtotal = new Decimal(0);
-    let taxTotal = new Decimal(0);
-    const linesData = input.lines.map((l, idx) => {
-      const q = toDecimal(l.quantity);
-      const u = toDecimal(l.unitPrice);
-      const g = toDecimal(l.gstRatePct ?? "0").div(100);
-      const sub = q.times(u);
-      const tax = sub.times(g);
-      subtotal = subtotal.plus(sub);
-      taxTotal = taxTotal.plus(tax);
-      return {
-        sortOrder: idx,
-        description: l.description,
-        quantity: l.quantity,
-        unit: l.unit,
-        unitPrice: l.unitPrice,
-        gstRatePct: l.gstRatePct ?? "0",
-        lineSubtotal: sub.toDecimalPlaces(2).toString(),
-        lineTax: tax.toDecimalPlaces(2).toString(),
-        lineTotal: sub.plus(tax).toDecimalPlaces(2).toString(),
-      };
-    });
+    const { linesData, subtotal, taxTotal } = computeVendorBillLines(input.lines);
 
     const billNo = await nextVendorBillNumber(tx);
     const bill = await tx.vendorBill.create({
@@ -741,6 +753,90 @@ async function createVendorBillInner(raw: unknown): Promise<{ ok: true; id: stri
 
   revalidatePath("/procurement/vendor-bills");
   return { ok: true, id: result.id, billNo: result.billNo };
+}
+
+/**
+ * Edit a supplier bill that hasn't entered the match/approval pipeline —
+ * DRAFT or PENDING_MATCH only. Matched / discrepancy / approved / paid
+ * bills are financial records and stay immutable. Editable fields:
+ * vendorBillNo, issue/due dates, notes and the lines (full replace, totals
+ * recomputed via the same computation createVendorBill uses). Any previous
+ * match result is stale after an edit, so the match fields are reset to
+ * the same clean state createVendorBill initialises them with.
+ */
+export async function updateVendorBill(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    return await updateVendorBillInner(id, raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function updateVendorBillInner(id: string, raw: unknown): Promise<{ ok: true }> {
+  const session = await requireRole(BILL_WRITE_ROLES);
+  const input = VendorBillUpdateInput.parse(raw);
+
+  await db.$transaction(async (tx) => {
+    const bill = await tx.vendorBill.findUnique({
+      where: { id },
+      select: { status: true, billNo: true },
+    });
+    if (!bill) throw new ActionError("Bill not found");
+    if (bill.status !== VendorBillStatus.DRAFT && bill.status !== VendorBillStatus.PENDING_MATCH) {
+      throw new ActionError(
+        `${bill.billNo} is ${bill.status} — matched/approved/paid bills are financial records and can't be edited. Record a fresh bill or contact an admin.`,
+      );
+    }
+
+    const { linesData, subtotal, taxTotal } = computeVendorBillLines(input.lines);
+
+    // Status guard: someone running the 3-way match (or a payment) while
+    // this edit is in flight loses the race with a clear message.
+    const updated = await tx.vendorBill.updateMany({
+      where: { id, status: { in: [VendorBillStatus.DRAFT, VendorBillStatus.PENDING_MATCH] } },
+      data: {
+        vendorBillNo: input.vendorBillNo ?? null,
+        ...(input.issueDate ? { issueDate: new Date(input.issueDate) } : {}),
+        dueDate: input.dueDate ? new Date(input.dueDate) : null,
+        notes: input.notes ?? null,
+        subtotal: subtotal.toDecimalPlaces(2).toString(),
+        taxTotal: taxTotal.toDecimalPlaces(2).toString(),
+        grandTotal: subtotal.plus(taxTotal).toDecimalPlaces(2).toString(),
+        // The lines changed, so any earlier match result is stale — reset
+        // to the same clean state a freshly created bill has.
+        matchedByUserId: null,
+        matchedAt: null,
+        discrepancyNote: null,
+      },
+    });
+    if (updated.count === 0) {
+      throw new ActionError("This bill just changed status — refresh the page.");
+    }
+
+    // Full line replace, same as the customer-invoice draft editor.
+    await tx.vendorBillLine.deleteMany({ where: { billId: id } });
+    await tx.vendorBillLine.createMany({
+      data: linesData.map((l) => ({ ...l, billId: id })),
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "VENDOR_BILL_UPDATED",
+        entity: "VendorBill",
+        entityId: id,
+        payloadHash: sha256Json({
+          billNo: bill.billNo,
+          lines: input.lines.length,
+          grandTotal: subtotal.plus(taxTotal).toDecimalPlaces(2).toString(),
+        }),
+      },
+    });
+  });
+
+  revalidatePath("/procurement/vendor-bills");
+  revalidatePath(`/procurement/vendor-bills/${id}`);
+  return { ok: true };
 }
 
 interface Discrepancy {

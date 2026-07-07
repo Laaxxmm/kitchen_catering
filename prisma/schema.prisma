@@ -379,6 +379,7 @@ model User {
   quotesCreated                   Quote[]                  @relation("QuoteCreatedBy")
   quoteEvents                     QuoteEvent[]             @relation("QuoteEventActor")
   customerInvoicesCreated         CustomerInvoice[]        @relation("CustomerInvoiceCreatedBy")
+  customerInvoicesHeld            CustomerInvoice[]        @relation("CustomerInvoiceOnHoldBy")
   ordersCreated                   Order[]                  @relation("OrderCreatedBy")
   ordersStoreReviewed             Order[]                  @relation("OrderStoreReviewedBy")
   ordersManagerReviewed           Order[]                  @relation("OrderManagerReviewedBy")
@@ -1534,6 +1535,14 @@ model CustomerInvoice {
   // a proforma / tax invoice to the customer, capture the timestamp and the
   // destination so the audit trail and the UI can show "Sent to
   // ops@infosys.com at 14:32".
+  // Billing hold — wrong address / wrong client / wrong items / payment
+  // dispute. A held invoice can't take payments or be emailed until the
+  // hold is released.
+  onHoldAt     DateTime?
+  onHoldReason String?
+  onHoldById   String?
+  onHoldBy     User?     @relation("CustomerInvoiceOnHoldBy", fields: [onHoldById], references: [id])
+
   emailedAt DateTime?
   emailedTo String?
 

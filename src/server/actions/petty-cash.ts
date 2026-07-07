@@ -9,6 +9,7 @@ import {
   PettyCashFloatInput,
   PettyCashTopUpInput,
   PettyCashVoucherInput,
+  PettyCashVoucherUpdateInput,
 } from "@/lib/validators";
 import { nextPettyCashVoucherNo } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
@@ -183,6 +184,181 @@ async function createPettyCashVoucherInner(
   return { ok: true, id: result.id, voucherNo: result.voucherNo };
 }
 
+export async function updatePettyCashVoucher(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    return await updatePettyCashVoucherInner(id, raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function updatePettyCashVoucherInner(id: string, raw: unknown): Promise<{ ok: true }> {
+  // Editing a posted voucher rewrites the cash trail, so it's gated like
+  // reverse (finance desk), not like create (custodian).
+  const session = await requireRole(PETTY_MANAGE);
+  const input = PettyCashVoucherUpdateInput.parse(raw);
+
+  const floatId = await db.$transaction(async (tx) => {
+    // Resolve the parent float, then lock it BEFORE reading the voucher or
+    // the balance — same discipline as reverse: without the lock a
+    // concurrent movement and this edit both compute from a stale balance.
+    const ref = await tx.pettyCashVoucher.findUnique({
+      where: { id },
+      select: { floatId: true },
+    });
+    if (!ref) throw new ActionError("Voucher not found");
+    await lockFloatRow(tx, ref.floatId);
+    const voucher = await tx.pettyCashVoucher.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        floatId: true,
+        voucherNo: true,
+        amount: true,
+        category: true,
+        paidTo: true,
+        reason: true,
+        paidAt: true,
+        status: true,
+        reversedAt: true,
+      },
+    });
+    if (!voucher) throw new ActionError("Voucher not found");
+    if (voucher.reversedAt || voucher.status === PettyCashVoucherStatus.REVERSED) {
+      throw new ActionError("Voucher is reversed — reversed vouchers cannot be edited");
+    }
+
+    const newAmount = toDecimal(input.amount);
+    if (newAmount.lte(0)) throw new ActionError("Voucher amount must be positive");
+    const oldAmount = toDecimal(voucher.amount);
+
+    const float = await tx.pettyCashFloat.findUnique({
+      where: { id: voucher.floatId },
+      select: { currentBalance: true },
+    });
+    if (!float) throw new ActionError("Parent float missing");
+
+    // Voucher = cash OUT: raising the amount lowers the balance by the
+    // difference, lowering it gives the difference back.
+    const balance = toDecimal(float.currentBalance);
+    const newBalance = balance.plus(oldAmount).minus(newAmount);
+    if (newBalance.lt(0)) {
+      throw new ActionError(
+        `Insufficient float balance. Changing this voucher from ₹${oldAmount.toString()} to ₹${newAmount.toString()} needs ₹${newAmount.minus(oldAmount).toString()} more, but only ₹${balance.toString()} is available (balance would go to ₹${newBalance.toDecimalPlaces(2).toString()}).`,
+      );
+    }
+
+    await tx.pettyCashVoucher.update({
+      where: { id },
+      data: {
+        amount: input.amount,
+        category: input.category,
+        paidTo: input.paidTo,
+        reason: input.reason,
+        // Same parse as create — the form sends a local datetime string.
+        paidAt: new Date(input.paidAt),
+      },
+    });
+    await tx.pettyCashFloat.update({
+      where: { id: voucher.floatId },
+      data: { currentBalance: newBalance.toDecimalPlaces(2).toString() },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "PETTY_CASH_VOUCHER_UPDATED",
+        entity: "PettyCashVoucher",
+        entityId: id,
+        payloadHash: sha256Json({
+          voucherNo: voucher.voucherNo,
+          before: {
+            amount: oldAmount.toString(),
+            category: voucher.category,
+            paidTo: voucher.paidTo,
+            reason: voucher.reason,
+            paidAt: voucher.paidAt.toISOString(),
+          },
+          after: {
+            amount: newAmount.toString(),
+            category: input.category,
+            paidTo: input.paidTo,
+            reason: input.reason,
+            paidAt: new Date(input.paidAt).toISOString(),
+          },
+        }),
+      },
+    });
+    return voucher.floatId;
+  });
+
+  revalidatePath("/petty-cash");
+  revalidatePath(`/petty-cash/floats/${floatId}`);
+  return { ok: true };
+}
+
+export async function deletePettyCashVoucher(id: string, reason: string): Promise<ActionResult> {
+  try {
+    return await deletePettyCashVoucherInner(id, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function deletePettyCashVoucherInner(id: string, reason: string): Promise<{ ok: true }> {
+  const session = await requireRole(PETTY_MANAGE);
+  // Hard delete — the audit row is the ONLY trace, so the reason is mandatory.
+  if (!reason.trim()) throw new ActionError("Reason required");
+
+  const floatId = await db.$transaction(async (tx) => {
+    const ref = await tx.pettyCashVoucher.findUnique({
+      where: { id },
+      select: { floatId: true },
+    });
+    if (!ref) throw new ActionError("Voucher not found");
+    await lockFloatRow(tx, ref.floatId);
+    const voucher = await tx.pettyCashVoucher.findUnique({
+      where: { id },
+      select: { id: true, floatId: true, voucherNo: true, amount: true, status: true, reversedAt: true },
+    });
+    if (!voucher) throw new ActionError("Voucher not found");
+    if (voucher.reversedAt || voucher.status === PettyCashVoucherStatus.REVERSED) {
+      throw new ActionError("Voucher is reversed — its cash is already restored; deleting it would double-credit the float");
+    }
+
+    // Cash went OUT when the voucher was posted — put it back.
+    const float = await tx.pettyCashFloat.findUnique({
+      where: { id: voucher.floatId },
+      select: { currentBalance: true },
+    });
+    if (!float) throw new ActionError("Parent float missing");
+    await tx.pettyCashFloat.update({
+      where: { id: voucher.floatId },
+      data: {
+        currentBalance: toDecimal(float.currentBalance).plus(toDecimal(voucher.amount)).toDecimalPlaces(2).toString(),
+      },
+    });
+    await tx.pettyCashVoucher.delete({ where: { id } });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "PETTY_CASH_VOUCHER_DELETED",
+        entity: "PettyCashVoucher",
+        entityId: id,
+        payloadHash: sha256Json({
+          voucherNo: voucher.voucherNo,
+          amount: toDecimal(voucher.amount).toString(),
+          reason,
+        }),
+      },
+    });
+    return voucher.floatId;
+  });
+
+  revalidatePath("/petty-cash");
+  revalidatePath(`/petty-cash/floats/${floatId}`);
+  return { ok: true };
+}
+
 export async function reversePettyCashVoucher(id: string, reason: string): Promise<ActionResult> {
   try {
     return await reversePettyCashVoucherInner(id, reason);
@@ -303,4 +479,108 @@ async function topUpPettyCashInner(raw: unknown): Promise<{ ok: true }> {
   revalidatePath("/petty-cash");
   revalidatePath(`/petty-cash/floats/${input.floatId}`);
   return { ok: true };
+}
+
+// ─── Report ──────────────────────────────────────────────────────────────
+
+export type PettyCashMovementKind = "VOUCHER_OUT" | "TOPUP_IN" | "REVERSAL_IN";
+
+export type PettyCashMovement = {
+  id: string;
+  kind: PettyCashMovementKind;
+  date: Date;
+  floatId: string;
+  floatName: string;
+  /** Voucher number, or the top-up's bank reference. */
+  refNo: string | null;
+  /** Voucher category / top-up source. */
+  detail: string;
+  paidTo: string | null;
+  /** Signed: negative = cash out of the float, positive = cash in. */
+  amount: string;
+};
+
+/**
+ * Movement ledger for the report page: vouchers (out), top-ups (in) and
+ * voucher reversals (in) within [from, to], newest first. A voucher that
+ * was reversed shows up twice — the original outflow at paidAt and the
+ * reversal inflow at reversedAt — so the running story matches the cash tin.
+ */
+export async function getPettyCashReport(params: { floatId?: string; from: Date; to: Date }) {
+  await requireRole(PETTY_MANAGE);
+  const floatFilter = params.floatId ? { floatId: params.floatId } : {};
+  const range = { gte: params.from, lte: params.to };
+
+  const [floats, vouchers, reversals, topUps] = await Promise.all([
+    db.pettyCashFloat.findMany({
+      where: { active: true },
+      select: { id: true, name: true, currentBalance: true },
+      orderBy: { name: "asc" },
+    }),
+    db.pettyCashVoucher.findMany({
+      where: { ...floatFilter, paidAt: range },
+      include: { float: { select: { name: true } } },
+    }),
+    db.pettyCashVoucher.findMany({
+      where: { ...floatFilter, status: PettyCashVoucherStatus.REVERSED, reversedAt: range },
+      include: { float: { select: { name: true } } },
+    }),
+    db.pettyCashTopUp.findMany({
+      where: { ...floatFilter, createdAt: range },
+      include: { float: { select: { name: true } } },
+    }),
+  ]);
+
+  const movements: PettyCashMovement[] = [
+    ...vouchers.map((v) => ({
+      id: `voucher-${v.id}`,
+      kind: "VOUCHER_OUT" as const,
+      date: v.paidAt,
+      floatId: v.floatId,
+      floatName: v.float.name,
+      refNo: v.voucherNo,
+      detail: v.category,
+      paidTo: v.paidTo,
+      amount: toDecimal(v.amount).negated().toString(),
+    })),
+    ...reversals.map((v) => ({
+      id: `reversal-${v.id}`,
+      kind: "REVERSAL_IN" as const,
+      date: v.reversedAt ?? v.paidAt,
+      floatId: v.floatId,
+      floatName: v.float.name,
+      refNo: v.voucherNo,
+      detail: v.reversedReason ?? v.category,
+      paidTo: v.paidTo,
+      amount: toDecimal(v.amount).toString(),
+    })),
+    ...topUps.map((t) => ({
+      id: `topup-${t.id}`,
+      kind: "TOPUP_IN" as const,
+      date: t.createdAt,
+      floatId: t.floatId,
+      floatName: t.float.name,
+      refNo: t.reference,
+      detail: t.source,
+      paidTo: null,
+      amount: toDecimal(t.amount).toString(),
+    })),
+  ].sort((a, b) => b.date.getTime() - a.date.getTime());
+
+  const cashOut = vouchers.reduce((s, v) => s.plus(toDecimal(v.amount)), toDecimal(0));
+  const cashIn = [...reversals, ...topUps].reduce((s, r) => s.plus(toDecimal(r.amount)), toDecimal(0));
+
+  return {
+    movements,
+    totals: {
+      cashOut: cashOut.toString(),
+      cashIn: cashIn.toString(),
+      net: cashIn.minus(cashOut).toString(),
+    },
+    floats: floats.map((f) => ({
+      id: f.id,
+      name: f.name,
+      currentBalance: toDecimal(f.currentBalance).toString(),
+    })),
+  };
 }
