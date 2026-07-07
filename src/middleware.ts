@@ -51,7 +51,7 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   { pattern: /^\/tasks\/admin(\/|$)/, allow: ["ADMIN", "MANAGER"] },
 
   // Sales modules
-  { pattern: /^\/customers(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES"] },
+  { pattern: /^\/customers(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "ACCOUNTS"] },
   { pattern: /^\/quotes(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES"] },
   { pattern: /^\/dishes(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "KITCHEN_HEAD"] },
 
@@ -61,7 +61,7 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Mid-flight quantity revision (client changed pax) — commercial call, so
   // sales/manager/admin only; the reviseOrder action re-checks the role.
   { pattern: /^\/orders\/[^/]+\/revise(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES"] },
-  { pattern: /^\/orders(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "STORE_KEEPER", "KITCHEN_HEAD", "FNB_SERVICE", "DELIVERY"] },
+  { pattern: /^\/orders(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "STORE_KEEPER", "KITCHEN_HEAD", "FNB_SERVICE", "DELIVERY", "ACCOUNTS"] },
 
   // Operations
   // Kitchen production board is the chef's (+ management oversight) only.

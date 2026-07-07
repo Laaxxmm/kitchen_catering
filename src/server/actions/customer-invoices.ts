@@ -22,7 +22,7 @@ import {
   type ActionResultWith,
 } from "@/server/action-result";
 import { deferAfterResponse } from "@/server/defer";
-import { isImmediateChannel } from "@/lib/order-channels";
+import { isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
 import { nextCustomerInvoiceNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { summarise } from "@/lib/gst";
@@ -54,6 +54,29 @@ function newShareToken(): string {
  *
  * e-invoicing fields stay NOT_REQUIRED until Phase 3 wires the GSP.
  */
+/**
+ * Package-priced channels (banquet / buffet / ODC / packet) are billed as
+ * ONE line at the agreed package total — the dishes are sub-heads with no
+ * per-plate rates, so summing OrderItem prices under-bills (seen live:
+ * a ₹25,000 banquet invoiced at ₹10,395). The package total is treated as
+ * the pre-GST taxable value with 5% catering GST on top.
+ */
+function packageSummaryLine(order: {
+  channel: OrderChannel;
+  headcount: number;
+  contractValue: { toString(): string };
+}) {
+  return {
+    calc: [{
+      quantity: "1",
+      unitPrice: order.contractValue.toString(),
+      discountPct: "0",
+      gstRatePct: "5",
+    }],
+    describe: `${order.channel} catering package — ${order.headcount} pax`,
+  };
+}
+
 export async function createCustomerInvoiceFromOrder(
   orderId: string,
 ): Promise<ActionResultWith<{ id: string; invoiceNo: string }>> {
@@ -103,12 +126,16 @@ async function createCustomerInvoiceFromOrderInner(
     }
 
     const supplierState = indefineStateCode();
-    const lines = order.items.map((it) => ({
-      quantity: it.portions.toString(),
-      unitPrice: it.unitPrice.toString(),
-      discountPct: it.discountPct.toString(),
-      gstRatePct: it.gstRatePct.toString(),
-    }));
+    const isPackage = isPackagePricedChannel(order.channel);
+    const pkg = isPackage ? packageSummaryLine(order) : null;
+    const lines = pkg
+      ? pkg.calc
+      : order.items.map((it) => ({
+          quantity: it.portions.toString(),
+          unitPrice: it.unitPrice.toString(),
+          discountPct: it.discountPct.toString(),
+          gstRatePct: it.gstRatePct.toString(),
+        }));
     const summary = summarise({
       lines,
       supplierStateCode: supplierState,
@@ -152,7 +179,21 @@ async function createCustomerInvoiceFromOrderInner(
         createdById: session.user.id,
         shareToken: newShareToken(),
         lines: {
-          create: order.items.map((it, idx) => {
+          create: pkg
+            ? [{
+                sortOrder: 0,
+                description: `${pkg.describe} (${order.items.map((it) => it.dish.name).join(", ")})`,
+                hsnSac: null,
+                quantity: "1",
+                unit: "package",
+                unitPrice: order.contractValue.toString(),
+                discountPct: "0",
+                gstRatePct: "5",
+                lineSubtotal: summary.subtotal.toString(),
+                lineTax: summary.taxTotal.toString(),
+                lineTotal: summary.grandTotal.toString(),
+              }]
+            : order.items.map((it, idx) => {
             const lineSubtotal = it.lineSubtotal.toString();
             const lineTax = it.lineTax.toString();
             const lineTotal = it.lineTotal.toString();
@@ -260,13 +301,17 @@ export async function createProformaInvoiceForOrder(orderId: string) {
     invoice = existing;
   } else {
     const supplierState = indefineStateCode();
+    const isPackage = isPackagePricedChannel(order.channel);
+    const pkg = isPackage ? packageSummaryLine(order) : null;
     const summary = summarise({
-      lines: order.items.map((it) => ({
-        quantity: it.portions.toString(),
-        unitPrice: it.unitPrice.toString(),
-        discountPct: it.discountPct.toString(),
-        gstRatePct: it.gstRatePct.toString(),
-      })),
+      lines: pkg
+        ? pkg.calc
+        : order.items.map((it) => ({
+            quantity: it.portions.toString(),
+            unitPrice: it.unitPrice.toString(),
+            discountPct: it.discountPct.toString(),
+            gstRatePct: it.gstRatePct.toString(),
+          })),
       supplierStateCode: supplierState,
       placeOfSupplyStateCode: order.placeOfSupplyStateCode,
     });
@@ -295,7 +340,21 @@ export async function createProformaInvoiceForOrder(orderId: string) {
           createdById: order.createdById,
           shareToken: newShareToken(),
           lines: {
-            create: order.items.map((it, idx) => ({
+            create: pkg
+              ? [{
+                  sortOrder: 0,
+                  description: `${pkg.describe} (${order.items.map((it) => it.dish.name).join(", ")})`,
+                  hsnSac: null,
+                  quantity: "1",
+                  unit: "package",
+                  unitPrice: order.contractValue.toString(),
+                  discountPct: "0",
+                  gstRatePct: "5",
+                  lineSubtotal: summary.subtotal.toString(),
+                  lineTax: summary.taxTotal.toString(),
+                  lineTotal: summary.grandTotal.toString(),
+                }]
+              : order.items.map((it, idx) => ({
               sortOrder: idx,
               description: it.dish.name,
               hsnSac: it.dish.hsnSac ?? null,
