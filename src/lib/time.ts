@@ -1,5 +1,5 @@
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
-import { addMonths, endOfMonth, startOfMonth } from "date-fns";
+import { addDays, addMonths, endOfMonth, startOfDay, startOfISOWeek, startOfMonth } from "date-fns";
 
 export const APP_TZ = process.env.APP_TZ ?? "Asia/Kolkata";
 
@@ -28,6 +28,61 @@ export function istMonthEnd(date: Date): Date {
 
 export function istMonthBoundaries(date: Date): { start: Date; end: Date } {
   return { start: istMonthStart(date), end: istMonthEnd(date) };
+}
+
+/** Half-open [from, toExclusive) window over UTC Dates — the shape every
+ *  eventDate list-filter takes. */
+export interface DateWindow {
+  from: Date;
+  toExclusive: Date;
+}
+
+/**
+ * The IST calendar day containing `date`, shifted by `offsetDays`, as a
+ * half-open UTC window. `istDayWindow()` = today (IST); `istDayWindow(new
+ * Date(), 1)` = tomorrow.
+ */
+export function istDayWindow(date: Date = new Date(), offsetDays = 0): DateWindow {
+  const day = addDays(startOfDay(toZonedTime(date, APP_TZ)), offsetDays);
+  return {
+    from: fromZonedTime(day, APP_TZ),
+    toExclusive: fromZonedTime(addDays(day, 1), APP_TZ),
+  };
+}
+
+/** The IST ISO week (Mon 00:00 → next Mon 00:00) containing `date`. */
+export function istWeekWindow(date: Date = new Date()): DateWindow {
+  const weekStart = startOfISOWeek(toZonedTime(date, APP_TZ));
+  return {
+    from: fromZonedTime(weekStart, APP_TZ),
+    toExclusive: fromZonedTime(addDays(weekStart, 7), APP_TZ),
+  };
+}
+
+/** Event-date scope tokens used in ?scope= on the chef screens. */
+export type EventDateScope = "today" | "tomorrow" | "week" | "all" | "date";
+
+/**
+ * Resolve a `?scope=` / `?date=YYYY-MM-DD` searchParam pair into an IST
+ * day/week window. An explicit `date` wins over `scope`; "all" (no filter)
+ * returns null; anything unrecognised falls back to today so a mistyped URL
+ * never silently widens the list.
+ */
+export function istScopeWindow(scope?: string, date?: string): DateWindow | null {
+  if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return istDayWindow(fromZonedTime(`${date}T00:00:00`, APP_TZ));
+  }
+  switch (scope) {
+    case "all":
+      return null;
+    case "tomorrow":
+      return istDayWindow(new Date(), 1);
+    case "week":
+      return istWeekWindow();
+    case "today":
+    default:
+      return istDayWindow();
+  }
 }
 
 /** Enumerate the first-of-month boundaries (UTC) that intersect [from, to]. */

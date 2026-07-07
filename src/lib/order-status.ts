@@ -16,6 +16,24 @@ export const INACTIVE_ORDER_STATUSES: OrderStatus[] = [
 ];
 
 /**
+ * Statuses in which a confirmed order can still be revised (client changed
+ * pax). Everything from the approval gates up to READY — once the food is
+ * out for delivery (or the order is terminal) it's too late. Shared between
+ * the reviseOrder action and the UI that shows/hides the "Revise order"
+ * entry points, so they can't drift apart.
+ */
+export const REVISABLE_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.PENDING_ADMIN_APPROVAL,
+  OrderStatus.PENDING_CHEF_APPROVAL,
+  OrderStatus.CHANGES_PROPOSED_BY_CHEF,
+  OrderStatus.CHEF_REQUISITION_PENDING,
+  OrderStatus.ISSUING,
+  OrderStatus.READY_FOR_PRODUCTION,
+  OrderStatus.IN_PREP,
+  OrderStatus.READY,
+];
+
+/**
  * Human-friendly labels for OrderStatus. The DB enum values are
  * code-friendly (PENDING_CHEF_APPROVAL); the UI should show plain English
  * (Awaiting chef approval). Single source of truth so admin / manager /

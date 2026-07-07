@@ -29,9 +29,11 @@ import {
   OrderCreateInput,
   OrderManagerApprovalInput,
   OrderManagerOverrideInput,
+  OrderReviseInput,
   OrderStoreApprovalInput,
   OrderUpdateInput,
 } from "@/lib/validators";
+import { REVISABLE_ORDER_STATUSES } from "@/lib/order-status";
 import {
   ActionError,
   actionFailure,
@@ -433,6 +435,207 @@ async function updateOrderDraftInner(id: string, raw: unknown): Promise<{ ok: tr
   revalidatePath(`/orders/${id}`);
   revalidatePath("/orders");
   return { ok: true };
+}
+
+/**
+ * Revise a confirmed order mid-flight — the client changed the headcount
+ * (e.g. 50 → 30 pax). Quantities only: headcount, per-existing-line
+ * portions (0 removes the line) and, for package-priced channels, the
+ * renegotiated package total. Dishes and prices don't move here (dish
+ * substitution is the chef's swap flow; full re-pricing means a new order).
+ *
+ * Allowed while the order is still in the kitchen's hands (up to READY);
+ * refused once it's out for delivery / billed / terminal. Within 24h of the
+ * event only a manager/admin may revise — sales must escalate.
+ *
+ * Already-issued stock is deliberately NOT auto-returned: the kitchen is
+ * told to review the requisition instead, and any stock correction is a
+ * manual adjustment decision (same policy as cancelOrder).
+ */
+export async function reviseOrder(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    return await reviseOrderInner(id, raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }> {
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.SALES]);
+  const input = OrderReviseInput.parse(raw);
+
+  const revised = await db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id },
+      include: { items: true },
+    });
+    if (!order) throw new ActionError("Order not found");
+    if (!REVISABLE_ORDER_STATUSES.includes(order.status)) {
+      throw new ActionError(`Too late — the order is ${order.status}`);
+    }
+
+    // 24-hour rule: close to the event the kitchen has already planned and
+    // possibly cooked — only a manager/admin may change quantities then.
+    const withinDayOfEvent =
+      order.eventDate.getTime() - Date.now() < 24 * 60 * 60 * 1000;
+    if (withinDayOfEvent && session.user.role === Role.SALES) {
+      throw new ActionError(
+        "Within 24 hours of the event — ask a manager/admin to make this change.",
+      );
+    }
+
+    // Every submitted line must belong to this order.
+    const byId = new Map(order.items.map((it) => [it.id, it]));
+    for (const li of input.items) {
+      if (!byId.has(li.id)) {
+        throw new ActionError("A line in this revision no longer exists on the order — refresh and try again.");
+      }
+    }
+    const removals = input.items.filter((li) => li.portions === 0);
+    const keeps = input.items.filter((li) => li.portions > 0);
+    // Lines the form didn't send stay untouched.
+    const untouched = order.items.filter((it) => !input.items.some((li) => li.id === it.id));
+    if (keeps.length + untouched.length === 0) {
+      throw new ActionError("An order needs at least one dish — cancel the order instead of zeroing every line.");
+    }
+
+    if (removals.length > 0) {
+      await tx.orderItem.deleteMany({
+        where: { id: { in: removals.map((r) => r.id) }, orderId: id },
+      });
+    }
+    // Recompute each kept line exactly like updateOrderDraft/computeLine —
+    // same price, discount and GST, only the portions change.
+    for (const li of keeps) {
+      const existing = byId.get(li.id)!;
+      const c = computeLine(
+        String(li.portions),
+        existing.unitPrice.toString(),
+        existing.discountPct.toString(),
+        existing.gstRatePct.toString(),
+      );
+      await tx.orderItem.update({
+        where: { id: li.id },
+        data: {
+          portions: String(li.portions),
+          lineSubtotal: c.subtotal.toString(),
+          lineTax: c.tax.toString(),
+          lineTotal: c.total.toString(),
+        },
+      });
+    }
+
+    // Contract value: package channels carry the renegotiated lump sum
+    // (kept as-is when the form doesn't send one); everything else is the
+    // sum of the recomputed lines.
+    const isPackageChannel = isPackagePricedChannel(order.channel);
+    let contractValue: Decimal;
+    if (isPackageChannel) {
+      contractValue =
+        input.packageTotal != null && input.packageTotal !== ""
+          ? new Decimal(input.packageTotal).toDecimalPlaces(2)
+          : toDecimal(order.contractValue);
+    } else {
+      const items = await tx.orderItem.findMany({
+        where: { orderId: id },
+        select: { lineTotal: true },
+      });
+      contractValue = items
+        .reduce((s, it) => s.plus(toDecimal(it.lineTotal)), new Decimal(0))
+        .toDecimalPlaces(2);
+    }
+
+    // Status guard in the WHERE clause: if the order moved (e.g. went out
+    // for delivery) between our read and this write, match zero rows and
+    // roll the whole revision back.
+    const updated = await tx.order.updateMany({
+      where: { id, status: { in: REVISABLE_ORDER_STATUSES } },
+      data: {
+        headcount: input.headcount,
+        contractValue: contractValue.toString(),
+      },
+    });
+    if (updated.count === 0) {
+      const current = await tx.order.findUnique({ where: { id }, select: { status: true } });
+      throw new ActionError(
+        `Too late — the order is ${current?.status ?? "gone"}. Someone moved it while you were editing — refresh the page.`,
+      );
+    }
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "ORDER_REVISED",
+        entity: "Order",
+        entityId: id,
+        payloadHash: sha256Json({
+          before: { headcount: order.headcount, contractValue: order.contractValue.toString() },
+          after: { headcount: input.headcount, contractValue: contractValue.toString() },
+          removedLines: removals.length,
+          note: input.revisionNote,
+        }),
+      },
+    });
+
+    return { code: order.code, oldPax: order.headcount };
+  });
+
+  revalidatePath(`/orders/${id}`);
+  revalidatePath("/orders");
+  revalidatePath("/dashboard");
+  revalidatePath("/kitchen");
+
+  deferAfterResponse("order-revise:notify", () =>
+    notifyOrderRevised(id, revised.code, revised.oldPax, input.headcount, input.revisionNote),
+  );
+  return { ok: true };
+}
+
+/**
+ * Fire-and-forget: tell the kitchen + service teams an in-flight order's
+ * quantities changed. If an ingredient requisition is still open (not
+ * fully issued / cancelled), the kitchen is told to re-check it — the
+ * quantities were planned for the old headcount.
+ */
+async function notifyOrderRevised(
+  orderId: string,
+  code: string,
+  oldPax: number | null,
+  newPax: number,
+  note: string,
+) {
+  try {
+    // Open = non-terminal and not fully issued. Already-issued stock is not
+    // auto-returned, so the chef has to reconcile the requisition by hand.
+    const openRequisition = await db.chefRequisition.findFirst({
+      where: {
+        orderId,
+        status: {
+          in: [
+            ChefRequisitionStatus.DRAFT,
+            ChefRequisitionStatus.SUBMITTED,
+            ChefRequisitionStatus.PARTIALLY_ISSUED,
+          ],
+        },
+      },
+      select: { id: true },
+    });
+    const body =
+      note +
+      (openRequisition
+        ? " Review the ingredient requisition — quantities were planned for the old headcount."
+        : "");
+    await notifyRoles([Role.KITCHEN_HEAD, Role.DELIVERY, Role.FNB_SERVICE], {
+      kind: "GENERIC",
+      title: `Order ${code} revised — ${oldPax ?? "?"} → ${newPax} pax`,
+      body,
+      link: `/orders/${orderId}`,
+      // Every revision is news — timestamp the key so repeats aren't deduped.
+      dedupeKey: `order-revised:${orderId}:${Date.now()}`,
+    });
+  } catch (err) {
+    console.warn("[notify] order-revised fanout failed:", err);
+  }
 }
 
 /**
@@ -1343,6 +1546,10 @@ export interface OrderFilter {
   customerId?: string;
   myQueue?: boolean;
   query?: string;
+  /** Optional half-open eventDate window — resolve IST day boundaries with
+   *  the helpers in @/lib/time (istScopeWindow etc.) before passing. */
+  eventFrom?: Date;
+  eventToExclusive?: Date;
 }
 
 /** Count of orders per status across the whole table — drives the orders-page
@@ -1407,6 +1614,14 @@ export async function listOrders(filter: OrderFilter = {}) {
     where: {
       ...(statuses ? { status: { in: statuses } } : {}),
       ...(filter.customerId ? { customerId: filter.customerId } : {}),
+      ...(filter.eventFrom || filter.eventToExclusive
+        ? {
+            eventDate: {
+              ...(filter.eventFrom ? { gte: filter.eventFrom } : {}),
+              ...(filter.eventToExclusive ? { lt: filter.eventToExclusive } : {}),
+            },
+          }
+        : {}),
       ...(fnbScoped
         ? { channel: { in: [OrderChannel.ROOM_SERVICE, OrderChannel.ALACARTE, OrderChannel.MANAGEMENT] } }
         : {}),

@@ -28,7 +28,8 @@ import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
 import { listHousekeepingIssues } from "@/server/actions/housekeeping";
 import { listMaintenanceActivities } from "@/server/actions/maintenance";
 import { toDecimal, formatINRWhole } from "@/lib/money";
-import { formatIST } from "@/lib/time";
+import { formatIST, istScopeWindow, type EventDateScope } from "@/lib/time";
+import { EventScopePills } from "@/components/ik/EventScopePills";
 import {
   ChefRequisitionStatus, VendorPOStatus, OrderStatus,
   CustomerInvoiceStatus, VendorBillStatus,
@@ -52,7 +53,11 @@ function logBucket(date: Date): LogBucket {
  * banner, the inline approvals board (chef-change + PO sign-off), task
  * tiles, and a money-this-month strip. Everything is clickable.
  */
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ scope?: string; date?: string }>;
+}) {
   const session = await auth();
   const name = session?.user?.name ?? "there";
   const firstName = name.split(" ")[0];
@@ -71,7 +76,18 @@ export default async function DashboardPage() {
   // card with its single next action inline (accept / raise request /
   // start cooking / mark done / dispatch). No drilling into detail pages.
   if (isChef) {
-    const board = await listChefBoardOrders();
+    // Event-date scope from the URL — defaults to TODAY so the chef opens
+    // onto today's cooking, with pills to widen (tomorrow / week / all / a
+    // specific date). Same ?scope=/?date= contract as /kitchen.
+    const sp = await searchParams;
+    const scope: EventDateScope =
+      sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date)
+        ? "date"
+        : sp.scope === "tomorrow" || sp.scope === "week" || sp.scope === "all"
+          ? sp.scope
+          : "today";
+    const window = istScopeWindow(sp.scope, sp.date);
+    const board = await listChefBoardOrders(window ?? undefined);
     return (
       <>
         <LauncherGreeting
@@ -81,6 +97,21 @@ export default async function DashboardPage() {
         />
         <div className="grid gap-5">
           <MyTasksPanel />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <EventScopePills basePath="/dashboard" scope={scope} date={sp.date} />
+            <Link href="/dashboard?scope=all" className="text-[12px] text-brand hover:underline">
+              All orders →
+            </Link>
+          </div>
+          {board.length === 0 && scope !== "all" && (
+            <p className="text-[12.5px] text-ik-ink-3">
+              Nothing {scope === "today" ? "for today" : "in this window"} —{" "}
+              <Link href="/dashboard?scope=all" className="text-brand hover:underline">
+                see all orders
+              </Link>{" "}
+              to check what&apos;s coming up.
+            </p>
+          )}
           <ChefWorkScreen
             orders={board.map((o) => ({
               id: o.id,

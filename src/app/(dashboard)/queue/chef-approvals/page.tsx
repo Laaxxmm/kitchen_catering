@@ -5,13 +5,32 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { listOrders } from "@/server/actions/orders";
 import { formatINR } from "@/lib/money";
-import { formatIST } from "@/lib/time";
+import { formatIST, istScopeWindow, type EventDateScope } from "@/lib/time";
+import { EventScopePills } from "@/components/ik/EventScopePills";
 
 export const dynamic = "force-dynamic";
 
-export default async function ChefApprovalsQueuePage() {
+export default async function ChefApprovalsQueuePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ scope?: string; date?: string }>;
+}) {
   await gateRolePage([Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD]);
-  const orders = await listOrders({ status: [OrderStatus.PENDING_CHEF_APPROVAL] });
+  const sp = await searchParams;
+  // Same ?scope=/?date= contract as the chef dashboard and /kitchen, but the
+  // approvals queue defaults to ALL — hiding a pending approval by default
+  // would silently stall the order.
+  const scope: EventDateScope =
+    sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date)
+      ? "date"
+      : sp.scope === "today" || sp.scope === "tomorrow" || sp.scope === "week"
+        ? sp.scope
+        : "all";
+  const window = scope === "all" ? null : istScopeWindow(sp.scope, sp.date);
+  const orders = await listOrders({
+    status: [OrderStatus.PENDING_CHEF_APPROVAL],
+    ...(window ? { eventFrom: window.from, eventToExclusive: window.toExclusive } : {}),
+  });
   return (
     <>
       <PageHeader
@@ -19,6 +38,9 @@ export default async function ChefApprovalsQueuePage() {
         title="Awaiting chef approval"
         description="Orders submitted by front desk or manager. Approve to send the proforma to the customer, or suggest changes for the manager to review."
       />
+      <div className="mb-4">
+        <EventScopePills basePath="/queue/chef-approvals" scope={scope} date={sp.date} />
+      </div>
       {orders.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">Queue is clear.</p>
       ) : (

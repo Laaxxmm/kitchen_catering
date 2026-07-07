@@ -58,6 +58,9 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Orders — kitchen sees the cooking brief, sales/F&B raise them. Accounts
   // works billing from /invoices (the Generate-invoice screen), not here.
   { pattern: /^\/orders\/[^/]+\/requisition(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD"] },
+  // Mid-flight quantity revision (client changed pax) — commercial call, so
+  // sales/manager/admin only; the reviseOrder action re-checks the role.
+  { pattern: /^\/orders\/[^/]+\/revise(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES"] },
   { pattern: /^\/orders(\/|$)/, allow: ["ADMIN", "MANAGER", "SALES", "STORE_KEEPER", "KITCHEN_HEAD", "FNB_SERVICE", "DELIVERY"] },
 
   // Operations

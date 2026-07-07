@@ -20,6 +20,7 @@ import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoic
 import { listDishes } from "@/server/actions/dishes";
 import { listAssignableUsers } from "@/server/actions/users";
 import { isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
+import { REVISABLE_ORDER_STATUSES } from "@/lib/order-status";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
@@ -158,6 +159,14 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               >
                 {immediate ? "Submit to kitchen" : "Submit for manager approval"}
               </ActionResultButton>
+            )}
+            {/* Mid-flight quantity revision (client changed pax) — sales /
+                manager / admin, while the order is still in the kitchen's
+                hands. The action re-checks role, status and the 24h rule. */}
+            {isSales && REVISABLE_ORDER_STATUSES.includes(order.status) && (
+              <Link href={`/orders/${order.id}/revise`}>
+                <Button variant="outline">Revise order</Button>
+              </Link>
             )}
             {/* Tax invoice is generated manually by accounts/admin/manager
                 once the order has been delivered. They then download +

@@ -353,8 +353,14 @@ async function markOrderCookedInner(orderId: string): Promise<{ ok: true }> {
  * Orders the chef needs to act on, in pipeline order. Powers the chef
  * work-screen on the dashboard. Returns a flat list with the single
  * "next action" each order is waiting for.
+ *
+ * `window` optionally limits the board to orders whose EVENT DATE falls in
+ * the half-open [from, toExclusive) range — resolve IST day boundaries with
+ * the helpers in @/lib/time (istScopeWindow etc.) before passing.
  */
-export async function listChefBoardOrders() {
+export async function listChefBoardOrders(
+  window?: { from?: Date; toExclusive?: Date },
+) {
   await requireRole([...ORDER_KITCHEN_ROLES, Role.MANAGER]);
   const orders = await db.order.findMany({
     where: {
@@ -368,6 +374,14 @@ export async function listChefBoardOrders() {
           OrderStatus.READY,
         ],
       },
+      ...(window?.from || window?.toExclusive
+        ? {
+            eventDate: {
+              ...(window.from ? { gte: window.from } : {}),
+              ...(window.toExclusive ? { lt: window.toExclusive } : {}),
+            },
+          }
+        : {}),
     },
     select: {
       id: true,
@@ -390,27 +404,21 @@ export async function listChefBoardOrders() {
 
 // ─── Queries ─────────────────────────────────────────────────────────────
 
-export async function listProductionJobs(opts: { window?: "today" | "tomorrow" | "thisweek" } = {}) {
+/**
+ * `window` optionally limits jobs to those whose ORDER's event date falls in
+ * the half-open [from, toExclusive) range. Callers resolve IST day
+ * boundaries via @/lib/time (istScopeWindow etc.) — the old string window
+ * ("today" | "tomorrow" | "thisweek") used server-local midnight, which
+ * drifted from the IST calendar day whenever the host wasn't in IST.
+ */
+export async function listProductionJobs(
+  opts: { window?: { from?: Date; toExclusive?: Date } } = {},
+) {
   await requireRole(READ_ROLES);
 
-  // Window filter on scheduledReady (which equals eventDate).
-  let dateFilter: { gte?: Date; lt?: Date } = {};
-  if (opts.window) {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const dayMs = 24 * 60 * 60 * 1000;
-    if (opts.window === "today") {
-      dateFilter = { gte: todayStart, lt: new Date(todayStart.getTime() + dayMs) };
-    } else if (opts.window === "tomorrow") {
-      dateFilter = { gte: new Date(todayStart.getTime() + dayMs), lt: new Date(todayStart.getTime() + 2 * dayMs) };
-    } else {
-      dateFilter = { gte: todayStart, lt: new Date(todayStart.getTime() + 7 * dayMs) };
-    }
-  }
-
+  const win = opts.window;
   return db.productionJob.findMany({
     where: {
-      ...(opts.window ? { scheduledReady: dateFilter } : {}),
       status: { not: ProductionJobStatus.CANCELLED },
       // Only show jobs whose order is still in a kitchen-relevant state.
       // Once an order is handed to delivery / delivered / invoiced, its job
@@ -424,6 +432,14 @@ export async function listProductionJobs(opts: { window?: "today" | "tomorrow" |
             OrderStatus.READY,
           ],
         },
+        ...(win?.from || win?.toExclusive
+          ? {
+              eventDate: {
+                ...(win.from ? { gte: win.from } : {}),
+                ...(win.toExclusive ? { lt: win.toExclusive } : {}),
+              },
+            }
+          : {}),
       },
     },
     include: {

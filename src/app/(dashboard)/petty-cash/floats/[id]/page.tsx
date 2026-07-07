@@ -1,19 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { DocumentEntityType, PettyCashVoucherStatus } from "@prisma/client";
-import { DocumentUploader } from "@/components/ik/DocumentUploader";
-import { InlineReasonForm } from "@/components/ik/InlineReasonForm";
+import { PettyCashVoucherStatus } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { VoucherForm } from "./_components/VoucherForm";
 import { TopUpForm } from "./_components/TopUpForm";
-import { VoucherRowActions } from "./_components/VoucherRowActions";
+import { VoucherRow } from "./_components/VoucherRow";
 import {
   createPettyCashVoucher,
   deletePettyCashVoucher,
   getPettyCashFloat,
-  reversePettyCashVoucher,
   topUpPettyCash,
   updatePettyCashVoucher,
 } from "@/server/actions/petty-cash";
@@ -45,10 +42,6 @@ export default async function PettyCashFloatDetailPage({ params }: { params: Pro
   async function newTopUp(input: { amount: string; source: string; reference: string | null }) {
     "use server";
     return await topUpPettyCash({ floatId: id, ...input });
-  }
-  async function reverse(voucherId: string, reason: string) {
-    "use server";
-    return await reversePettyCashVoucher(voucherId, reason);
   }
 
   return (
@@ -92,44 +85,29 @@ export default async function PettyCashFloatDetailPage({ params }: { params: Pro
             </TableHeader>
             <TableBody>
               {float.vouchers.map((v) => (
-                <TableRow key={v.id}>
-                  <TableCell className="font-mono text-[12px]">{v.voucherNo}</TableCell>
-                  <TableCell className="font-mono text-[12px]">{formatIST(v.paidAt, "yyyy-MM-dd")}</TableCell>
-                  <TableCell>{v.category}</TableCell>
-                  <TableCell>{v.paidTo}</TableCell>
-                  <TableCell className="text-[12px] text-ik-ink-2">{v.reason}</TableCell>
-                  <TableCell className="text-right font-mono">{formatINR(v.amount)}</TableCell>
-                  <TableCell>{v.status}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-col gap-1">
-                      <DocumentUploader
-                        entityType={DocumentEntityType.PETTY_CASH_VOUCHER}
-                        entityId={v.id}
-                        label="Attach bill"
-                      />
-                      {v.status === PettyCashVoucherStatus.POSTED && (
-                        <InlineReasonForm
-                          action={reverse.bind(null, v.id)}
-                          submitLabel="Reverse"
-                          successMessage="Voucher reversed"
-                        />
-                      )}
-                      {v.status !== PettyCashVoucherStatus.REVERSED && (
-                        <VoucherRowActions
-                          initial={{
-                            amount: v.amount.toString(),
-                            category: v.category,
-                            paidTo: v.paidTo,
-                            reason: v.reason,
-                            paidAt: formatIST(v.paidAt, "yyyy-MM-dd'T'HH:mm"),
-                          }}
-                          onUpdate={editVoucher.bind(null, v.id)}
-                          onDelete={removeVoucher.bind(null, v.id)}
-                        />
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
+                <VoucherRow
+                  key={v.id}
+                  voucher={{
+                    id: v.id,
+                    voucherNo: v.voucherNo,
+                    dateLabel: formatIST(v.paidAt, "yyyy-MM-dd"),
+                    category: v.category,
+                    paidTo: v.paidTo,
+                    reason: v.reason,
+                    amountLabel: formatINR(v.amount),
+                    status: v.status,
+                    editable: v.status !== PettyCashVoucherStatus.REVERSED,
+                    edit: {
+                      amount: v.amount.toString(),
+                      category: v.category,
+                      paidTo: v.paidTo,
+                      reason: v.reason,
+                      paidAt: formatIST(v.paidAt, "yyyy-MM-dd'T'HH:mm"),
+                    },
+                  }}
+                  onUpdate={editVoucher.bind(null, v.id)}
+                  onDelete={removeVoucher.bind(null, v.id)}
+                />
               ))}
             </TableBody>
           </Table>

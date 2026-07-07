@@ -3,7 +3,14 @@ import { ProductionJobItemStatus } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { listProductionJobs } from "@/server/actions/production-jobs";
 import { getOrdersWaitingOnIngredients } from "@/server/actions/dashboard";
-import { formatIST } from "@/lib/time";
+import {
+  formatIST,
+  istDayWindow,
+  istScopeWindow,
+  istWeekWindow,
+  type EventDateScope,
+} from "@/lib/time";
+import { EventScopePills } from "@/components/ik/EventScopePills";
 import { toDecimal } from "@/lib/money";
 import { KitchenBoard } from "./_components/KitchenBoard";
 
@@ -19,12 +26,21 @@ export const dynamic = "force-dynamic";
 export default async function KitchenPage({
   searchParams,
 }: {
-  searchParams: Promise<{ window?: "today" | "tomorrow" | "thisweek" }>;
+  searchParams: Promise<{ scope?: string; date?: string }>;
 }) {
   const sp = await searchParams;
-  const win = sp.window ?? "today";
-  const [jobs, waiting] = await Promise.all([
-    listProductionJobs({ window: win }),
+  // ?date=YYYY-MM-DD wins over ?scope=; anything unrecognised = today.
+  const scope: EventDateScope =
+    sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date)
+      ? "date"
+      : sp.scope === "tomorrow" || sp.scope === "week" || sp.scope === "all"
+        ? sp.scope
+        : "today";
+  const window = istScopeWindow(sp.scope, sp.date);
+  // Fetch the scoped board plus the unscoped list (drives the pill counts).
+  const [jobs, allJobs, waiting] = await Promise.all([
+    window ? listProductionJobs({ window }) : listProductionJobs(),
+    listProductionJobs(),
     getOrdersWaitingOnIngredients(8),
   ]);
   const boardEmpty = jobs.length === 0;
@@ -39,17 +55,19 @@ export default async function KitchenPage({
     ? jobs.reduce((min, j) => (j.scheduledReady < min ? j.scheduledReady : min), jobs[0].scheduledReady)
     : null;
 
-  // Window-tab counts so the chef knows where the load is without
-  // clicking through.
-  const [todayJobs, tomorrowJobs, weekJobs] = await Promise.all([
-    listProductionJobs({ window: "today" }),
-    listProductionJobs({ window: "tomorrow" }),
-    listProductionJobs({ window: "thisweek" }),
-  ]);
-  const tabCounts: Record<"today" | "tomorrow" | "thisweek", number> = {
-    today: todayJobs.length,
-    tomorrow: tomorrowJobs.length,
-    thisweek: weekJobs.length,
+  // Pill counts so the chef knows where the load is without clicking
+  // through — computed from the unscoped list with the same IST windows
+  // the DB filter uses.
+  const inWindow = (d: Date, w: { from: Date; toExclusive: Date }) =>
+    d.getTime() >= w.from.getTime() && d.getTime() < w.toExclusive.getTime();
+  const todayW = istDayWindow();
+  const tomorrowW = istDayWindow(new Date(), 1);
+  const weekW = istWeekWindow();
+  const pillCounts = {
+    today: allJobs.filter((j) => inWindow(j.order.eventDate, todayW)).length,
+    tomorrow: allJobs.filter((j) => inWindow(j.order.eventDate, tomorrowW)).length,
+    week: allJobs.filter((j) => inWindow(j.order.eventDate, weekW)).length,
+    all: allJobs.length,
   };
 
   return (
@@ -83,30 +101,9 @@ export default async function KitchenPage({
         </div>
       )}
 
-      {/* Window tabs */}
-      <div className="mb-4 flex gap-2">
-        {(["today", "tomorrow", "thisweek"] as const).map((w) => (
-          <Link
-            key={w}
-            href={`/kitchen?window=${w}`}
-            className={
-              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] " +
-              (win === w
-                ? "bg-brand-500 text-white"
-                : "bg-ik-paper-alt text-ik-ink-2 hover:bg-brand-50 hover:text-brand-700")
-            }
-          >
-            {w === "thisweek" ? "This week" : w[0].toUpperCase() + w.slice(1)}
-            <span
-              className={
-                "rounded-full px-1.5 text-[10.5px] " +
-                (win === w ? "bg-white/20 text-white" : "bg-ik-rule text-ik-ink-3")
-              }
-            >
-              {tabCounts[w]}
-            </span>
-          </Link>
-        ))}
+      {/* Event-date scope pills (IST day boundaries) */}
+      <div className="mb-4">
+        <EventScopePills basePath="/kitchen" scope={scope} date={sp.date} counts={pillCounts} />
       </div>
 
       {boardEmpty && waiting.length > 0 && (

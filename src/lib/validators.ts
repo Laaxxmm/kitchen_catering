@@ -341,6 +341,34 @@ export const OrderUpdateInput = orderCreateBase.partial().extend({
   items: z.array(OrderItemInput).optional(),
 });
 
+/**
+ * Mid-flight revision of a confirmed order (client changed pax). Only the
+ * quantities move: headcount, per-existing-line portions (0 removes the
+ * line), and — for package-priced channels — the renegotiated package
+ * total. A note is mandatory so the kitchen knows why quantities changed.
+ * Dishes/prices are NOT editable here (that's the chef's swap flow).
+ */
+export const OrderReviseInput = z.object({
+  headcount: z.coerce.number().int().min(1, "Headcount must be at least 1"),
+  items: z
+    .array(
+      z.object({
+        // Existing OrderItem id — the action verifies it belongs to the order.
+        id: z.string().min(1),
+        portions: z.coerce
+          .number()
+          .int("Portions must be a whole number")
+          .min(0, "Portions can't be negative"),
+      }),
+    )
+    .min(1, "At least one line is required"),
+  // Honoured only for package-priced channels (banquet / buffet / ODC /
+  // packet) — ignored otherwise, same as OrderCreateInput.
+  packageTotal: decimalString.nullable().optional(),
+  revisionNote: z.string().trim().min(1, "A revision note is required").max(2000),
+});
+export type OrderReviseInputT = z.infer<typeof OrderReviseInput>;
+
 export const OrderStoreApprovalInput = z.object({
   decision: z.enum(["APPROVED", "REJECTED"]),
   note: z.string().min(1, "Store approval note is required").max(2000),
