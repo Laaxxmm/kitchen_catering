@@ -42,7 +42,7 @@ import { nextOrderCode } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
 import { indefineStateCode } from "@/lib/org";
-import { isImmediateChannel, channelWantsFeedback, isEventDeliveryChannel } from "@/lib/order-channels";
+import { isImmediateChannel, channelWantsFeedback, isEventDeliveryChannel, isPackagePricedChannel } from "@/lib/order-channels";
 import { getOrCreateHouseCustomerId } from "@/lib/house-customer";
 import { createNotification, notifyRoles } from "@/server/actions/notifications";
 import { deferAfterResponse } from "@/server/defer";
@@ -244,8 +244,7 @@ async function createOrderInner(raw: unknown): Promise<{ ok: true; id: string; c
     // For ODC / PACKET bulk orders the operator sets one lump-sum
     // package price; otherwise the contract value is the sum of the
     // per-dish line totals.
-    const isPackageChannel =
-      input.channel === "ODC" || input.channel === "PACKET";
+    const isPackageChannel = isPackagePricedChannel(input.channel);
     const lineSum = itemsData
       .reduce((s, it) => s.plus(new Decimal(it.lineTotal)), new Decimal(0))
       .toDecimalPlaces(2);
@@ -357,7 +356,7 @@ async function updateOrderDraftInner(id: string, raw: unknown): Promise<{ ok: tr
 
     // Effective channel = the one being set, else the order's current.
     const effChannel = input.channel ?? order.channel;
-    const isPackageChannel = effChannel === "ODC" || effChannel === "PACKET";
+    const isPackageChannel = isPackagePricedChannel(effChannel);
 
     if (input.items) {
       // Full replace
@@ -1265,7 +1264,7 @@ async function swapOrderItemDishInner(
 
     // Reprice the order (line-sum) except for ODC / PACKET, which carry a
     // fixed lump-sum package price.
-    if (order.channel !== "ODC" && order.channel !== "PACKET") {
+    if (!isPackagePricedChannel(order.channel)) {
       const items = await tx.orderItem.findMany({ where: { orderId }, select: { lineTotal: true } });
       const total = items
         .reduce((s, it) => s.plus(toDecimal(it.lineTotal)), new Decimal(0))

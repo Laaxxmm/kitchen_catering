@@ -595,7 +595,7 @@ export async function listBanquetEvents() {
   await requireRole(READ_ROLES);
   const rows = await db.order.findMany({
     where: {
-      channel: { in: [OrderChannel.BANQUET, OrderChannel.ODC, OrderChannel.PACKET] },
+      channel: { in: [OrderChannel.BANQUET, OrderChannel.BUFFET, OrderChannel.ODC, OrderChannel.PACKET] },
       status: { notIn: INACTIVE_ORDER_STATUSES },
     },
     select: { id: true, code: true, channel: true, eventDate: true, customer: { select: { name: true } } },

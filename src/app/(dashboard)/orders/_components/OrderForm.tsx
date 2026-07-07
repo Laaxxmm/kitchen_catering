@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Combobox, type ComboOption } from "@/components/ui/combobox";
 import type { OrderCreateInputT, OrderItemInputT } from "@/lib/validators";
 import type { ActionResultWith } from "@/lib/action-result";
-import { isImmediateChannel } from "@/lib/order-channels";
+import { isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
 import { isNextNavigationError } from "@/lib/next-error";
 import { QuickAddCustomer, type QuickCustomerInput } from "@/components/ik/QuickAddCustomer";
 import { QuickAddDish, type QuickDishInput } from "@/components/ik/QuickAddDish";
@@ -109,7 +109,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
   // Package channels (ODC / packet / take-away) are priced as one lump sum,
   // so the per-dish rate columns (unit price, discount, GST, line total) are
   // hidden — the dishes are just sub-heads and the "Package total" is the value.
-  const isPackage = channel === OrderChannel.ODC || channel === OrderChannel.PACKET;
+  const isPackage = isPackagePricedChannel(channel);
   const [lines, setLines] = useState<DraftLine[]>(() => {
     if (defaults?.items && defaults.items.length > 0) {
       return defaults.items.map((it) => ({
@@ -354,6 +354,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
               className="h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
             >
               {!inHouseOnly && <option value={OrderChannel.BANQUET}>Banquet (corporate catering)</option>}
+              {!inHouseOnly && <option value={OrderChannel.BUFFET}>Buffet (breakfast / lunch / dinner)</option>}
               {!inHouseOnly && <option value={OrderChannel.ODC}>ODC (outdoor catering)</option>}
               {!inHouseOnly && <option value={OrderChannel.PACKET}>Packet food / take-away</option>}
               <option value={OrderChannel.ROOM_SERVICE}>Room service</option>

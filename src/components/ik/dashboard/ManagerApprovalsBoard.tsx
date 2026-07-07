@@ -49,6 +49,7 @@ interface Props {
 
 const CHANNEL_LABEL: Record<OrderChannel, string> = {
   BANQUET: "Banquet",
+  BUFFET: "Buffet",
   ODC: "ODC",
   PACKET: "Packed",
   ROOM_SERVICE: "Room service",

@@ -19,7 +19,7 @@ import {
 import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoices";
 import { listDishes } from "@/server/actions/dishes";
 import { listAssignableUsers } from "@/server/actions/users";
-import { isImmediateChannel } from "@/lib/order-channels";
+import { isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
@@ -283,17 +283,16 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               {chefOnlyView ? "Items to prepare" : "Items"}
             </h3>
             {(() => {
-              // Workflow doc: ODC + Packet show items as sub-heads with no
-              // rate/qty column — only the package total applies. Chef
-              // view is already qty-only; the financial channels keep
-              // full columns.
-              const packageMode =
-                order.channel === "ODC" || order.channel === "PACKET";
+              // Package-priced channels (banquet / buffet / ODC / packet)
+              // show items as sub-heads with no rate column — only the
+              // package total applies. Chef view is already qty-only; the
+              // per-dish channels keep full columns.
+              const packageMode = isPackagePricedChannel(order.channel);
               if (packageMode) {
                 return (
                   <div className="rounded-md border border-ik-rule bg-ik-card p-4">
                     <p className="mb-3 text-[12px] text-ik-ink-3">
-                      {order.channel === "ODC" ? "Outdoor catering" : "Packet food"}{" "}
+                      {{ BANQUET: "Banquet", BUFFET: "Buffet", ODC: "Outdoor catering", PACKET: "Packet food" }[order.channel as string] ?? order.channel}{" "}
                       package — items included, no per-item pricing:
                     </p>
                     <ul className="grid list-disc gap-1 pl-5 text-[13px]">

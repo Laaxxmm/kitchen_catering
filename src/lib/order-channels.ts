@@ -44,10 +44,27 @@ export function channelWantsFeedback(channel: OrderChannel): boolean {
  */
 const EVENT_DELIVERY_CHANNELS: ReadonlySet<OrderChannel> = new Set([
   OrderChannel.BANQUET,
+  OrderChannel.BUFFET,
   OrderChannel.ODC,
   OrderChannel.PACKET,
 ]);
 
 export function isEventDeliveryChannel(channel: OrderChannel): boolean {
   return EVENT_DELIVERY_CHANNELS.has(channel);
+}
+
+/**
+ * Channels priced as ONE lump-sum package (the dishes are sub-heads, not
+ * per-plate line items): banquet, buffet, outdoor catering and packed
+ * batches. In-house channels stay per-dish priced.
+ */
+const PACKAGE_PRICED_CHANNELS: ReadonlySet<OrderChannel> = new Set([
+  OrderChannel.BANQUET,
+  OrderChannel.BUFFET,
+  OrderChannel.ODC,
+  OrderChannel.PACKET,
+]);
+
+export function isPackagePricedChannel(channel: OrderChannel): boolean {
+  return PACKAGE_PRICED_CHANNELS.has(channel);
 }

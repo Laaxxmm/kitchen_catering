@@ -161,7 +161,7 @@ export async function listEventPrepQueue() {
   await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
   const rows = await db.order.findMany({
     where: {
-      channel: { in: [OrderChannel.BANQUET, OrderChannel.ODC, OrderChannel.PACKET] },
+      channel: { in: [OrderChannel.BANQUET, OrderChannel.BUFFET, OrderChannel.ODC, OrderChannel.PACKET] },
       status: { in: EVENT_PREP_STATUSES },
     },
     select: {

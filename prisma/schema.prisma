@@ -83,6 +83,7 @@ enum MealType {
 //   MANAGEMENT    — internal staff meals, no invoicing required.
 enum OrderChannel {
   BANQUET
+  BUFFET
   ODC
   PACKET
   ROOM_SERVICE
