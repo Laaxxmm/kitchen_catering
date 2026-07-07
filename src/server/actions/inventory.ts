@@ -492,7 +492,10 @@ export async function listRecentReceipts(opts: { limit?: number } = {}) {
 
 // Stock-adjustment audit list — admin/manager only.
 export async function listRecentAdjustments(opts: { limit?: number } = {}) {
-  await requireRole(ADJUST_ROLES);
+  // Reading the adjustments log is open to the store keeper too — they
+  // can hold the write permission via the stock.storeDirectEdit toggle,
+  // and the list is their receipt of what they changed.
+  await requireRole([...ADJUST_ROLES, Role.STORE_KEEPER]);
   return db.ingredientAdjustment.findMany({
     orderBy: { adjustedAt: "desc" },
     take: opts.limit ?? 100,

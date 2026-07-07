@@ -22,7 +22,7 @@ export default async function AdjustmentsPage() {
       <PageHeader
         eyebrow="Inventory"
         title="Stock adjustments"
-        description="Manual on-hand corrections — write-offs, opening fixes, spoilage. Admin/Manager only. Every change is logged with who made it."
+        description="Manual on-hand corrections — write-offs, opening fixes, spoilage. Every change is logged with who made it. (Store keeper edits need the admin toggle in Settings.)"
         actions={
           <Link href="/inventory/adjustments/new">
             <Button>Adjust stock</Button>
