@@ -15,6 +15,8 @@ import {
 import { recordVendorBillPayment, reverseVendorBillPayment } from "@/server/actions/payments";
 import { BillPaymentForm } from "./_components/BillPaymentForm";
 import { MarkPaidModal } from "@/components/ik/finance/MarkPaidModal";
+import { ActionResultButton } from "@/components/ik/ActionResultButton";
+import { InlineReasonForm } from "@/components/ik/InlineReasonForm";
 import { DocumentUploader } from "@/components/ik/DocumentUploader";
 import { DocumentList } from "@/components/ik/DocumentList";
 import { DocumentEntityType } from "@prisma/client";
@@ -34,11 +36,11 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
 
   async function doMatch() {
     "use server";
-    await matchVendorBill(id);
+    return await matchVendorBill(id);
   }
   async function doApprove() {
     "use server";
-    await approveVendorBill(id);
+    return await approveVendorBill(id);
   }
   async function doPay(input: { amount: string; method: PaymentMethod; reference: string | null; notes: string | null; paidAt: string }) {
     "use server";
@@ -53,11 +55,9 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
     "use server";
     return markVendorBillPaid({ id, ...input });
   }
-  async function doReverse(paymentId: string, formData: FormData) {
+  async function doReverse(paymentId: string, reason: string) {
     "use server";
-    const reason = String(formData.get("reason") ?? "").trim();
-    if (!reason) return;
-    await reverseVendorBillPayment({ paymentId, reason });
+    return await reverseVendorBillPayment({ paymentId, reason });
   }
 
   let discrepancies: Array<{ line: string; field: string; poValue?: string; billValue: string; delta?: string }> = [];
@@ -79,8 +79,8 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
         actions={
           <div className="flex gap-2">
             <Link href="/procurement/vendor-bills"><Button variant="outline">Back</Button></Link>
-            {canMatch && <form action={doMatch}><Button type="submit">Run 3-way match</Button></form>}
-            {canApprove && <form action={doApprove}><Button type="submit">Approve</Button></form>}
+            {canMatch && <ActionResultButton action={doMatch} successMessage="3-way match complete">Run 3-way match</ActionResultButton>}
+            {canApprove && <ActionResultButton action={doApprove} successMessage="Bill approved">Approve</ActionResultButton>}
             {canPay && (
               <MarkPaidModal
                 outstanding={(Number(bill.grandTotal) - Number(bill.amountPaid)).toFixed(2)}
@@ -165,10 +165,11 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
                   <TableCell className="font-mono text-[12px]">{p.reference ?? "—"}</TableCell>
                   <TableCell>
                     {canPay && (
-                      <form action={doReverse.bind(null, p.id)} className="inline">
-                        <input name="reason" placeholder="Reason" className="h-6 w-24 rounded border border-ik-rule bg-ik-card px-1 text-[11px]" />
-                        <Button type="submit" size="sm" variant="outline" className="ml-1">Reverse</Button>
-                      </form>
+                      <InlineReasonForm
+                        action={doReverse.bind(null, p.id)}
+                        submitLabel="Reverse"
+                        successMessage="Payment reversed"
+                      />
                     )}
                   </TableCell>
                 </TableRow>

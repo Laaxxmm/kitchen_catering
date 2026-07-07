@@ -16,6 +16,8 @@ import {
 import { recordCustomerInvoicePayment } from "@/server/actions/payments";
 import { RecordPaymentForm } from "./_components/RecordPaymentForm";
 import { MarkPaidModal } from "@/components/ik/finance/MarkPaidModal";
+import { ActionResultButton } from "@/components/ik/ActionResultButton";
+import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 
@@ -35,12 +37,11 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
   async function doIssue() {
     "use server";
-    await issueCustomerInvoice(id);
+    return await issueCustomerInvoice(id);
   }
   async function doEmailToCustomer() {
     "use server";
-    const res = await emailTaxInvoice(id, { force: true });
-    if (!res.ok) throw new Error(res.error);
+    return await emailTaxInvoice(id, { force: true });
   }
   async function doMarkPaid(input: {
     method: PaymentMethod;
@@ -57,11 +58,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       notes: input.notes,
     });
   }
-  async function doCancel(formData: FormData) {
+  async function doCancel(reason: string) {
     "use server";
-    const reason = String(formData.get("reason") ?? "").trim();
-    if (!reason) return;
-    await cancelCustomerInvoice(id, reason);
+    return await cancelCustomerInvoice(id, reason);
   }
   async function doRecordPayment(input: { amount: string; method: PaymentMethod; reference: string | null; notes: string | null; paidAt: string }) {
     "use server";
@@ -85,9 +84,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
             <Link href={`/api/invoices/${invoice.id}/pdf`} target="_blank"><Button variant="outline">Download PDF</Button></Link>
             <Link href={`/i/${invoice.shareToken}`} target="_blank"><Button variant="outline">Public view</Button></Link>
             {invoice.status !== CustomerInvoiceStatus.DRAFT && invoice.status !== CustomerInvoiceStatus.CANCELLED && canMarkPaid && (
-              <form action={doEmailToCustomer}>
-                <Button type="submit">{invoice.emailedAt ? "Resend by email" : "Send to customer"}</Button>
-              </form>
+              <ActionResultButton action={doEmailToCustomer} successMessage="Invoice emailed to customer">
+                {invoice.emailedAt ? "Resend by email" : "Send to customer"}
+              </ActionResultButton>
             )}
             {invoice.status !== CustomerInvoiceStatus.PAID
               && invoice.status !== CustomerInvoiceStatus.CANCELLED
@@ -104,7 +103,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
             {invoice.status === CustomerInvoiceStatus.DRAFT && canIssue && (
               <>
                 <Link href={`/invoices/${invoice.id}/edit`}><Button variant="outline">Edit lines</Button></Link>
-                <form action={doIssue}><Button type="submit">Issue invoice</Button></form>
+                <ActionResultButton action={doIssue} successMessage="Invoice issued">Issue invoice</ActionResultButton>
               </>
             )}
           </div>
@@ -221,11 +220,12 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           </div>
 
           {invoice.status === CustomerInvoiceStatus.DRAFT && canPay && (
-            <form action={doCancel} className="rounded-md border border-alert-wash bg-alert-wash p-4">
-              <h3 className="mb-2 font-medium text-alert">Cancel draft</h3>
-              <textarea name="reason" rows={2} placeholder="Reason" className="mb-2 w-full rounded border border-ik-rule bg-ik-card px-2 py-1 text-[12.5px]" />
-              <Button type="submit" variant="outline" size="sm">Cancel invoice</Button>
-            </form>
+            <ActionReasonForm
+              action={doCancel}
+              heading="Cancel draft"
+              submitLabel="Cancel invoice"
+              successMessage="Invoice cancelled"
+            />
           )}
         </aside>
       </div>

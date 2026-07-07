@@ -4,6 +4,7 @@ import { useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { isNextNavigationError } from "@/lib/next-error";
 import type { ActionResult } from "@/lib/action-result";
 
 /**
@@ -13,17 +14,20 @@ import type { ActionResult } from "@/lib/action-result";
  * result — the click silently does nothing when the action refuses (e.g.
  * "Event date must be in the future"). This wrapper surfaces the error as a
  * toast and refreshes the route on success. Pass a bound "use server" shim
- * that RETURNS the action's result.
+ * that RETURNS the action's result. The shim may also `redirect()` on
+ * success — navigation signals are rethrown for Next to handle.
  */
 export function ActionResultButton({
   action,
   children,
   variant,
+  size,
   successMessage,
 }: {
   action: () => Promise<ActionResult>;
   children: ReactNode;
   variant?: "default" | "outline" | "ghost";
+  size?: "default" | "sm" | "lg";
   successMessage?: string;
 }) {
   const router = useRouter();
@@ -32,6 +36,7 @@ export function ActionResultButton({
     <Button
       type="button"
       variant={variant}
+      size={size}
       disabled={pending}
       onClick={() =>
         startTransition(async () => {
@@ -44,6 +49,7 @@ export function ActionResultButton({
             if (successMessage) toast.success(successMessage);
             router.refresh();
           } catch (err) {
+            if (isNextNavigationError(err)) throw err;
             toast.error(err instanceof Error ? err.message : "Something went wrong");
           }
         })

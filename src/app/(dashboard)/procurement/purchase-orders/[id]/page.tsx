@@ -16,6 +16,8 @@ import {
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { NotifyVendorBlock } from "./_components/NotifyVendorBlock";
+import { ActionResultButton } from "@/components/ik/ActionResultButton";
+import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 
 export const dynamic = "force-dynamic";
 
@@ -37,16 +39,14 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
   // Supplier bills are finance-only — store keepers never record them.
   const canRecordBill = role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS;
 
-  async function doSubmit() { "use server"; await submitVendorPO(id); }
-  async function doApprove() { "use server"; await approveVendorPO(id); }
-  async function doSend() { "use server"; await sendVendorPO(id); }
-  // Same action, but returning the result — NotifyVendorBlock checks
-  // `res.ok` and toasts the failure (a <form action> must return void).
-  async function doMarkSent() { "use server"; return sendVendorPO(id); }
-  async function doCancel(formData: FormData) {
+  async function doSubmit() { "use server"; return await submitVendorPO(id); }
+  async function doApprove() { "use server"; return await approveVendorPO(id); }
+  // Returns the result — ActionResultButton / NotifyVendorBlock check
+  // `res.ok` and toast the failure.
+  async function doMarkSent() { "use server"; return await sendVendorPO(id); }
+  async function doCancel(reason: string) {
     "use server";
-    const reason = String(formData.get("reason") ?? "").trim();
-    if (reason) await cancelVendorPO(id, reason);
+    return await cancelVendorPO(id, reason);
   }
 
   return (
@@ -58,9 +58,9 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
         actions={
           <div className="flex gap-2">
             <Link href="/procurement/purchase-orders"><Button variant="outline">Back</Button></Link>
-            {canSubmit && <form action={doSubmit}><Button type="submit">Submit</Button></form>}
-            {canApprove && <form action={doApprove}><Button type="submit">Approve</Button></form>}
-            {canSend && <form action={doSend}><Button type="submit" variant="outline">Mark sent</Button></form>}
+            {canSubmit && <ActionResultButton action={doSubmit} successMessage="PO submitted for approval">Submit</ActionResultButton>}
+            {canApprove && <ActionResultButton action={doApprove} successMessage="PO approved">Approve</ActionResultButton>}
+            {canSend && <ActionResultButton action={doMarkSent} variant="outline" successMessage="PO marked sent">Mark sent</ActionResultButton>}
             {canReceive && <Link href={`/procurement/grns/new?poId=${po.id}`}><Button>Receive (GRN)</Button></Link>}
           </div>
         }
@@ -69,7 +69,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
         <StatusBadge status={po.status} />
         {po.procurementType !== "STANDARD" && (
           <span className="rounded-full bg-amber-wash px-2 py-0.5 text-[11px] font-medium text-amber-700">
-            {po.procurementType === "LOCAL" ? "Local purchase" : "Online order"} · needs Manager + Admin
+            {po.procurementType === "LOCAL" ? "Local purchase" : "Online order"}
           </span>
         )}
         {po.status === VendorPOStatus.PENDING_APPROVAL && managerStepDone && (
@@ -183,11 +183,12 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
             <div className="text-ik-ink-3">State {po.vendor.stateCode}</div>
           </div>
           {(role === Role.ADMIN || role === Role.MANAGER) && po.status !== VendorPOStatus.CANCELLED && (
-            <form action={doCancel} className="rounded-md border border-alert-wash bg-alert-wash p-4">
-              <h3 className="mb-2 font-medium text-alert">Cancel PO</h3>
-              <textarea name="reason" rows={2} placeholder="Reason" className="mb-2 w-full rounded border border-ik-rule bg-ik-card px-2 py-1 text-[12.5px]" />
-              <Button type="submit" variant="outline" size="sm">Cancel</Button>
-            </form>
+            <ActionReasonForm
+              action={doCancel}
+              heading="Cancel PO"
+              submitLabel="Cancel"
+              successMessage="PO cancelled"
+            />
           )}
         </aside>
       </div>

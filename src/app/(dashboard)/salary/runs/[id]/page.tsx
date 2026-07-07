@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { auth } from "@/server/auth";
 import { approveSalaryRun, getSalaryRun, postSalaryRun } from "@/server/actions/salary";
+import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 
@@ -20,8 +21,8 @@ export default async function SalaryRunDetailPage({ params }: { params: Promise<
   const canApprove = run.status === SalaryRunStatus.DRAFT && (role === Role.ADMIN || role === Role.MANAGER);
   const canPost = run.status === SalaryRunStatus.APPROVED && (role === Role.ADMIN || role === Role.MANAGER);
 
-  async function doApprove() { "use server"; await approveSalaryRun(id); }
-  async function doPost() { "use server"; await postSalaryRun(id); }
+  async function doApprove() { "use server"; return await approveSalaryRun(id); }
+  async function doPost() { "use server"; return await postSalaryRun(id); }
 
   return (
     <>
@@ -32,8 +33,8 @@ export default async function SalaryRunDetailPage({ params }: { params: Promise<
         actions={
           <div className="flex gap-2">
             <Link href="/salary/runs"><Button variant="outline">Back</Button></Link>
-            {canApprove && <form action={doApprove}><Button type="submit">Approve</Button></form>}
-            {canPost && <form action={doPost}><Button type="submit">Post</Button></form>}
+            {canApprove && <ActionResultButton action={doApprove} successMessage="Salary run approved">Approve</ActionResultButton>}
+            {canPost && <ActionResultButton action={doPost} successMessage="Salary run posted">Post</ActionResultButton>}
           </div>
         }
       />

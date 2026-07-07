@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { auth } from "@/server/auth";
 import { deactivateDish, getDish, updateDish } from "@/server/actions/dishes";
 import { DishForm } from "../_components/DishForm";
+import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { getSettingBool } from "@/lib/settings";
 import type { DishInputT } from "@/lib/validators";
 
@@ -33,7 +34,7 @@ export default async function DishDetailPage({ params }: { params: Promise<{ id:
   }
   async function deactivate() {
     "use server";
-    await deactivateDish(id);
+    return await deactivateDish(id);
   }
 
   return (
@@ -46,9 +47,9 @@ export default async function DishDetailPage({ params }: { params: Promise<{ id:
           <div className="flex gap-2">
             <Link href="/dishes"><Button variant="outline">Back</Button></Link>
             {!isChef && dish.active && (
-              <form action={deactivate}>
-                <Button variant="outline" type="submit">Deactivate</Button>
-              </form>
+              <ActionResultButton action={deactivate} variant="outline" successMessage="Dish deactivated">
+                Deactivate
+              </ActionResultButton>
             )}
           </div>
         }

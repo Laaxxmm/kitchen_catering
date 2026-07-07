@@ -1,10 +1,8 @@
 import Link from "next/link";
 import { EmploymentType, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { SalaryStructureForm } from "./_components/SalaryStructureForm";
 import { gateRolePage } from "@/server/rbac";
 import { listUsers } from "@/server/actions/users";
 import { listSalaryStructures, upsertSalaryStructure } from "@/server/actions/salary";
@@ -21,15 +19,15 @@ export default async function SalaryStructuresPage() {
     listUsers({ active: true }),
   ]);
 
-  async function save(formData: FormData) {
+  async function save(input: {
+    employeeId: string;
+    type: EmploymentType;
+    hourlyRate: string | null;
+    monthlySalary: string | null;
+    effectiveFrom: string;
+  }) {
     "use server";
-    const employeeId = String(formData.get("employeeId") ?? "");
-    const type = String(formData.get("type") ?? "") as "HOURLY" | "SALARIED";
-    const hourlyRate = formData.get("hourlyRate") ? String(formData.get("hourlyRate")) : null;
-    const monthlySalary = formData.get("monthlySalary") ? String(formData.get("monthlySalary")) : null;
-    const effectiveFrom = String(formData.get("effectiveFrom") ?? new Date().toISOString().slice(0, 10));
-    if (!employeeId || !type) return;
-    await upsertSalaryStructure({ employeeId, type, hourlyRate, monthlySalary, effectiveFrom });
+    return await upsertSalaryStructure(input);
   }
 
   return (
@@ -44,38 +42,10 @@ export default async function SalaryStructuresPage() {
         <Link href="/salary/structures" className="rounded-full bg-brand-500 px-3 py-1 text-white">Structures</Link>
       </div>
 
-      <form action={save} className="mb-6 grid max-w-3xl gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
-        <h3 className="font-medium text-[14px] text-ik-ink">Set structure</h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="grid gap-1">
-            <Label htmlFor="employeeId">Employee</Label>
-            <select id="employeeId" name="employeeId" className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
-              {users.map((u) => <option key={u.id} value={u.id}>{u.name} ({roleLabel(u.role)})</option>)}
-            </select>
-          </div>
-          <div className="grid gap-1">
-            <Label htmlFor="type">Type</Label>
-            <select id="type" name="type" className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
-              {Object.values(EmploymentType).map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="grid gap-1">
-            <Label htmlFor="hourlyRate">Hourly rate (₹/hr)</Label>
-            <Input id="hourlyRate" name="hourlyRate" type="number" step="0.01" min="0" />
-          </div>
-          <div className="grid gap-1">
-            <Label htmlFor="monthlySalary">Monthly salary (₹)</Label>
-            <Input id="monthlySalary" name="monthlySalary" type="number" step="0.01" min="0" />
-          </div>
-          <div className="grid gap-1">
-            <Label htmlFor="effectiveFrom">Effective from</Label>
-            <Input id="effectiveFrom" name="effectiveFrom" type="date" />
-          </div>
-        </div>
-        <div><Button type="submit" size="sm">Set structure</Button></div>
-      </form>
+      <SalaryStructureForm
+        employees={users.map((u) => ({ id: u.id, label: `${u.name} (${roleLabel(u.role)})` }))}
+        onSubmit={save}
+      />
 
       <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Active structures</h3>
       {structures.length === 0 ? (

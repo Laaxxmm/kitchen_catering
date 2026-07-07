@@ -81,11 +81,14 @@ function needsAdminApproval(total: Decimal, tiers: PoApprovalTiers): boolean {
 }
 
 /**
- * Local / online store procurement always needs BOTH manager and admin
- * sign-off, whatever the value. Standard POs fall back to the value tier.
+ * All procurement types follow the same value tier: under adminMin the
+ * manager's sign-off completes the PO; at-or-above it the admin must also
+ * sign. (Local/online purchases used to force double sign-off regardless
+ * of value — dropped July 2026 per product decision: a ₹2,100 local veg
+ * run shouldn't wait on the admin.)
  */
-function typeForcesAdmin(type: ProcurementType): boolean {
-  return type === ProcurementType.LOCAL || type === ProcurementType.ONLINE;
+function typeForcesAdmin(): boolean {
+  return false;
 }
 
 // =====================================================================
@@ -245,7 +248,7 @@ async function submitVendorPOInner(id: string): Promise<{ ok: true }> {
   if (result.status === VendorPOStatus.PENDING_APPROVAL) {
     deferAfterResponse("po-submit:notify", async () => {
       const tiers = await loadApprovalTiers();
-      const forcedByType = typeForcesAdmin(result.procurementType);
+      const forcedByType = typeForcesAdmin();
       const adminRequired = needsAdminApproval(toDecimal(result.grandTotal), tiers) || forcedByType;
       const reason = forcedByType
         ? `${result.procurementType === ProcurementType.LOCAL ? "Local" : "Online"} procurement — Manager + Admin sign-off required.`
@@ -314,7 +317,7 @@ async function approveVendorPOInner(id: string): Promise<{ ok: true }> {
     const tiers = await loadApprovalTiers();
     // Local / online procurement always needs admin on top of manager.
     const adminRequired =
-      needsAdminApproval(toDecimal(po.grandTotal), tiers) || typeForcesAdmin(po.procurementType);
+      needsAdminApproval(toDecimal(po.grandTotal), tiers) || typeForcesAdmin();
     const now = new Date();
     const role = session.user.role;
 

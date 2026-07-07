@@ -6,8 +6,7 @@ import type { VendorInputT } from "@/lib/validators";
 export default function NewVendorPage() {
   async function submit(input: VendorInputT) {
     "use server";
-    const r = await createVendor(input);
-    return { id: r.id };
+    return await createVendor(input);
   }
   return (
     <>

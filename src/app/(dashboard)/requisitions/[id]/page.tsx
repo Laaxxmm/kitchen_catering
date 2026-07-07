@@ -14,6 +14,7 @@ import {
 } from "@/server/actions/chef-requisitions";
 import { formatIST } from "@/lib/time";
 import { LineFulfilControls } from "./_components/LineFulfilControls";
+import { ActionResultButton } from "@/components/ik/ActionResultButton";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
 
   async function doSubmit() {
     "use server";
-    await submitChefRequisition(id);
+    return await submitChefRequisition(id);
   }
   async function doIssue(lineId: string, qty: string) {
     "use server";
@@ -65,9 +66,9 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
               ? <Link href={`/orders/${requisition.order.id}`}><Button variant="outline">Back to order</Button></Link>
               : <Link href="/requisitions"><Button variant="outline">Back to requisitions</Button></Link>}
             {canSubmit && (
-              <form action={doSubmit}>
-                <Button type="submit">Submit to store</Button>
-              </form>
+              <ActionResultButton action={doSubmit} successMessage="Requisition submitted to store">
+                Submit to store
+              </ActionResultButton>
             )}
             {isStore && hasAwaiting && (
               <Link href={`/procurement/purchase-orders/new?reqId=${requisition.id}`}>

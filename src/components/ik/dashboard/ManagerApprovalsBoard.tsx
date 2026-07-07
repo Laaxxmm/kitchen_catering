@@ -36,12 +36,15 @@ export interface PurchaseOrder {
   poNo: string;
   vendor: string;
   grandTotal: string;
+  /** Manager step already recorded — only the admin's signature is left. */
+  awaitingAdmin: boolean;
 }
 
 interface Props {
   ordersToApprove: OrderToApprove[];
   orderChanges: OrderChange[];
   purchaseOrders: PurchaseOrder[];
+  viewerIsAdmin?: boolean;
 }
 
 const CHANNEL_LABEL: Record<OrderChannel, string> = {
@@ -60,7 +63,7 @@ const CHANNEL_LABEL: Record<OrderChannel, string> = {
  * queue stays compact instead of pushing the page down. Nothing here gets
  * missed: the order gate sits first since the kitchen waits on it.
  */
-export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseOrders }: Props) {
+export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseOrders, viewerIsAdmin = false }: Props) {
   const total = ordersToApprove.length + orderChanges.length + purchaseOrders.length;
   if (total === 0) return null;
 
@@ -91,7 +94,7 @@ export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseO
           }
           return (
             <ScrollRow>
-              {purchaseOrders.map((p) => <PurchaseOrderCard key={p.id} po={p} />)}
+              {purchaseOrders.map((p) => <PurchaseOrderCard key={p.id} po={p} viewerIsAdmin={viewerIsAdmin} />)}
             </ScrollRow>
           );
         }}
@@ -228,8 +231,11 @@ function OrderChangeCard({ change }: { change: OrderChange }) {
   );
 }
 
-function PurchaseOrderCard({ po }: { po: PurchaseOrder }) {
+function PurchaseOrderCard({ po, viewerIsAdmin }: { po: PurchaseOrder; viewerIsAdmin: boolean }) {
   const { pending, run } = useApprove();
+  // Manager already signed; only the admin can act now — showing the
+  // manager an Approve button here would just earn them a refusal toast.
+  const viewerCanAct = !po.awaitingAdmin || viewerIsAdmin;
   return (
     <li className={CARD + " border border-brand-200 bg-brand-50"}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -238,8 +244,14 @@ function PurchaseOrderCard({ po }: { po: PurchaseOrder }) {
       </div>
       <div className="mt-1 text-[13px] text-ik-ink"><strong>{po.vendor}</strong></div>
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={pending}
-          onClick={() => run(() => approveVendorPO(po.id), "Approved")}>Approve</Button>
+        {viewerCanAct ? (
+          <Button size="sm" disabled={pending}
+            onClick={() => run(() => approveVendorPO(po.id), "Approved")}>Approve</Button>
+        ) : (
+          <span className="text-[11.5px] font-medium uppercase tracking-wide text-amber-700">
+            Manager approved · awaiting Admin
+          </span>
+        )}
         <Link href={`/procurement/purchase-orders/${po.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open</Link>
       </div>
     </li>

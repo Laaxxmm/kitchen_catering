@@ -23,6 +23,7 @@ import { isImmediateChannel } from "@/lib/order-channels";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
+import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 import type { ActionResult } from "@/lib/action-result";
 import { AdminApprovalBlock } from "./_components/AdminApprovalBlock";
 import { ChefApprovalBlock } from "./_components/ChefApprovalBlock";
@@ -99,16 +100,14 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     "use server";
     return await adminApproveOrder(id, { decision: "REJECTED", note });
   }
-  async function doCancel(formData: FormData) {
+  async function doCancel(reason: string) {
     "use server";
-    const reason = String(formData.get("reason") ?? "").trim();
-    if (!reason) return;
-    await cancelOrder(id, reason);
+    return await cancelOrder(id, reason);
   }
   async function doGenerateInvoice() {
     "use server";
     const result = await createCustomerInvoiceFromOrder(id);
-    if (!result.ok) throw new Error(result.error);
+    if (!result.ok) return result;
     redirect(`/invoices/${result.id}`);
   }
   async function doIngredientsAvailable() {
@@ -166,9 +165,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                 page. Payment-on-delivery (if any) is credited against
                 the invoice when it's created. */}
             {order.status === OrderStatus.DELIVERED && (role === Role.ACCOUNTS || isAdmin || isManager) && (
-              <form action={doGenerateInvoice}>
-                <Button type="submit">Generate tax invoice</Button>
-              </form>
+              <ActionResultButton action={doGenerateInvoice}>
+                Generate tax invoice
+              </ActionResultButton>
             )}
           </div>
         }
@@ -447,16 +446,12 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             order.status !== OrderStatus.CANCELLED &&
             order.status !== OrderStatus.PAID &&
             order.status !== OrderStatus.COMPLETED && (
-              <form action={doCancel} className="rounded-md border border-alert-wash bg-alert-wash p-4 text-[13px]">
-                <h3 className="mb-2 font-medium text-alert">Cancel order</h3>
-                <textarea
-                  name="reason"
-                  rows={2}
-                  placeholder="Reason"
-                  className="mb-2 w-full rounded border border-ik-rule bg-ik-card px-2 py-1 text-[12.5px]"
-                />
-                <Button type="submit" variant="outline" size="sm">Cancel order</Button>
-              </form>
+              <ActionReasonForm
+                action={doCancel}
+                heading="Cancel order"
+                submitLabel="Cancel order"
+                successMessage="Order cancelled"
+              />
             )}
         </aside>
       </div>

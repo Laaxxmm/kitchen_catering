@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { deactivateVendor, getVendor, updateVendor } from "@/server/actions/vendors";
+import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { listVendorPOs } from "@/server/actions/procurement";
 import { VendorForm } from "../_components/VendorForm";
 import { VendorHistoryPanel } from "./_components/VendorHistoryPanel";
@@ -19,12 +20,13 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
 
   async function update(input: VendorInputT) {
     "use server";
-    await updateVendor(id, input);
-    return { id };
+    const r = await updateVendor(id, input);
+    if (!r.ok) return r;
+    return { ok: true as const, id };
   }
   async function deactivate() {
     "use server";
-    await deactivateVendor(id);
+    return await deactivateVendor(id);
   }
 
   return (
@@ -37,7 +39,9 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
           <div className="flex gap-2">
             <Link href="/procurement/vendors"><Button variant="outline">Back</Button></Link>
             {vendor.active && (
-              <form action={deactivate}><Button type="submit" variant="outline">Deactivate</Button></form>
+              <ActionResultButton action={deactivate} variant="outline" successMessage="Vendor deactivated">
+                Deactivate
+              </ActionResultButton>
             )}
           </div>
         }

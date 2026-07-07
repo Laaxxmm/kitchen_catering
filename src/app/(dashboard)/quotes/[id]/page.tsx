@@ -18,6 +18,8 @@ import {
 } from "@/server/actions/quotes";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
+import { ActionResultButton } from "@/components/ik/ActionResultButton";
+import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 
 export const dynamic = "force-dynamic";
 
@@ -30,34 +32,32 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   const canEdit =
     role === Role.ADMIN || role === Role.MANAGER || role === Role.SALES;
 
-  // Server-action shims so we can render plain <form action> buttons.
-  async function doSend() { "use server"; await sendQuote(id); }
-  async function doResendEmail() { "use server"; await resendQuoteEmail(id); }
-  async function doAccept(formData: FormData) {
+  // Server-action shims — each RETURNS the action's result so the client
+  // wrappers (ActionResultButton / ActionReasonForm) can toast refusals.
+  async function doSend() { "use server"; return await sendQuote(id); }
+  async function doResendEmail() { "use server"; return await resendQuoteEmail(id); }
+  async function doAccept(note: string) {
     "use server";
-    const note = String(formData.get("note") ?? "").trim();
-    await acceptQuote(id, note || undefined);
+    return await acceptQuote(id, note || undefined);
   }
-  async function doMarkLost(formData: FormData) {
+  async function doMarkLost(reason: string) {
     "use server";
-    const reason = String(formData.get("reason") ?? "").trim();
-    if (reason) await markQuoteLost(id, reason);
+    return await markQuoteLost(id, reason);
   }
-  async function doFlagChanges(formData: FormData) {
+  async function doFlagChanges(note: string) {
     "use server";
-    const note = String(formData.get("note") ?? "").trim();
-    if (note) await flagQuoteChangesRequested(id, note);
+    return await flagQuoteChangesRequested(id, note);
   }
   async function doRevise() {
     "use server";
     const r = await reviseQuote(id);
-    if (!r.ok) throw new Error(r.error);
+    if (!r.ok) return r;
     redirect(`/quotes/${r.id}`);
   }
   async function doConvert() {
     "use server";
     const r = await convertQuoteToOrder(id);
-    if (!r.ok) throw new Error(r.error);
+    if (!r.ok) return r;
     redirect(`/orders/${r.orderId}`);
   }
 
@@ -85,16 +85,16 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           <div className="flex flex-wrap gap-2">
             <Link href="/quotes"><Button variant="outline">Back</Button></Link>
             {canEdit && quote.status === QuoteStatus.DRAFT && (
-              <form action={doSend}><Button type="submit">Send to customer</Button></form>
+              <ActionResultButton action={doSend} successMessage="Quote sent to customer">Send to customer</ActionResultButton>
             )}
             {canEdit && quote.status === QuoteStatus.REVISED && (
-              <form action={doSend}><Button type="submit">Send revised quote</Button></form>
+              <ActionResultButton action={doSend} successMessage="Revised quote sent">Send revised quote</ActionResultButton>
             )}
             {canEdit && quote.status === QuoteStatus.ACCEPTED && !quote.orderId && (
-              <form action={doConvert}><Button type="submit">Convert to order</Button></form>
+              <ActionResultButton action={doConvert}>Convert to order</ActionResultButton>
             )}
             {canEdit && isOpen && quote.status !== QuoteStatus.DRAFT && quote.status !== QuoteStatus.REVISED && (
-              <form action={doRevise}><Button type="submit" variant="outline">Revise (new version)</Button></form>
+              <ActionResultButton action={doRevise} variant="outline">Revise (new version)</ActionResultButton>
             )}
           </div>
         }
@@ -229,9 +229,11 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
                     Customer email on file: <span className="font-mono text-ik-ink-2">{quote.customer.email}</span>
                   </p>
                   {canEdit && (
-                    <form action={doResendEmail} className="mt-2">
-                      <Button type="submit" size="sm">Resend by email</Button>
-                    </form>
+                    <div className="mt-2">
+                      <ActionResultButton action={doResendEmail} size="sm" successMessage="Quote re-sent by email">
+                        Resend by email
+                      </ActionResultButton>
+                    </div>
                   )}
                 </>
               ) : (
@@ -255,44 +257,37 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
 
           {/* Status-transition forms */}
           {canEdit && (quote.status === QuoteStatus.SENT || quote.status === QuoteStatus.NEGOTIATING || quote.status === QuoteStatus.CHANGES_REQUESTED || quote.status === QuoteStatus.REVISED) && (
-            <form action={doAccept} className="rounded-md border border-brand-200 bg-brand-50 p-4">
-              <h3 className="mb-2 font-medium text-brand-700">Customer accepted</h3>
-              <textarea
-                name="note"
-                rows={2}
-                placeholder="Optional note (verbal confirmation, email reply, etc.)"
-                className="mb-2 w-full rounded border border-ik-rule bg-ik-card px-2 py-1 text-[12.5px]"
-              />
-              <Button type="submit" size="sm">Mark accepted</Button>
-            </form>
+            <ActionReasonForm
+              action={doAccept}
+              heading="Customer accepted"
+              placeholder="Optional note (verbal confirmation, email reply, etc.)"
+              submitLabel="Mark accepted"
+              successMessage="Quote marked accepted"
+              required={false}
+              tone="brand"
+              buttonVariant="default"
+            />
           )}
 
           {canEdit && (quote.status === QuoteStatus.SENT || quote.status === QuoteStatus.NEGOTIATING) && (
-            <form action={doFlagChanges} className="rounded-md border border-amber-wash bg-amber-wash p-4">
-              <h3 className="mb-2 font-medium text-amber">Customer wants changes</h3>
-              <textarea
-                name="note"
-                rows={2}
-                placeholder="What does the customer want changed?"
-                className="mb-2 w-full rounded border border-ik-rule bg-ik-card px-2 py-1 text-[12.5px]"
-                required
-              />
-              <Button type="submit" variant="outline" size="sm">Log change request</Button>
-            </form>
+            <ActionReasonForm
+              action={doFlagChanges}
+              heading="Customer wants changes"
+              placeholder="What does the customer want changed?"
+              submitLabel="Log change request"
+              successMessage="Change request logged"
+              tone="warning"
+            />
           )}
 
           {canEdit && isOpen && (
-            <form action={doMarkLost} className="rounded-md border border-alert-wash bg-alert-wash p-4">
-              <h3 className="mb-2 font-medium text-alert">Lost</h3>
-              <textarea
-                name="reason"
-                rows={2}
-                placeholder="Reason — required"
-                className="mb-2 w-full rounded border border-ik-rule bg-ik-card px-2 py-1 text-[12.5px]"
-                required
-              />
-              <Button type="submit" variant="outline" size="sm">Mark lost</Button>
-            </form>
+            <ActionReasonForm
+              action={doMarkLost}
+              heading="Lost"
+              placeholder="Reason — required"
+              submitLabel="Mark lost"
+              successMessage="Quote marked lost"
+            />
           )}
         </aside>
       </div>

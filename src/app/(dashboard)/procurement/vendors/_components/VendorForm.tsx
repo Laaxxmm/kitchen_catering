@@ -14,7 +14,7 @@ import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   defaults?: Partial<VendorInputT>;
-  onSubmit: (input: VendorInputT) => Promise<{ id: string }>;
+  onSubmit: (input: VendorInputT) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
   submitLabel?: string;
   redirectOnSuccess?: string;
 }
@@ -53,6 +53,10 @@ export function VendorForm({ defaults, onSubmit, submitLabel = "Save", redirectO
     startTransition(async () => {
       try {
         const r = await onSubmit(cleaned);
+        if (!r.ok) {
+          toast.error(r.error);
+          return;
+        }
         toast.success("Saved");
         if (redirectOnSuccess) router.push(redirectOnSuccess.replace(":id", r.id));
         router.refresh();

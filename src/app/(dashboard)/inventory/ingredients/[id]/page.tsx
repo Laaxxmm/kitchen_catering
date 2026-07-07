@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { deactivateIngredient, getIngredient, updateIngredient } from "@/server/actions/inventory";
 import { IngredientForm } from "../../_components/IngredientForm";
+import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import type { IngredientInputT } from "@/lib/validators";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +22,7 @@ export default async function IngredientDetailPage({ params }: { params: Promise
   }
   async function deactivate() {
     "use server";
-    await deactivateIngredient(id);
+    return await deactivateIngredient(id);
   }
 
   return (
@@ -34,9 +35,9 @@ export default async function IngredientDetailPage({ params }: { params: Promise
           <div className="flex gap-2">
             <Link href="/inventory/ingredients"><Button variant="outline">Back</Button></Link>
             {ingredient.active && (
-              <form action={deactivate}>
-                <Button variant="outline" type="submit">Deactivate</Button>
-              </form>
+              <ActionResultButton action={deactivate} variant="outline" successMessage="Ingredient deactivated">
+                Deactivate
+              </ActionResultButton>
             )}
           </div>
         }

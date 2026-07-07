@@ -8,6 +8,7 @@ import { listOrders } from "@/server/actions/orders";
 import { CustomerForm } from "../_components/CustomerForm";
 import { CustomerOrders } from "./_components/CustomerOrders";
 import { DetailTabs } from "@/components/ik/DetailTabs";
+import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import type { CustomerInputT } from "@/lib/validators";
 
 export const dynamic = "force-dynamic";
@@ -29,11 +30,11 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   }
   async function deactivate() {
     "use server";
-    await deactivateCustomer(id);
+    return await deactivateCustomer(id);
   }
   async function reactivate() {
     "use server";
-    await reactivateCustomer(id);
+    return await reactivateCustomer(id);
   }
 
   return (
@@ -46,13 +47,13 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
           <div className="flex gap-2">
             <Link href="/customers"><Button variant="outline">Back to list</Button></Link>
             {customer.active ? (
-              <form action={deactivate}>
-                <Button variant="outline" type="submit">Deactivate</Button>
-              </form>
+              <ActionResultButton action={deactivate} variant="outline" successMessage="Customer deactivated">
+                Deactivate
+              </ActionResultButton>
             ) : (
-              <form action={reactivate}>
-                <Button variant="outline" type="submit">Reactivate</Button>
-              </form>
+              <ActionResultButton action={reactivate} variant="outline" successMessage="Customer reactivated">
+                Reactivate
+              </ActionResultButton>
             )}
           </div>
         }

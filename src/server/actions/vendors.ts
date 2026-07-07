@@ -7,6 +7,11 @@ import { requireRole } from "@/server/rbac";
 import { VendorInput, type VendorInputT } from "@/lib/validators";
 import { sha256Json } from "@/lib/audit";
 import { nextVendorCode } from "@/lib/sequences";
+import {
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.ACCOUNTS];
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.ACCOUNTS, Role.KITCHEN_HEAD];
@@ -31,7 +36,17 @@ function dataFromInput(input: VendorInputT) {
   };
 }
 
-export async function createVendor(raw: unknown) {
+export async function createVendor(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string; code: string }>> {
+  try {
+    return await createVendorInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createVendorInner(raw: unknown): Promise<{ ok: true; id: string; code: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = VendorInput.parse(raw);
 
@@ -53,41 +68,51 @@ export async function createVendor(raw: unknown) {
   });
 
   revalidatePath("/procurement/vendors");
-  return { id: vendor.id, code: vendor.code };
+  return { ok: true, id: vendor.id, code: vendor.code };
 }
 
-export async function updateVendor(id: string, raw: unknown) {
-  const session = await requireRole(WRITE_ROLES);
-  const input = VendorInput.parse(raw);
-  await db.$transaction(async (tx) => {
-    await tx.vendor.update({ where: { id }, data: dataFromInput(input) });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "VENDOR_UPDATED",
-        entity: "Vendor",
-        entityId: id,
-      },
+export async function updateVendor(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireRole(WRITE_ROLES);
+    const input = VendorInput.parse(raw);
+    await db.$transaction(async (tx) => {
+      await tx.vendor.update({ where: { id }, data: dataFromInput(input) });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "VENDOR_UPDATED",
+          entity: "Vendor",
+          entityId: id,
+        },
+      });
     });
-  });
-  revalidatePath("/procurement/vendors");
-  revalidatePath(`/procurement/vendors/${id}`);
+    revalidatePath("/procurement/vendors");
+    revalidatePath(`/procurement/vendors/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function deactivateVendor(id: string) {
-  const session = await requireRole([Role.ADMIN, Role.MANAGER]);
-  await db.$transaction(async (tx) => {
-    await tx.vendor.update({ where: { id }, data: { active: false } });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "VENDOR_DEACTIVATED",
-        entity: "Vendor",
-        entityId: id,
-      },
+export async function deactivateVendor(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole([Role.ADMIN, Role.MANAGER]);
+    await db.$transaction(async (tx) => {
+      await tx.vendor.update({ where: { id }, data: { active: false } });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "VENDOR_DEACTIVATED",
+          entity: "Vendor",
+          entityId: id,
+        },
+      });
     });
-  });
-  revalidatePath("/procurement/vendors");
+    revalidatePath("/procurement/vendors");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 export async function listVendors(opts: { query?: string; active?: boolean; category?: VendorCategory } = {}) {

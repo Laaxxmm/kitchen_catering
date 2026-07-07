@@ -41,7 +41,10 @@ interface Props {
   initialLines?: DraftLine[] | null;
   // Inline vendor creator — lets the store add a brand-new supplier (e.g. for
   // a one-off online order) without leaving the PO form.
-  onQuickAddVendor?: (input: { name: string; stateCode: string }) => Promise<{ id: string; name: string; code: string; stateCode: string }>;
+  onQuickAddVendor?: (input: { name: string; stateCode: string }) => Promise<
+    | { ok: true; id: string; name: string; code: string; stateCode: string }
+    | { ok: false; error: string }
+  >;
 }
 
 function emptyLine(): DraftLine {
@@ -66,6 +69,10 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
     setAddingVendorBusy(true);
     try {
       const v = await onQuickAddVendor({ name: newVendorName.trim(), stateCode: newVendorState.trim() || "29" });
+      if (!v.ok) {
+        toast.error(v.error);
+        return;
+      }
       setVendorOptions((prev) => [{ id: v.id, name: v.name, code: v.code, stateCode: v.stateCode }, ...prev]);
       setVendorId(v.id);
       setAddingVendor(false);
@@ -203,9 +210,7 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
             <option value="ONLINE">Online order</option>
           </select>
           <p className="text-[11.5px] text-ik-ink-3">
-            {procurementType === "STANDARD"
-              ? "Approval by value: under ₹5,000 the manager signs off; ₹5,000 and above needs admin."
-              : "Local and online purchases always need both manager and admin sign-off."}
+            Approval by value: under ₹5,000 the manager signs off; ₹5,000 and above needs admin.
           </p>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

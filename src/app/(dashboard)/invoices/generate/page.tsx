@@ -9,6 +9,7 @@ import {
   listBillableOrders,
 } from "@/server/actions/customer-invoices";
 import { EmptyState } from "@/components/ik/FormKit";
+import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 
@@ -36,12 +37,10 @@ export default async function GenerateInvoicePage() {
     a[1].name.localeCompare(b[1].name),
   );
 
-  async function generate(formData: FormData) {
+  async function generate(orderId: string) {
     "use server";
-    const orderId = String(formData.get("orderId") ?? "");
-    if (!orderId) return;
     const r = await createCustomerInvoiceFromOrder(orderId);
-    if (!r.ok) throw new Error(r.error);
+    if (!r.ok) return r;
     redirect(`/invoices/${r.id}`);
   }
 
@@ -112,12 +111,9 @@ export default async function GenerateInvoicePage() {
                         <span className="font-mono text-[13px] text-ik-ink">
                           {formatINR(o.contractValue)}
                         </span>
-                        <form action={generate}>
-                          <input type="hidden" name="orderId" value={o.id} />
-                          <Button type="submit" size="sm">
-                            Generate invoice
-                          </Button>
-                        </form>
+                        <ActionResultButton action={generate.bind(null, o.id)} size="sm">
+                          Generate invoice
+                        </ActionResultButton>
                       </div>
                     </li>
                   ))}

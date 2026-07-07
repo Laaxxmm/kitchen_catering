@@ -1,22 +1,11 @@
-import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { createSalaryRun } from "@/server/actions/salary";
+import { NewSalaryRunForm } from "./_components/NewSalaryRunForm";
 
 export default function NewSalaryRunPage() {
-  async function create(formData: FormData) {
+  async function create(input: { periodMonth: string }) {
     "use server";
-    const month = String(formData.get("periodMonth") ?? "");
-    if (!month) return;
-    // <input type="month"> returns "YYYY-MM"; convert to ISO date string.
-    const periodMonth = `${month}-01T00:00:00`;
-    const r = await createSalaryRun({ periodMonth });
-    // Form action has no toast channel — surface the failure via the
-    // error boundary (same visibility as the pre-conversion throw).
-    if (!r.ok) throw new Error(r.error);
-    redirect(`/salary/runs/${r.id}`);
+    return await createSalaryRun(input);
   }
   return (
     <>
@@ -25,13 +14,7 @@ export default function NewSalaryRunPage() {
         title="New salary run"
         description="Pick a month. The run computes gross pay from active SalaryStructures and approved TimeEntries within that month."
       />
-      <form action={create} className="grid max-w-xs gap-4">
-        <div className="grid gap-1">
-          <Label htmlFor="periodMonth">Period (month)</Label>
-          <Input id="periodMonth" name="periodMonth" type="month" required />
-        </div>
-        <Button type="submit">Create run</Button>
-      </form>
+      <NewSalaryRunForm onSubmit={create} />
     </>
   );
 }

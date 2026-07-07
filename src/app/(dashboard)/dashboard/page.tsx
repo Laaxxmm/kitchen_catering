@@ -489,7 +489,9 @@ export default async function DashboardPage() {
               poNo: po.poNo,
               vendor: po.vendor.name,
               grandTotal: po.grandTotal.toString(),
+              awaitingAdmin: po.managerApprovedAt != null,
             }))}
+            viewerIsAdmin={role === "ADMIN"}
           />
         )}
 

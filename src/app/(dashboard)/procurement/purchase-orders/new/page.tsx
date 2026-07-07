@@ -100,7 +100,8 @@ export default async function NewVendorPOPage({
       address: null,
       notes: null,
     });
-    return { id: created.id, name: v.name, code: created.code, stateCode: v.stateCode };
+    if (!created.ok) return created;
+    return { ok: true as const, id: created.id, name: v.name, code: created.code, stateCode: v.stateCode };
   }
 
   return (
