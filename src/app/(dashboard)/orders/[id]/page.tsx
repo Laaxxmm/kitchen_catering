@@ -22,6 +22,8 @@ import { listAssignableUsers } from "@/server/actions/users";
 import { isImmediateChannel } from "@/lib/order-channels";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
+import { ActionResultButton } from "@/components/ik/ActionResultButton";
+import type { ActionResult } from "@/lib/action-result";
 import { AdminApprovalBlock } from "./_components/AdminApprovalBlock";
 import { ChefApprovalBlock } from "./_components/ChefApprovalBlock";
 import { ManagerChangeBlock } from "./_components/ManagerChangeBlock";
@@ -67,7 +69,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // ─── Server-action shims ───────────────────────────────────────────
   async function doSubmit() {
     "use server";
-    await submitOrder(id);
+    return await submitOrder(id);
   }
   async function doChefApprove(note: string) {
     "use server";
@@ -114,12 +116,12 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     const { markIngredientsAvailable } = await import(
       "@/server/actions/chef-requisitions"
     );
-    await markIngredientsAvailable(id);
+    return await markIngredientsAvailable(id);
   }
   async function doMarkServed() {
     "use server";
     const { markInHouseServed } = await import("@/server/actions/orders");
-    await markInHouseServed(id);
+    return await markInHouseServed(id);
   }
 
   // ─── Approval block selection ────────────────────────────────────────
@@ -151,11 +153,12 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               <Link href={`/orders/${order.id}/pnl`}><Button variant="outline">P&amp;L</Button></Link>
             )}
             {order.status === OrderStatus.DRAFT && isSales && (
-              <form action={doSubmit}>
-                <Button type="submit">
-                  {immediate ? "Submit to kitchen" : "Submit for manager approval"}
-                </Button>
-              </form>
+              <ActionResultButton
+                action={doSubmit}
+                successMessage={immediate ? "Sent to the kitchen" : "Submitted for manager approval"}
+              >
+                {immediate ? "Submit to kitchen" : "Submit for manager approval"}
+              </ActionResultButton>
             )}
             {/* Tax invoice is generated manually by accounts/admin/manager
                 once the order has been delivered. They then download +
@@ -470,9 +473,9 @@ interface OrderNextStepProps {
   immediate: boolean;
   hasRequisitions: boolean;
   /** Server action: chef skips the requisition because stock is on hand. */
-  onIngredientsAvailable: () => Promise<void>;
+  onIngredientsAvailable: () => Promise<ActionResult>;
   /** Server action: one-tap "served" for in-house orders (no driver). */
-  onMarkServed: () => Promise<void>;
+  onMarkServed: () => Promise<ActionResult>;
 }
 
 /**
@@ -553,11 +556,9 @@ function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisi
               <Link href={`/orders/${orderId}/requisition`}>
                 <Button size="sm">Raise ingredient requisition</Button>
               </Link>
-              <form action={onIngredientsAvailable}>
-                <Button type="submit" size="sm" variant="outline">
-                  Ingredients already available — skip to cooking
-                </Button>
-              </form>
+              <ActionResultButton action={onIngredientsAvailable} variant="outline">
+                Ingredients already available — skip to cooking
+              </ActionResultButton>
             </div>
           ) : (
             <span className="text-ik-ink-3"> Waiting on the kitchen head.</span>
@@ -635,9 +636,9 @@ function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisi
             {!canServe && <span className="text-ik-ink-3"> (Serve action is for kitchen / F&amp;B / management.)</span>}
             {canServe && (
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <form action={onMarkServed}>
-                  <Button type="submit" size="sm">Mark served</Button>
-                </form>
+                <ActionResultButton action={onMarkServed} successMessage="Marked served">
+                  Mark served
+                </ActionResultButton>
                 <Link href="/invoices/room-service">
                   <Button type="button" size="sm" variant="outline">Open room billing</Button>
                 </Link>
