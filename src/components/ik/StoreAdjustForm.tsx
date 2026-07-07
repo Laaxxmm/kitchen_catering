@@ -86,7 +86,7 @@ export function StoreAdjustForm({ store, items, backHref }: { store: StoreKey; i
         <span className="text-[12px] text-ik-ink-2">
           {mode === "set" ? `New on-hand quantity${item ? ` (${item.unit})` : ""}` : `Amount to add (use a minus sign to remove)${item ? ` (${item.unit})` : ""}`}
         </span>
-        <input type="number" step="0.001" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls + " font-mono"} placeholder={mode === "set" ? "e.g. 40" : "e.g. 10 or -3"} />
+        <input type="number" step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls + " font-mono"} placeholder={mode === "set" ? "e.g. 40" : "e.g. 10 or -3"} />
       </label>
 
       <label className="grid gap-1">

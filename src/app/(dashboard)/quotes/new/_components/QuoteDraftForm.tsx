@@ -302,7 +302,7 @@ export function QuoteDraftForm({ customers, dishes, onSubmit, onQuickAddCustomer
                     <td className="py-1 pr-2">
                       <input
                         type="number"
-                        step="0.001"
+                        step="any"
                         min="0.001"
                         value={l.quantity}
                         onChange={(e) => setLines((p) => p.map((x, i) => (i === idx ? { ...x, quantity: e.target.value } : x)))}

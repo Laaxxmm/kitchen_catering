@@ -50,7 +50,7 @@ export function ReorderCell({ id, value, canEdit }: { id: string; value: string;
       <input
         autoFocus
         type="number"
-        step="0.001"
+        step="any"
         min="0"
         value={val}
         onChange={(e) => setVal(e.target.value)}

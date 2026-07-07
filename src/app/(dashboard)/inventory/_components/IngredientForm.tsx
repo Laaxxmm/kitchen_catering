@@ -103,7 +103,7 @@ export function IngredientForm({ defaults, onSubmit, submitLabel = "Save", redir
         </div>
         <div className="grid gap-1">
           <Label htmlFor="reorderLevel">Reorder level</Label>
-          <Input id="reorderLevel" type="number" step="0.001" {...register("reorderLevel")} />
+          <Input id="reorderLevel" type="number" step="any" {...register("reorderLevel")} />
         </div>
       </div>
 
@@ -111,11 +111,11 @@ export function IngredientForm({ defaults, onSubmit, submitLabel = "Save", redir
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="grid gap-1">
             <Label htmlFor="openingQty">Opening qty</Label>
-            <Input id="openingQty" type="number" step="0.001" {...register("openingQty")} />
+            <Input id="openingQty" type="number" step="any" {...register("openingQty")} />
           </div>
           <div className="grid gap-1">
             <Label htmlFor="openingAvgCost">Opening avg cost (₹)</Label>
-            <Input id="openingAvgCost" type="number" step="0.0001" {...register("openingAvgCost")} />
+            <Input id="openingAvgCost" type="number" step="any" {...register("openingAvgCost")} />
           </div>
         </div>
       )}

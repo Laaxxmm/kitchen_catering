@@ -84,7 +84,7 @@ export function AuditForm({ ingredients, onSubmit }: Props) {
               <td className="py-1 pr-2 text-right font-mono">{d.system}</td>
               <td className="py-1 pr-2">
                 <input
-                  type="number" step="0.001" min="0"
+                  type="number" step="any" min="0"
                   value={d.physical}
                   onChange={(e) => setCounts((p) => ({ ...p, [d.id]: e.target.value }))}
                   className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono"

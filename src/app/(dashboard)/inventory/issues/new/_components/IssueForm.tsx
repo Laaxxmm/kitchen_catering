@@ -115,7 +115,7 @@ export function IssueForm({ ingredients, orders, initialOrderId, onSubmit }: Pro
         <Input
           id="qty"
           type="number"
-          step="0.001"
+          step="any"
           min="0.001"
           value={qty}
           onChange={(e) => setQty(e.target.value)}

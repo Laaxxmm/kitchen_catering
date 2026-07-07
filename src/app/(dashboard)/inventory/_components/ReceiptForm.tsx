@@ -94,12 +94,12 @@ export function ReceiptForm({ ingredients, onSubmit, redirectOnSuccess }: Props)
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="grid gap-1">
             <Label htmlFor="qty">Quantity<span className="text-gold" aria-hidden> *</span></Label>
-            <Input id="qty" type="number" step="0.001" min="0.001" {...register("qty", { required: true })} />
+            <Input id="qty" type="number" step="any" min="0.001" {...register("qty", { required: true })} />
             {errors.qty && <span className="text-[11px] text-alert">Required</span>}
           </div>
           <div className="grid gap-1">
             <Label htmlFor="unitCost">Unit cost (₹)<span className="text-gold" aria-hidden> *</span></Label>
-            <Input id="unitCost" type="number" step="0.0001" min="0" {...register("unitCost", { required: true })} />
+            <Input id="unitCost" type="number" step="any" min="0" {...register("unitCost", { required: true })} />
           </div>
         </div>
 

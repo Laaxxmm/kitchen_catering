@@ -147,7 +147,7 @@ export function AdjustmentForm({ ingredients, onSubmit, redirectOnSuccess }: Pro
         <Input
           id="value"
           type="number"
-          step="0.001"
+          step="any"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder={mode === "absolute" ? "e.g. 12.500" : "e.g. -2.000"}

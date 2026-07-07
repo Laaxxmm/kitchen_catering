@@ -86,8 +86,8 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
                 <td className="py-1 pr-2 text-right font-mono">{l.ordered}</td>
                 <td className="py-1 pr-2 text-right font-mono">{l.alreadyReceived}</td>
                 <td className="py-1 pr-2 text-right font-mono">{l.remaining}</td>
-                <td className="py-1 pr-2"><input type="number" step="0.001" min="0" max={l.remaining} value={rows[l.id].acceptedQty} onChange={(e) => setRow(l.id, { acceptedQty: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
-                <td className="py-1 pr-2"><input type="number" step="0.001" min="0" max={l.remaining} value={rows[l.id].rejectedQty} onChange={(e) => setRow(l.id, { rejectedQty: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
+                <td className="py-1 pr-2"><input type="number" step="any" min="0" max={l.remaining} value={rows[l.id].acceptedQty} onChange={(e) => setRow(l.id, { acceptedQty: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
+                <td className="py-1 pr-2"><input type="number" step="any" min="0" max={l.remaining} value={rows[l.id].rejectedQty} onChange={(e) => setRow(l.id, { rejectedQty: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
                 <td className="py-1 pr-2"><input value={rows[l.id].reason} onChange={(e) => setRow(l.id, { reason: e.target.value })} placeholder="reject reason" className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1" /></td>
               </tr>
             ))}

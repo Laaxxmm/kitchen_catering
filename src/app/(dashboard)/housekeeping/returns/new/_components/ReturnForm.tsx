@@ -86,7 +86,7 @@ export function ReturnForm({ items }: { items: Item[] }) {
 
       <label className="grid gap-1">
         <span className="text-[12px] text-ik-ink-2">How many{item ? ` (${item.unit}, ${item.inCirculation} out)` : ""}?</span>
-        <input type="number" step="0.001" min="0" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls + " font-mono"} placeholder="e.g. 12" />
+        <input type="number" step="any" min="0" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls + " font-mono"} placeholder="e.g. 12" />
       </label>
 
       <div className="flex gap-2">

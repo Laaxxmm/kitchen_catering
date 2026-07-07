@@ -109,7 +109,7 @@ export function LineFulfilControls({ lineId, requestedQty, issuedQty, onHand, st
             <span className="flex gap-1">
               <input
                 type="number"
-                step="0.001"
+                step="any"
                 min="0.001"
                 max={Math.max(maxIssuable.toNumber(), 0)}
                 placeholder={`max ${maxIssuable.toString()}`}
