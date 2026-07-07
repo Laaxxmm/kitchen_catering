@@ -11,7 +11,7 @@ import { toDecimal } from "@/lib/money";
 import { ActionError, actionFailure, type ActionResultWith } from "@/server/action-result";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
-const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD];
+const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.ACCOUNTS];
 
 /**
  * Row-lock an ingredient for the rest of the transaction (same rationale as

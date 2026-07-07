@@ -124,7 +124,9 @@ export async function getStoreStock(store: StoreKey) {
 
 /** Active items for a store's adjust-stock picker (id · name · unit · on-hand). */
 export async function listStoreItems(store: StoreKey) {
-  await requireRole(WRITE_ROLES_BY_STORE[store]);
+  // Read-only picker for the adjust screen — read roles, not write roles
+  // (the write itself is gated in adjustStoreStock, incl. the toggle).
+  await requireRole(READ_ROLES);
   const select = { id: true, name: true, unit: true, currentStock: true } as const;
   const rows =
     store === "housekeeping"

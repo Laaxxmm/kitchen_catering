@@ -9,7 +9,7 @@ import { RoomsTable } from "./_components/RoomsTable";
 export const dynamic = "force-dynamic";
 
 export default async function HousekeepingRoomsPage() {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER, Role.MAINTENANCE_MANAGER]);
   const rooms = await listRooms({ activeOnly: false });
 
   return (

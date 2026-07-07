@@ -20,13 +20,20 @@ const ADJUSTMENTS_TAB = {
 } as const;
 
 export function InventoryNav({ active, role }: Props) {
-  // Adjustments: admin/manager always; the store keeper also gets the tab
-  // (the action itself enforces the stock.storeDirectEdit admin toggle, so
-  // with the toggle off they get a clear refusal message, not a dead end).
-  const tabs =
-    role === "ADMIN" || role === "MANAGER" || role === "STORE_KEEPER"
-      ? [...BASE_TABS.slice(0, 3), ADJUSTMENTS_TAB, BASE_TABS[3]]
-      : BASE_TABS;
+  // Tabs match what the middleware actually lets each role open — a tab
+  // that lands on /forbidden is worse than no tab.
+  //   receipts: ADMIN/MANAGER/STORE_KEEPER/ACCOUNTS
+  //   issues:   ADMIN/MANAGER/STORE_KEEPER
+  //   adjustments: ADMIN/MANAGER/STORE_KEEPER (writes behind the
+  //     stock.storeDirectEdit toggle — a clear refusal, not a dead end)
+  //   audit (bulk count): ADMIN/MANAGER/STORE_KEEPER/KITCHEN_HEAD/ACCOUNTS
+  const canStock = role === "ADMIN" || role === "MANAGER" || role === "STORE_KEEPER";
+  const tabs = [
+    BASE_TABS[0],
+    ...(canStock || role === "ACCOUNTS" ? [BASE_TABS[1]] : []),
+    ...(canStock ? [BASE_TABS[2], ADJUSTMENTS_TAB] : []),
+    BASE_TABS[3],
+  ];
 
   return (
     <nav className="mb-4 flex flex-wrap gap-1 border-b border-ik-rule text-[13px]">

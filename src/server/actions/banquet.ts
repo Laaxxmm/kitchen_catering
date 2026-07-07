@@ -623,7 +623,7 @@ export async function listBanquetEvents() {
 // raise the PO (and GRN on receipt). This routes that ask as a tracked task
 // assigned to the store keeper, plus a notification with a "raise a PO" link.
 export async function requestGoodsFromStore(input: { summary: string; note?: string }) {
-  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY]);
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
   const summary = input.summary?.trim();
   if (!summary || summary.length < 3) throw new Error("Describe what you need (min 3 characters).");
 

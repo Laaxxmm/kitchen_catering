@@ -23,6 +23,7 @@ export default async function TaskDetailPage({
     Role.SALES,
     Role.STORE_KEEPER,
     Role.KITCHEN_HEAD,
+    Role.FNB_SERVICE,
     Role.DELIVERY,
     Role.ACCOUNTS,
     Role.HOUSEKEEPING_MANAGER,

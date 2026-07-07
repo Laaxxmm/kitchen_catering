@@ -1,3 +1,4 @@
+import { Role } from "@prisma/client";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -6,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { computeOrderPnL } from "@/lib/pnl";
 import { formatINR } from "@/lib/money";
-import { requireSession } from "@/server/rbac";
+import { gateRolePage } from "@/server/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,9 @@ function KPI({ label, value, tone, sub }: { label: string; value: string; tone?:
 }
 
 export default async function OrderPnLPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireSession();
+  // Margin/cost data is management + finance facing — kitchen/store/
+  // delivery roles get the order page, not the P&L.
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.SALES, Role.ACCOUNTS]);
   const { id } = await params;
   const pnl = await computeOrderPnL(id);
   if (!pnl) notFound();
