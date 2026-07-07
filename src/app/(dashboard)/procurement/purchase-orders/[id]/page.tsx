@@ -40,6 +40,9 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
   async function doSubmit() { "use server"; await submitVendorPO(id); }
   async function doApprove() { "use server"; await approveVendorPO(id); }
   async function doSend() { "use server"; await sendVendorPO(id); }
+  // Same action, but returning the result — NotifyVendorBlock checks
+  // `res.ok` and toasts the failure (a <form action> must return void).
+  async function doMarkSent() { "use server"; return sendVendorPO(id); }
   async function doCancel(formData: FormData) {
     "use server";
     const reason = String(formData.get("reason") ?? "").trim();
@@ -99,7 +102,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
             messageText={buildVendorMessage(po)}
             emailSubject={`Purchase order ${po.poNo} from Greenpath`}
             receiveHref={`/procurement/grns/new?poId=${po.id}`}
-            onMarkSent={doSend}
+            onMarkSent={doMarkSent}
           />
         </div>
       ) : (

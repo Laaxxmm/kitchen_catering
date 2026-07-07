@@ -33,7 +33,8 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
     }>;
   }) {
     "use server";
-    await updateDraftInvoice(id, input);
+    const res = await updateDraftInvoice(id, input);
+    if (!res.ok) return res;
     redirect(`/invoices/${id}`);
   }
 

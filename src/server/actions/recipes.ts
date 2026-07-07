@@ -6,6 +6,12 @@ import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { RecipeInput, RecipeSubRecipeInput } from "@/lib/validators";
 import { sha256Json } from "@/lib/audit";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
 
 const WRITE_ROLES = [Role.ADMIN, Role.KITCHEN_HEAD];
 
@@ -14,7 +20,21 @@ const WRITE_ROLES = [Role.ADMIN, Role.KITCHEN_HEAD];
  * when dishId is null). Replaces the full ingredient list in a single
  * transaction.
  */
-export async function upsertRecipe(dishId: string | null, raw: unknown) {
+export async function upsertRecipe(
+  dishId: string | null,
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await upsertRecipeInner(dishId, raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function upsertRecipeInner(
+  dishId: string | null,
+  raw: unknown,
+): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = RecipeInput.parse(raw);
 
@@ -94,7 +114,7 @@ export async function upsertRecipe(dishId: string | null, raw: unknown) {
   });
 
   if (dishId) revalidatePath(`/dishes/${dishId}`);
-  return recipe;
+  return { ok: true, id: recipe.id };
 }
 
 /**
@@ -103,12 +123,20 @@ export async function upsertRecipe(dishId: string | null, raw: unknown) {
  * walk depth as a defensive bound; cycles via deep nesting are caught by
  * the visited-set independently.
  */
-export async function upsertRecipeSubRecipe(raw: unknown) {
+export async function upsertRecipeSubRecipe(raw: unknown): Promise<ActionResult> {
+  try {
+    return await upsertRecipeSubRecipeInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function upsertRecipeSubRecipeInner(raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const input = RecipeSubRecipeInput.parse(raw);
 
   if (input.parentId === input.childId) {
-    throw new Error("A recipe cannot include itself as a sub-recipe");
+    throw new ActionError("A recipe cannot include itself as a sub-recipe");
   }
 
   await db.$transaction(async (tx) => {
@@ -121,7 +149,7 @@ export async function upsertRecipeSubRecipe(raw: unknown) {
       if (visited.has(current)) continue;
       visited.add(current);
       if (current === input.parentId) {
-        throw new Error("Adding this link would create a cycle in the recipe graph");
+        throw new ActionError("Adding this link would create a cycle in the recipe graph");
       }
       const children = await tx.recipeSubRecipe.findMany({
         where: { parentId: current },
@@ -150,4 +178,5 @@ export async function upsertRecipeSubRecipe(raw: unknown) {
       },
     });
   });
+  return { ok: true };
 }

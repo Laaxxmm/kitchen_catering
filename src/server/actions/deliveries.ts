@@ -7,11 +7,14 @@ import { DeliveryStatus, OrderChannel, OrderStatus, PaymentMethod, Role } from "
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { toDecimal } from "@/lib/money";
+import { requireRole, requireSession } from "@/server/rbac";
 import {
-  AuthorizationError,
-  requireRole,
-  requireSession,
-} from "@/server/rbac";
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
+import { deferAfterResponse } from "@/server/defer";
 import {
   DeliveryAssignInput,
   DeliveryFailureInput,
@@ -70,7 +73,15 @@ const READ_ROLES = [
  * with a link straight to the scheduling screen. Keeps the chef's UI
  * simple and avoids the permission error from sending them to /deliveries/new.
  */
-export async function handToDelivery(orderId: string) {
+export async function handToDelivery(orderId: string): Promise<ActionResult> {
+  try {
+    return await handToDeliveryInner(orderId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function handToDeliveryInner(orderId: string): Promise<{ ok: true }> {
   const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD]);
   const order = await db.order.findUnique({
     where: { id: orderId },
@@ -83,7 +94,7 @@ export async function handToDelivery(orderId: string) {
       customer: { select: { name: true } },
     },
   });
-  if (!order) throw new Error("Order not found");
+  if (!order) throw new ActionError("Order not found");
   // Already handed off / scheduled / delivered — treat as a harmless no-op
   // so a stale board card (or a double-tap) doesn't surface an error.
   const ALREADY_DISPATCHED: OrderStatus[] = [
@@ -95,20 +106,25 @@ export async function handToDelivery(orderId: string) {
   ];
   if (ALREADY_DISPATCHED.includes(order.status)) {
     revalidatePath("/kitchen");
-    return;
+    return { ok: true };
   }
   if (order.status !== OrderStatus.READY) {
-    // Still cooking — genuinely not ready. (Message is masked in prod, but
-    // the kitchen board no longer shows a dispatch button this early.)
-    throw new AuthorizationError(
+    // Still cooking — genuinely not ready.
+    throw new ActionError(
       `Order ${order.code} isn't ready to dispatch yet (it's ${order.status}).`,
     );
   }
   // Stamp the intimation so the kitchen card flips to "Delivery informed".
-  await db.order.update({
-    where: { id: orderId },
+  // Status guard in the WHERE: if the order moved on since the read (a
+  // concurrent dispatch/cancel), skip the stamp — same no-op as above.
+  const updated = await db.order.updateMany({
+    where: { id: orderId, status: OrderStatus.READY },
     data: { handedToDeliveryAt: new Date() },
   });
+  if (updated.count === 0) {
+    revalidatePath("/kitchen");
+    return { ok: true };
+  }
   await db.auditLog.create({
     data: {
       userId: session.user.id,
@@ -118,16 +134,20 @@ export async function handToDelivery(orderId: string) {
     },
   });
   const where = order.roomNumber ? ` · Room ${order.roomNumber}` : "";
-  await notifyRoles([Role.DELIVERY, Role.ADMIN, Role.MANAGER], {
-    kind: "GENERIC",
-    title: `Order ${order.code} ready to dispatch`,
-    body: `${order.customer.name} · ${order.channel}${where}. Cooked and ready — schedule the delivery.`,
-    link: `/deliveries/new?orderId=${orderId}`,
-    dedupeKey: `order-ready-dispatch:${orderId}`,
-  });
+  // Fan-out is best-effort — the chef's button shouldn't wait on it.
+  deferAfterResponse("hand-to-delivery:notify", () =>
+    notifyRoles([Role.DELIVERY, Role.ADMIN, Role.MANAGER], {
+      kind: "GENERIC",
+      title: `Order ${order.code} ready to dispatch`,
+      body: `${order.customer.name} · ${order.channel}${where}. Cooked and ready — schedule the delivery.`,
+      link: `/deliveries/new?orderId=${orderId}`,
+      dedupeKey: `order-ready-dispatch:${orderId}`,
+    }),
+  );
   revalidatePath("/dashboard");
   revalidatePath("/kitchen");
   revalidatePath("/deliveries");
+  return { ok: true };
 }
 
 /**
@@ -178,7 +198,15 @@ export async function listEventPrepQueue() {
  * the kitchen + management so everyone knows the front-of-house side is set.
  * Idempotent: a second tap (or a stale card) is a harmless no-op.
  */
-export async function markEventPrepReady(orderId: string) {
+export async function markEventPrepReady(orderId: string): Promise<ActionResult> {
+  try {
+    return await markEventPrepReadyInner(orderId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function markEventPrepReadyInner(orderId: string): Promise<{ ok: true }> {
   const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
   const order = await db.order.findUnique({
     where: { id: orderId },
@@ -190,21 +218,27 @@ export async function markEventPrepReady(orderId: string) {
       customer: { select: { name: true } },
     },
   });
-  if (!order) throw new Error("Order not found");
+  if (!order) throw new ActionError("Order not found");
   if (!isEventDeliveryChannel(order.channel)) {
-    throw new AuthorizationError(
+    throw new ActionError(
       `Event prep only applies to off-site catering (banquet / ODC / packed) — order ${order.code} is ${order.channel}.`,
     );
   }
   // Already marked ready — no-op so a double-tap doesn't error.
   if (order.eventPrepReadyAt) {
     revalidatePath("/dashboard");
-    return;
+    return { ok: true };
   }
-  await db.order.update({
-    where: { id: orderId },
+  // Guarded write: a concurrent tap that already stamped it simply
+  // matches zero rows — same harmless no-op.
+  const updated = await db.order.updateMany({
+    where: { id: orderId, eventPrepReadyAt: null },
     data: { eventPrepReadyAt: new Date(), eventPrepReadyById: session.user.id },
   });
+  if (updated.count === 0) {
+    revalidatePath("/dashboard");
+    return { ok: true };
+  }
   await db.auditLog.create({
     data: {
       userId: session.user.id,
@@ -213,16 +247,20 @@ export async function markEventPrepReady(orderId: string) {
       entityId: orderId,
     },
   });
-  await notifyRoles([Role.KITCHEN_HEAD, Role.ADMIN, Role.MANAGER], {
-    kind: "GENERIC",
-    title: `Event prep ready — ${order.code}`,
-    body: `${order.customer.name} · ${order.channel}. Cutlery + arrangements packed and ready by the delivery team.`,
-    link: `/orders/${orderId}`,
-    dedupeKey: `event-prep-ready:${orderId}`,
-  });
+  // Chime is best-effort — don't hold the response for the fan-out.
+  deferAfterResponse("event-prep-ready:notify", () =>
+    notifyRoles([Role.KITCHEN_HEAD, Role.ADMIN, Role.MANAGER], {
+      kind: "GENERIC",
+      title: `Event prep ready — ${order.code}`,
+      body: `${order.customer.name} · ${order.channel}. Cutlery + arrangements packed and ready by the delivery team.`,
+      link: `/orders/${orderId}`,
+      dedupeKey: `event-prep-ready:${orderId}`,
+    }),
+  );
   revalidatePath("/dashboard");
   revalidatePath("/deliveries");
   revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
 }
 
 /**
@@ -340,7 +378,19 @@ export async function listMyActiveDeliveries() {
  * delivery friction-free; managers can still schedule + assign explicitly
  * via /deliveries/new when they want to direct a specific driver.
  */
-export async function claimDelivery(orderId: string) {
+export async function claimDelivery(
+  orderId: string,
+): Promise<ActionResultWith<{ id: string; deliveryNo: string }>> {
+  try {
+    return await claimDeliveryInner(orderId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function claimDeliveryInner(
+  orderId: string,
+): Promise<{ ok: true; id: string; deliveryNo: string }> {
   const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
   const created = await db.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
@@ -352,9 +402,9 @@ export async function claimDelivery(orderId: string) {
         customer: { select: { contactName: true, phone: true } },
       },
     });
-    if (!order) throw new Error("Order not found");
+    if (!order) throw new ActionError("Order not found");
     if (order.status !== OrderStatus.READY) {
-      throw new AuthorizationError(
+      throw new ActionError(
         `Order ${order.code} isn't ready for pickup yet (it's ${order.status}).`,
       );
     }
@@ -362,7 +412,7 @@ export async function claimDelivery(orderId: string) {
       where: { orderId, status: { notIn: [DeliveryStatus.FAILED, DeliveryStatus.CANCELLED] } },
       select: { id: true },
     });
-    if (existing) throw new Error("This order has already been picked up.");
+    if (existing) throw new ActionError("This order has already been picked up.");
 
     const deliveryNo = await nextDeliveryNumber(tx);
     const delivery = await tx.delivery.create({
@@ -390,10 +440,22 @@ export async function claimDelivery(orderId: string) {
 
   revalidatePath("/dashboard");
   revalidatePath("/deliveries");
-  return { id: created.id, deliveryNo: created.deliveryNo };
+  return { ok: true, id: created.id, deliveryNo: created.deliveryNo };
 }
 
-export async function scheduleDelivery(raw: unknown) {
+export async function scheduleDelivery(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string; deliveryNo: string }>> {
+  try {
+    return await scheduleDeliveryInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function scheduleDeliveryInner(
+  raw: unknown,
+): Promise<{ ok: true; id: string; deliveryNo: string }> {
   const session = await requireRole(SCHEDULE_ROLES);
   const input = DeliveryAssignInput.parse(raw);
 
@@ -402,9 +464,9 @@ export async function scheduleDelivery(raw: unknown) {
       where: { id: input.orderId },
       select: { id: true, code: true, status: true, deliveryAddress: true, customer: { select: { contactName: true, phone: true } } },
     });
-    if (!order) throw new Error("Order not found");
+    if (!order) throw new ActionError("Order not found");
     if (order.status !== OrderStatus.READY) {
-      throw new AuthorizationError(`Cannot schedule delivery for order in status ${order.status}`);
+      throw new ActionError(`Cannot schedule delivery for order in status ${order.status}`);
     }
 
     const deliveryNo = await nextDeliveryNumber(tx);
@@ -439,76 +501,98 @@ export async function scheduleDelivery(raw: unknown) {
 
   revalidatePath("/deliveries");
   revalidatePath(`/orders/${input.orderId}`);
-  return { id: result.delivery.id, deliveryNo: result.delivery.deliveryNo };
+  return { ok: true, id: result.delivery.id, deliveryNo: result.delivery.deliveryNo };
 }
 
-export async function dispatchDelivery(id: string) {
-  const session = await requireRole(DRIVER_OR_MANAGER);
-  await db.$transaction(async (tx) => {
-    const delivery = await tx.delivery.findUnique({
-      where: { id },
-      select: { status: true, driverUserId: true, orderId: true },
+export async function dispatchDelivery(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(DRIVER_OR_MANAGER);
+    await db.$transaction(async (tx) => {
+      const delivery = await tx.delivery.findUnique({
+        where: { id },
+        select: { status: true, driverUserId: true, orderId: true },
+      });
+      if (!delivery) throw new ActionError("Delivery not found");
+      if (delivery.status !== DeliveryStatus.SCHEDULED) {
+        throw new ActionError(`Cannot dispatch a delivery in status ${delivery.status}`);
+      }
+      // Driver can only dispatch their own.
+      if (
+        session.user.role === Role.DELIVERY &&
+        delivery.driverUserId !== session.user.id
+      ) {
+        throw new ActionError("Drivers can only dispatch their own deliveries");
+      }
+      // Status guard: two dispatch taps (or two devices) can't both
+      // transition the delivery — the loser gets a clear message.
+      const updated = await tx.delivery.updateMany({
+        where: { id, status: DeliveryStatus.SCHEDULED },
+        data: { status: DeliveryStatus.DISPATCHED, dispatchedAt: new Date() },
+      });
+      if (updated.count === 0) {
+        throw new ActionError("This delivery was already dispatched — refresh the page.");
+      }
+      await tx.order.update({
+        where: { id: delivery.orderId },
+        data: { status: OrderStatus.OUT_FOR_DELIVERY },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "DELIVERY_DISPATCHED",
+          entity: "Delivery",
+          entityId: id,
+        },
+      });
     });
-    if (!delivery) throw new Error("Delivery not found");
-    if (delivery.status !== DeliveryStatus.SCHEDULED) {
-      throw new AuthorizationError(`Cannot dispatch a delivery in status ${delivery.status}`);
-    }
-    // Driver can only dispatch their own.
-    if (
-      session.user.role === Role.DELIVERY &&
-      delivery.driverUserId !== session.user.id
-    ) {
-      throw new AuthorizationError("Drivers can only dispatch their own deliveries");
-    }
-    await tx.delivery.update({
-      where: { id },
-      data: { status: DeliveryStatus.DISPATCHED, dispatchedAt: new Date() },
-    });
-    await tx.order.update({
-      where: { id: delivery.orderId },
-      data: { status: OrderStatus.OUT_FOR_DELIVERY },
-    });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "DELIVERY_DISPATCHED",
-        entity: "Delivery",
-        entityId: id,
-      },
-    });
-  });
-  revalidatePath(`/deliveries/${id}`);
-  revalidatePath("/deliveries");
+    revalidatePath(`/deliveries/${id}`);
+    revalidatePath("/deliveries");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function markDeliveryArrived(id: string) {
-  const session = await requireRole(DRIVER_OR_MANAGER);
-  await db.$transaction(async (tx) => {
-    const delivery = await tx.delivery.findUnique({
-      where: { id },
-      select: { status: true, driverUserId: true },
+export async function markDeliveryArrived(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(DRIVER_OR_MANAGER);
+    await db.$transaction(async (tx) => {
+      const delivery = await tx.delivery.findUnique({
+        where: { id },
+        select: { status: true, driverUserId: true },
+      });
+      if (!delivery) throw new ActionError("Delivery not found");
+      if (
+        delivery.status !== DeliveryStatus.DISPATCHED &&
+        delivery.status !== DeliveryStatus.IN_TRANSIT
+      ) {
+        throw new ActionError(`Cannot mark arrived from ${delivery.status}`);
+      }
+      if (session.user.role === Role.DELIVERY && delivery.driverUserId !== session.user.id) {
+        throw new ActionError("Drivers can only update their own deliveries");
+      }
+      // Status guard: skip the stamp if the delivery moved on meanwhile.
+      const updated = await tx.delivery.updateMany({
+        where: { id, status: { in: [DeliveryStatus.DISPATCHED, DeliveryStatus.IN_TRANSIT] } },
+        data: { arrivedAt: new Date() },
+      });
+      if (updated.count === 0) {
+        throw new ActionError("Delivery status just changed — refresh the page.");
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "DELIVERY_ARRIVED",
+          entity: "Delivery",
+          entityId: id,
+        },
+      });
     });
-    if (!delivery) throw new Error("Delivery not found");
-    if (
-      delivery.status !== DeliveryStatus.DISPATCHED &&
-      delivery.status !== DeliveryStatus.IN_TRANSIT
-    ) {
-      throw new AuthorizationError(`Cannot mark arrived from ${delivery.status}`);
-    }
-    if (session.user.role === Role.DELIVERY && delivery.driverUserId !== session.user.id) {
-      throw new AuthorizationError("Drivers can only update their own deliveries");
-    }
-    await tx.delivery.update({ where: { id }, data: { arrivedAt: new Date() } });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "DELIVERY_ARRIVED",
-        entity: "Delivery",
-        entityId: id,
-      },
-    });
-  });
-  revalidatePath(`/deliveries/${id}`);
+    revalidatePath(`/deliveries/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 /**
@@ -527,18 +611,26 @@ export async function markDeliveryArrived(id: string) {
  * working without a rename sweep; the OTP field on the input is now
  * optional and ignored if absent.
  */
-export async function confirmDeliveryOTP(id: string, raw: unknown) {
+export async function confirmDeliveryOTP(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    return await confirmDeliveryOTPInner(id, raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function confirmDeliveryOTPInner(id: string, raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(DRIVER_OR_MANAGER);
   const input = DeliveryOTPInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {
     const delivery = await tx.delivery.findUnique({ where: { id } });
-    if (!delivery) throw new Error("Delivery not found");
+    if (!delivery) throw new ActionError("Delivery not found");
     if (delivery.status === DeliveryStatus.DELIVERED || delivery.status === DeliveryStatus.FAILED) {
-      throw new AuthorizationError(`Delivery is already ${delivery.status}`);
+      throw new ActionError(`Delivery is already ${delivery.status}`);
     }
     if (session.user.role === Role.DELIVERY && delivery.driverUserId !== session.user.id) {
-      throw new AuthorizationError("Drivers can only confirm their own deliveries");
+      throw new ActionError("Drivers can only confirm their own deliveries");
     }
 
     // Legacy OTP support: if the delivery row has an otpHash AND the
@@ -552,7 +644,7 @@ export async function confirmDeliveryOTP(id: string, raw: unknown) {
           where: { id },
           data: { otpAttempts: attempts },
         });
-        throw new Error("OTP did not match");
+        throw new ActionError("OTP did not match");
       }
     }
 
@@ -560,10 +652,10 @@ export async function confirmDeliveryOTP(id: string, raw: unknown) {
     let pay: { amount: Decimal; method: PaymentMethod; reference: string | null } | null = null;
     if (input.paymentCollected) {
       if (!input.paymentAmount || !input.paymentMethod) {
-        throw new Error("Payment amount and method are required when payment is collected");
+        throw new ActionError("Payment amount and method are required when payment is collected");
       }
       const amt = toDecimal(input.paymentAmount);
-      if (amt.lte(0)) throw new Error("Payment amount must be greater than zero");
+      if (amt.lte(0)) throw new ActionError("Payment amount must be greater than zero");
       pay = {
         amount: amt,
         method: input.paymentMethod,
@@ -571,8 +663,10 @@ export async function confirmDeliveryOTP(id: string, raw: unknown) {
       };
     }
 
-    await tx.delivery.update({
-      where: { id },
+    // Status guard: a concurrent confirm/fail (double-tap, two devices)
+    // loses the race and gets a clear message instead of double-writing.
+    const updated = await tx.delivery.updateMany({
+      where: { id, status: { notIn: [DeliveryStatus.DELIVERED, DeliveryStatus.FAILED] } },
       data: {
         status: DeliveryStatus.DELIVERED,
         deliveredAt: new Date(),
@@ -583,6 +677,9 @@ export async function confirmDeliveryOTP(id: string, raw: unknown) {
         paymentRecordedAt: pay ? new Date() : null,
       },
     });
+    if (updated.count === 0) {
+      throw new ActionError("This delivery was already confirmed or failed — refresh the page.");
+    }
     // Generate a feedback token when the order goes DELIVERED. The
     // public form at /f/<token> opens for ROOM_SERVICE / PACKET / ODC
     // / ALACARTE channels — banquet + management skip it (no public
@@ -635,38 +732,48 @@ export async function confirmDeliveryOTP(id: string, raw: unknown) {
   revalidatePath(`/deliveries/${id}`);
   revalidatePath("/deliveries");
   revalidatePath(`/orders/${result.orderId}`);
+  return { ok: true };
 }
 
-export async function failDelivery(id: string, raw: unknown) {
-  const session = await requireRole(DRIVER_OR_MANAGER);
-  const input = DeliveryFailureInput.parse(raw);
-  await db.$transaction(async (tx) => {
-    const delivery = await tx.delivery.findUnique({ where: { id }, select: { status: true, driverUserId: true } });
-    if (!delivery) throw new Error("Delivery not found");
-    if (delivery.status === DeliveryStatus.DELIVERED || delivery.status === DeliveryStatus.FAILED) {
-      throw new AuthorizationError(`Delivery is already ${delivery.status}`);
-    }
-    if (session.user.role === Role.DELIVERY && delivery.driverUserId !== session.user.id) {
-      throw new AuthorizationError("Drivers can only fail their own deliveries");
-    }
-    await tx.delivery.update({
-      where: { id },
-      data: { status: DeliveryStatus.FAILED, failureReason: input.reason },
+export async function failDelivery(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireRole(DRIVER_OR_MANAGER);
+    const input = DeliveryFailureInput.parse(raw);
+    await db.$transaction(async (tx) => {
+      const delivery = await tx.delivery.findUnique({ where: { id }, select: { status: true, driverUserId: true } });
+      if (!delivery) throw new ActionError("Delivery not found");
+      if (delivery.status === DeliveryStatus.DELIVERED || delivery.status === DeliveryStatus.FAILED) {
+        throw new ActionError(`Delivery is already ${delivery.status}`);
+      }
+      if (session.user.role === Role.DELIVERY && delivery.driverUserId !== session.user.id) {
+        throw new ActionError("Drivers can only fail their own deliveries");
+      }
+      // Status guard: a concurrent confirm/fail loses the race cleanly.
+      const updated = await tx.delivery.updateMany({
+        where: { id, status: { notIn: [DeliveryStatus.DELIVERED, DeliveryStatus.FAILED] } },
+        data: { status: DeliveryStatus.FAILED, failureReason: input.reason },
+      });
+      if (updated.count === 0) {
+        throw new ActionError("This delivery was already confirmed or failed — refresh the page.");
+      }
+      await tx.deliveryAttempt.create({
+        data: { deliveryId: id, outcome: "OTHER", notes: input.reason },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "DELIVERY_FAILED",
+          entity: "Delivery",
+          entityId: id,
+          payloadHash: sha256Json({ reason: input.reason }),
+        },
+      });
     });
-    await tx.deliveryAttempt.create({
-      data: { deliveryId: id, outcome: "OTHER", notes: input.reason },
-    });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "DELIVERY_FAILED",
-        entity: "Delivery",
-        entityId: id,
-        payloadHash: sha256Json({ reason: input.reason }),
-      },
-    });
-  });
-  revalidatePath(`/deliveries/${id}`);
+    revalidatePath(`/deliveries/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────

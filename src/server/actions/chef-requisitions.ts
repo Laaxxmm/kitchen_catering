@@ -31,6 +31,7 @@ import { nextChefRequisitionNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
 import { notifyRoles } from "@/server/actions/notifications";
+import { deferAfterResponse } from "@/server/defer";
 import { createProductionJobForOrder } from "./production-jobs";
 
 
@@ -190,13 +191,15 @@ async function createStandaloneChefRequisitionInner(
     return created;
   });
 
-  await notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
-    kind: "GENERIC",
-    title: `Kitchen stock request ${result.requisitionNo}`,
-    body: `The chef raised a general stock request (no order). Open to issue line by line.`,
-    link: `/requisitions/${result.id}`,
-    dedupeKey: `chef-standalone-req:${result.id}`,
-  });
+  deferAfterResponse("chef-standalone-req:notify", () =>
+    notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+      kind: "GENERIC",
+      title: `Kitchen stock request ${result.requisitionNo}`,
+      body: `The chef raised a general stock request (no order). Open to issue line by line.`,
+      link: `/requisitions/${result.id}`,
+      dedupeKey: `chef-standalone-req:${result.id}`,
+    }),
+  );
 
   revalidatePath("/requisitions");
   return { ok: true, id: result.id, requisitionNo: result.requisitionNo };

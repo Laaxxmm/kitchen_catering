@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { DeliveryStatus, PaymentMethod } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface OTPPayload {
   // OTP step retired — kept on the type so the page-level shim stays
@@ -19,10 +20,10 @@ interface OTPPayload {
 
 interface Props {
   status: DeliveryStatus;
-  onDispatch: () => Promise<void>;
-  onArrived: () => Promise<void>;
-  onConfirmOTP: (payload: OTPPayload) => Promise<void>;
-  onFail: (reason: string) => Promise<void>;
+  onDispatch: () => Promise<ActionResult>;
+  onArrived: () => Promise<ActionResult>;
+  onConfirmOTP: (payload: OTPPayload) => Promise<ActionResult>;
+  onFail: (reason: string) => Promise<ActionResult>;
 }
 
 const METHODS: { value: PaymentMethod; label: string }[] = [
@@ -43,10 +44,14 @@ export function MobileDeliveryControls({ status, onDispatch, onArrived, onConfir
   const [method, setMethod] = useState<PaymentMethod>("CASH");
   const [reference, setReference] = useState("");
 
-  function call(fn: () => Promise<void>) {
+  function call(fn: () => Promise<ActionResult>) {
     startTransition(async () => {
       try {
-        await fn();
+        const res = await fn();
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Saved");
         router.refresh();
       } catch (err) {

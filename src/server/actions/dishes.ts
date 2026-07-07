@@ -6,6 +6,11 @@ import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { DishInput } from "@/lib/validators";
 import { sha256Json } from "@/lib/audit";
+import {
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD];
 const READ_ROLES = [
@@ -15,7 +20,15 @@ const READ_ROLES = [
   Role.DELIVERY, Role.FNB_SERVICE,
 ];
 
-export async function createDish(raw: unknown) {
+export async function createDish(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await createDishInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createDishInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = DishInput.parse(raw);
 
@@ -44,10 +57,18 @@ export async function createDish(raw: unknown) {
     return row;
   });
   revalidatePath("/dishes");
-  return { id: dish.id };
+  return { ok: true, id: dish.id };
 }
 
-export async function updateDish(id: string, raw: unknown) {
+export async function updateDish(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    return await updateDishInner(id, raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function updateDishInner(id: string, raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const input = DishInput.parse(raw);
   await db.$transaction(async (tx) => {
@@ -75,22 +96,28 @@ export async function updateDish(id: string, raw: unknown) {
   });
   revalidatePath("/dishes");
   revalidatePath(`/dishes/${id}`);
+  return { ok: true };
 }
 
-export async function deactivateDish(id: string) {
-  const session = await requireRole(WRITE_ROLES);
-  await db.$transaction(async (tx) => {
-    await tx.dish.update({ where: { id }, data: { active: false } });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "DISH_DEACTIVATED",
-        entity: "Dish",
-        entityId: id,
-      },
+export async function deactivateDish(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(WRITE_ROLES);
+    await db.$transaction(async (tx) => {
+      await tx.dish.update({ where: { id }, data: { active: false } });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "DISH_DEACTIVATED",
+          entity: "Dish",
+          entityId: id,
+        },
+      });
     });
-  });
-  revalidatePath("/dishes");
+    revalidatePath("/dishes");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 export async function listDishes(opts: { query?: string; active?: boolean } = {}) {

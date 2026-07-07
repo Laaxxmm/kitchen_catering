@@ -31,6 +31,7 @@ export default async function NewInvoicePage() {
   }) {
     "use server";
     const r = await createStandaloneCustomerInvoice(input);
+    if (!r.ok) return r;
     redirect(`/invoices/${r.id}`);
   }
 

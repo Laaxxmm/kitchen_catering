@@ -23,6 +23,7 @@ export default async function NewGRNPage({
   async function create(input: { poId: string; notes: string | null; lines: Array<{ poLineId: string; acceptedQty: string; rejectedQty: string; reason: string | null }> }) {
     "use server";
     const r = await createGRN(input);
+    if (!r.ok) return r;
     redirect(`/procurement/grns/${r.id}`);
   }
 

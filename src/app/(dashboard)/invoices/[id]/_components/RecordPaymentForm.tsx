@@ -8,10 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResultWith } from "@/lib/action-result";
 
 interface Props {
   outstanding: number;
-  onSubmit: (input: { amount: string; method: PaymentMethod; reference: string | null; notes: string | null; paidAt: string }) => Promise<{ id: string }>;
+  onSubmit: (input: { amount: string; method: PaymentMethod; reference: string | null; notes: string | null; paidAt: string }) => Promise<ActionResultWith<{ id: string }>>;
 }
 
 export function RecordPaymentForm({ outstanding, onSubmit }: Props) {
@@ -28,13 +29,17 @@ export function RecordPaymentForm({ outstanding, onSubmit }: Props) {
     if (!amount || Number(amount) <= 0) return toast.error("Amount must be positive");
     startTransition(async () => {
       try {
-        await onSubmit({
+        const res = await onSubmit({
           amount,
           method,
           reference: reference || null,
           notes: notes || null,
           paidAt,
         });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Payment recorded");
         router.refresh();
         setAmount("");

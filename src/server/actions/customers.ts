@@ -6,6 +6,12 @@ import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { CustomerInput, type CustomerInputT } from "@/lib/validators";
 import { sha256Json } from "@/lib/audit";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
 import { Decimal } from "decimal.js";
 import { toDecimal } from "@/lib/money";
 
@@ -59,85 +65,104 @@ function customerDataFromInput(input: CustomerInputT) {
   };
 }
 
-export async function createCustomer(raw: unknown) {
-  const session = await requireRole(WRITE_ROLES);
-  const input = CustomerInput.parse(raw);
-  const block = checkCreditDurationGate(session.user.role, input.creditDays);
-  if (block) throw new Error(block);
+export async function createCustomer(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    const session = await requireRole(WRITE_ROLES);
+    const input = CustomerInput.parse(raw);
+    const block = checkCreditDurationGate(session.user.role, input.creditDays);
+    if (block) throw new ActionError(block);
 
-  const customer = await db.$transaction(async (tx) => {
-    const row = await tx.customer.create({ data: customerDataFromInput(input) });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "CUSTOMER_CREATED",
-        entity: "Customer",
-        entityId: row.id,
-        payloadHash: sha256Json({ name: input.name, gstin: input.gstin }),
-      },
+    const customer = await db.$transaction(async (tx) => {
+      const row = await tx.customer.create({ data: customerDataFromInput(input) });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "CUSTOMER_CREATED",
+          entity: "Customer",
+          entityId: row.id,
+          payloadHash: sha256Json({ name: input.name, gstin: input.gstin }),
+        },
+      });
+      return row;
     });
-    return row;
-  });
 
-  revalidatePath("/customers");
-  return { id: customer.id };
+    revalidatePath("/customers");
+    return { ok: true, id: customer.id };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function updateCustomer(id: string, raw: unknown) {
-  const session = await requireRole(WRITE_ROLES);
-  const input = CustomerInput.parse(raw);
-  const block = checkCreditDurationGate(session.user.role, input.creditDays);
-  if (block) throw new Error(block);
+export async function updateCustomer(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireRole(WRITE_ROLES);
+    const input = CustomerInput.parse(raw);
+    const block = checkCreditDurationGate(session.user.role, input.creditDays);
+    if (block) throw new ActionError(block);
 
-  await db.$transaction(async (tx) => {
-    await tx.customer.update({ where: { id }, data: customerDataFromInput(input) });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "CUSTOMER_UPDATED",
-        entity: "Customer",
-        entityId: id,
-        payloadHash: sha256Json({ name: input.name, gstin: input.gstin }),
-      },
+    await db.$transaction(async (tx) => {
+      await tx.customer.update({ where: { id }, data: customerDataFromInput(input) });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "CUSTOMER_UPDATED",
+          entity: "Customer",
+          entityId: id,
+          payloadHash: sha256Json({ name: input.name, gstin: input.gstin }),
+        },
+      });
     });
-  });
 
-  revalidatePath("/customers");
-  revalidatePath(`/customers/${id}`);
+    revalidatePath("/customers");
+    revalidatePath(`/customers/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function deactivateCustomer(id: string) {
-  const session = await requireRole([Role.ADMIN, Role.MANAGER]);
-  await db.$transaction(async (tx) => {
-    await tx.customer.update({ where: { id }, data: { active: false } });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "CUSTOMER_DEACTIVATED",
-        entity: "Customer",
-        entityId: id,
-      },
+export async function deactivateCustomer(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole([Role.ADMIN, Role.MANAGER]);
+    await db.$transaction(async (tx) => {
+      await tx.customer.update({ where: { id }, data: { active: false } });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "CUSTOMER_DEACTIVATED",
+          entity: "Customer",
+          entityId: id,
+        },
+      });
     });
-  });
-  revalidatePath("/customers");
-  revalidatePath(`/customers/${id}`);
+    revalidatePath("/customers");
+    revalidatePath(`/customers/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function reactivateCustomer(id: string) {
-  const session = await requireRole([Role.ADMIN, Role.MANAGER]);
-  await db.$transaction(async (tx) => {
-    await tx.customer.update({ where: { id }, data: { active: true } });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "CUSTOMER_REACTIVATED",
-        entity: "Customer",
-        entityId: id,
-      },
+export async function reactivateCustomer(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole([Role.ADMIN, Role.MANAGER]);
+    await db.$transaction(async (tx) => {
+      await tx.customer.update({ where: { id }, data: { active: true } });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "CUSTOMER_REACTIVATED",
+          entity: "Customer",
+          entityId: id,
+        },
+      });
     });
-  });
-  revalidatePath("/customers");
-  revalidatePath(`/customers/${id}`);
+    revalidatePath("/customers");
+    revalidatePath(`/customers/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 /**

@@ -62,15 +62,15 @@ export function ReviewWorklist({ data }: { data: Worklist }) {
               <div className="ml-auto">
                 <MarkPaidModal
                   outstanding={b.amount}
-                  onSubmit={async (input) => {
-                    await markVendorBillPaid({
+                  onSubmit={(input) =>
+                    markVendorBillPaid({
                       id: b.id,
                       method: input.method,
                       reference: input.reference,
                       paidAt: input.paidAt,
                       notes: input.notes,
-                    });
-                  }}
+                    })
+                  }
                 />
               </div>
             </Row>

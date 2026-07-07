@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ProductionJobItemStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
+import type { ActionResult } from "@/lib/action-result";
 import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   itemId: string;
   status: ProductionJobItemStatus;
-  onStart: (itemId: string) => Promise<void>;
-  onReady: (itemId: string) => Promise<void>;
+  onStart: (itemId: string) => Promise<ActionResult>;
+  onReady: (itemId: string) => Promise<ActionResult>;
 }
 
 /**
@@ -27,10 +28,14 @@ export function ItemControls({ itemId, status, onStart, onReady }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
-  function call(fn: () => Promise<void>) {
+  function call(fn: () => Promise<ActionResult>) {
     startTransition(async () => {
       try {
-        await fn();
+        const res = await fn();
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Saved");
         router.refresh();
       } catch (err) {

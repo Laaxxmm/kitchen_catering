@@ -51,7 +51,7 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
     notes: string | null;
   }) {
     "use server";
-    await markVendorBillPaid({ id, ...input });
+    return markVendorBillPaid({ id, ...input });
   }
   async function doReverse(paymentId: string, formData: FormData) {
     "use server";

@@ -11,7 +11,14 @@ import {
   VendorPOStatus,
 } from "@prisma/client";
 import { db } from "@/server/db";
-import { AuthorizationError, requireRole } from "@/server/rbac";
+import { requireRole } from "@/server/rbac";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
+import { deferAfterResponse } from "@/server/defer";
 import {
   GRNCreateInput,
   VendorBillCreateInput,
@@ -85,7 +92,17 @@ function typeForcesAdmin(type: ProcurementType): boolean {
 // VENDOR PO
 // =====================================================================
 
-export async function createVendorPO(raw: unknown) {
+export async function createVendorPO(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string; poNo: string }>> {
+  try {
+    return await createVendorPOInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createVendorPOInner(raw: unknown): Promise<{ ok: true; id: string; poNo: string }> {
   // The store keeper raises the PO for a kitchen shortfall (vendor + goods,
   // prices pre-filled); the manager/admin then approves it by value. Admin
   // and manager can also raise one directly.
@@ -163,10 +180,18 @@ export async function createVendorPO(raw: unknown) {
   });
 
   revalidatePath("/procurement/purchase-orders");
-  return { id: po.id, poNo: po.poNo };
+  return { ok: true, id: po.id, poNo: po.poNo };
 }
 
-export async function submitVendorPO(id: string) {
+export async function submitVendorPO(id: string): Promise<ActionResult> {
+  try {
+    return await submitVendorPOInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function submitVendorPOInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const result = await db.$transaction(async (tx) => {
     const po = await tx.vendorPO.findUnique({
@@ -180,19 +205,23 @@ export async function submitVendorPO(id: string) {
         vendor: { select: { name: true } },
       },
     });
-    if (!po) throw new Error("PO not found");
+    if (!po) throw new ActionError("PO not found");
     if (po.status !== VendorPOStatus.DRAFT) {
-      throw new AuthorizationError("Only DRAFT POs can be submitted");
+      throw new ActionError("Only DRAFT POs can be submitted");
     }
     const nextStatus =
       po.approvalTier === "auto" ? VendorPOStatus.APPROVED : VendorPOStatus.PENDING_APPROVAL;
-    await tx.vendorPO.update({
-      where: { id },
+    // Status guard: a double-submit loses the race and gets a clear message.
+    const updated = await tx.vendorPO.updateMany({
+      where: { id, status: VendorPOStatus.DRAFT },
       data: {
         status: nextStatus,
         ...(po.approvalTier === "auto" ? { approvedByUserId: session.user.id, approvedAt: new Date() } : {}),
       },
     });
+    if (updated.count === 0) {
+      throw new ActionError("This PO was already submitted — refresh the page.");
+    }
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -212,25 +241,29 @@ export async function submitVendorPO(id: string) {
 
   // Ping the approvers — the notification spells out it's a Purchase Order
   // and who needs to sign off, so the manager/admin knows what it's for.
+  // Deferred: the submitter's button shouldn't wait on the fan-out.
   if (result.status === VendorPOStatus.PENDING_APPROVAL) {
-    const tiers = await loadApprovalTiers();
-    const forcedByType = typeForcesAdmin(result.procurementType);
-    const adminRequired = needsAdminApproval(toDecimal(result.grandTotal), tiers) || forcedByType;
-    const reason = forcedByType
-      ? `${result.procurementType === ProcurementType.LOCAL ? "Local" : "Online"} procurement — Manager + Admin sign-off required.`
-      : adminRequired
-        ? "Over ₹5,000 — Admin sign-off required."
-        : "Under ₹5,000 — Manager can approve.";
-    await notifyRoles([Role.MANAGER, Role.ADMIN], {
-      kind: "PO_AWAITING_ADMIN",
-      title: `Purchase order ${result.poNo} needs approval`,
-      body: `${result.vendorName} · ₹${toDecimal(result.grandTotal).toFixed(2)}. ${reason} Open Purchase orders to approve.`,
-      link: `/procurement/purchase-orders/${id}`,
-      dedupeKey: `po-awaiting:${id}`,
+    deferAfterResponse("po-submit:notify", async () => {
+      const tiers = await loadApprovalTiers();
+      const forcedByType = typeForcesAdmin(result.procurementType);
+      const adminRequired = needsAdminApproval(toDecimal(result.grandTotal), tiers) || forcedByType;
+      const reason = forcedByType
+        ? `${result.procurementType === ProcurementType.LOCAL ? "Local" : "Online"} procurement — Manager + Admin sign-off required.`
+        : adminRequired
+          ? "Over ₹5,000 — Admin sign-off required."
+          : "Under ₹5,000 — Manager can approve.";
+      await notifyRoles([Role.MANAGER, Role.ADMIN], {
+        kind: "PO_AWAITING_ADMIN",
+        title: `Purchase order ${result.poNo} needs approval`,
+        body: `${result.vendorName} · ₹${toDecimal(result.grandTotal).toFixed(2)}. ${reason} Open Purchase orders to approve.`,
+        link: `/procurement/purchase-orders/${id}`,
+        dedupeKey: `po-awaiting:${id}`,
+      });
     });
   }
 
   revalidatePath(`/procurement/purchase-orders/${id}`);
+  return { ok: true };
 }
 
 /**
@@ -251,7 +284,15 @@ export async function submitVendorPO(id: string) {
  * Legacy approvalTier values ("manager" / "admin") are routed through
  * this tiered engine — no special casing.
  */
-export async function approveVendorPO(id: string) {
+export async function approveVendorPO(id: string): Promise<ActionResult> {
+  try {
+    return await approveVendorPOInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function approveVendorPOInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(APPROVE_ROLES);
   await db.$transaction(async (tx) => {
     const po = await tx.vendorPO.findUnique({
@@ -265,9 +306,9 @@ export async function approveVendorPO(id: string) {
         managerApprovedById: true,
       },
     });
-    if (!po) throw new Error("PO not found");
+    if (!po) throw new ActionError("PO not found");
     if (po.status !== VendorPOStatus.PENDING_APPROVAL) {
-      throw new AuthorizationError("PO is not awaiting approval");
+      throw new ActionError("PO is not awaiting approval");
     }
 
     const tiers = await loadApprovalTiers();
@@ -282,11 +323,13 @@ export async function approveVendorPO(id: string) {
     if (!managerStepDone) {
       // Manager step — Manager OR Admin can perform it.
       if (role !== Role.MANAGER && role !== Role.ADMIN) {
-        throw new AuthorizationError("Only Manager or Admin can approve");
+        throw new ActionError("Only Manager or Admin can approve");
       }
       const fullyApproved = !adminRequired || role === Role.ADMIN;
-      await tx.vendorPO.update({
-        where: { id },
+      // Approval-state guard: two approvers acting at once can't both
+      // record the manager step — the loser matches zero rows.
+      const updated = await tx.vendorPO.updateMany({
+        where: { id, status: VendorPOStatus.PENDING_APPROVAL, managerApprovedAt: null },
         data: {
           managerApprovedById: session.user.id,
           managerApprovedAt: now,
@@ -302,6 +345,9 @@ export async function approveVendorPO(id: string) {
             : {}),
         },
       });
+      if (updated.count === 0) {
+        throw new ActionError("Someone just approved this PO — refresh the page.");
+      }
       await tx.auditLog.create({
         data: {
           userId: session.user.id,
@@ -319,12 +365,12 @@ export async function approveVendorPO(id: string) {
     // adminRequired was true — sub-threshold POs would have been fully
     // approved in the manager step).
     if (role !== Role.ADMIN) {
-      throw new AuthorizationError(
+      throw new ActionError(
         "This PO needs Admin approval (already approved by Manager).",
       );
     }
-    await tx.vendorPO.update({
-      where: { id },
+    const updated = await tx.vendorPO.updateMany({
+      where: { id, status: VendorPOStatus.PENDING_APPROVAL, managerApprovedAt: { not: null } },
       data: {
         adminApprovedById: session.user.id,
         adminApprovedAt: now,
@@ -333,6 +379,9 @@ export async function approveVendorPO(id: string) {
         approvedAt: now,
       },
     });
+    if (updated.count === 0) {
+      throw new ActionError("Someone just approved this PO — refresh the page.");
+    }
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -343,19 +392,20 @@ export async function approveVendorPO(id: string) {
     });
   });
 
-  // ---- notifications, outside the transaction ----
+  // ---- notifications, after the response (best-effort) ----
   // Re-load the PO so we can find out whether the manager-approval
   // step ended fully approved or still awaiting admin.
-  const after = await db.vendorPO.findUnique({
-    where: { id },
-    select: {
-      poNo: true,
-      status: true,
-      managerApprovedAt: true,
-      adminApprovedAt: true,
-    },
-  });
-  if (after) {
+  deferAfterResponse("po-approve:notify", async () => {
+    const after = await db.vendorPO.findUnique({
+      where: { id },
+      select: {
+        poNo: true,
+        status: true,
+        managerApprovedAt: true,
+        adminApprovedAt: true,
+      },
+    });
+    if (!after) return;
     if (after.status === VendorPOStatus.APPROVED) {
       // Final approval — notify the Store team so they can send the PO.
       await notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
@@ -379,47 +429,65 @@ export async function approveVendorPO(id: string) {
         dedupeKey: `po-awaiting-admin:${id}`,
       });
     }
-  }
+  });
 
   revalidatePath(`/procurement/purchase-orders/${id}`);
   revalidatePath("/procurement/purchase-orders");
+  return { ok: true };
 }
 
-export async function sendVendorPO(id: string) {
-  const session = await requireRole(WRITE_ROLES);
-  await db.$transaction(async (tx) => {
-    const po = await tx.vendorPO.findUnique({ where: { id }, select: { status: true } });
-    if (!po) throw new Error("PO not found");
-    if (po.status !== VendorPOStatus.APPROVED) {
-      throw new AuthorizationError("Only APPROVED POs can be sent");
-    }
-    await tx.vendorPO.update({ where: { id }, data: { status: VendorPOStatus.SENT, sentAt: new Date() } });
-    await tx.auditLog.create({
-      data: { userId: session.user.id, action: "VENDOR_PO_SENT", entity: "VendorPO", entityId: id },
+export async function sendVendorPO(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(WRITE_ROLES);
+    await db.$transaction(async (tx) => {
+      const po = await tx.vendorPO.findUnique({ where: { id }, select: { status: true } });
+      if (!po) throw new ActionError("PO not found");
+      if (po.status !== VendorPOStatus.APPROVED) {
+        throw new ActionError("Only APPROVED POs can be sent");
+      }
+      // Status guard: a double-click loses the race with a clear message.
+      const updated = await tx.vendorPO.updateMany({
+        where: { id, status: VendorPOStatus.APPROVED },
+        data: { status: VendorPOStatus.SENT, sentAt: new Date() },
+      });
+      if (updated.count === 0) {
+        throw new ActionError("This PO was already marked sent — refresh the page.");
+      }
+      await tx.auditLog.create({
+        data: { userId: session.user.id, action: "VENDOR_PO_SENT", entity: "VendorPO", entityId: id },
+      });
     });
-  });
-  revalidatePath(`/procurement/purchase-orders/${id}`);
+    revalidatePath(`/procurement/purchase-orders/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function cancelVendorPO(id: string, reason: string) {
-  const session = await requireRole(APPROVE_ROLES);
-  if (!reason.trim()) throw new Error("Reason required");
-  await db.$transaction(async (tx) => {
-    await tx.vendorPO.update({
-      where: { id },
-      data: { status: VendorPOStatus.CANCELLED, closedAt: new Date(), notes: reason },
+export async function cancelVendorPO(id: string, reason: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(APPROVE_ROLES);
+    if (!reason.trim()) throw new ActionError("Reason required");
+    await db.$transaction(async (tx) => {
+      await tx.vendorPO.update({
+        where: { id },
+        data: { status: VendorPOStatus.CANCELLED, closedAt: new Date(), notes: reason },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "VENDOR_PO_CANCELLED",
+          entity: "VendorPO",
+          entityId: id,
+          payloadHash: sha256Json({ reason }),
+        },
+      });
     });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "VENDOR_PO_CANCELLED",
-        entity: "VendorPO",
-        entityId: id,
-        payloadHash: sha256Json({ reason }),
-      },
-    });
-  });
-  revalidatePath(`/procurement/purchase-orders/${id}`);
+    revalidatePath(`/procurement/purchase-orders/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 // =====================================================================
@@ -437,7 +505,17 @@ export async function cancelVendorPO(id: string, reason: string) {
  *   6. Recompute PO status (RECEIVED / PARTIALLY_RECEIVED)
  *   7. Write AuditLog
  */
-export async function createGRN(raw: unknown) {
+export async function createGRN(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string; grnNo: string }>> {
+  try {
+    return await createGRNInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createGRNInner(raw: unknown): Promise<{ ok: true; id: string; grnNo: string }> {
   // The store keeper records the goods receipt when the vendor delivers
   // against their PO. Manager / admin / accounts can too.
   const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.STORE_KEEPER]);
@@ -448,12 +526,12 @@ export async function createGRN(raw: unknown) {
       where: { id: input.poId },
       include: { lines: { include: { ingredient: true } } },
     });
-    if (!po) throw new Error("PO not found");
+    if (!po) throw new ActionError("PO not found");
     const ok =
       po.status === VendorPOStatus.APPROVED ||
       po.status === VendorPOStatus.SENT ||
       po.status === VendorPOStatus.PARTIALLY_RECEIVED;
-    if (!ok) throw new AuthorizationError("PO must be approved/sent before receiving goods");
+    if (!ok) throw new ActionError("PO must be approved/sent before receiving goods");
 
     const grnNo = await nextGRNNumber(tx);
     const grn = await tx.gRN.create({
@@ -470,17 +548,17 @@ export async function createGRN(raw: unknown) {
     for (let i = 0; i < input.lines.length; i++) {
       const lineInput = input.lines[i];
       const poLine = po.lines.find((l) => l.id === lineInput.poLineId);
-      if (!poLine) throw new Error("PO line not found");
+      if (!poLine) throw new ActionError("PO line not found");
 
       const orderedRemaining = toDecimal(poLine.quantity).minus(toDecimal(poLine.receivedQty));
       const accepted = toDecimal(lineInput.acceptedQty);
       const rejected = toDecimal(lineInput.rejectedQty ?? "0");
       if (accepted.plus(rejected).gt(orderedRemaining)) {
-        throw new Error(
+        throw new ActionError(
           `Cannot receive ${accepted.plus(rejected).toString()} of "${poLine.description}" — only ${orderedRemaining.toString()} remaining on PO`,
         );
       }
-      if (accepted.lt(0) || rejected.lt(0)) throw new Error("Quantities must be non-negative");
+      if (accepted.lt(0) || rejected.lt(0)) throw new ActionError("Quantities must be non-negative");
 
       const grnLine = await tx.gRNLine.create({
         data: {
@@ -559,7 +637,7 @@ export async function createGRN(raw: unknown) {
   revalidatePath("/procurement/grns");
   revalidatePath(`/procurement/purchase-orders/${input.poId}`);
   revalidatePath("/inventory/ingredients");
-  return result;
+  return { ok: true, ...result };
 }
 
 // =====================================================================
@@ -569,7 +647,17 @@ export async function createGRN(raw: unknown) {
 const PRICE_TOLERANCE_PCT = new Decimal(0.5); // ±0.5%
 const TAX_TOLERANCE_ABS = new Decimal(1); // ±₹1
 
-export async function createVendorBill(raw: unknown) {
+export async function createVendorBill(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string; billNo: string }>> {
+  try {
+    return await createVendorBillInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createVendorBillInner(raw: unknown): Promise<{ ok: true; id: string; billNo: string }> {
   const session = await requireRole(BILL_WRITE_ROLES);
   const input = VendorBillCreateInput.parse(raw);
 
@@ -627,7 +715,7 @@ export async function createVendorBill(raw: unknown) {
   });
 
   revalidatePath("/procurement/vendor-bills");
-  return { id: result.id, billNo: result.billNo };
+  return { ok: true, id: result.id, billNo: result.billNo };
 }
 
 interface Discrepancy {
@@ -648,7 +736,19 @@ interface Discrepancy {
  *   - Bill tax amount must match PO tax within ±₹1.
  * Sets status MATCHED on success, DISCREPANCY with discrepancyNote otherwise.
  */
-export async function matchVendorBill(id: string) {
+export async function matchVendorBill(
+  id: string,
+): Promise<ActionResultWith<{ matched: boolean; discrepancies: Discrepancy[] }>> {
+  try {
+    return await matchVendorBillInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function matchVendorBillInner(
+  id: string,
+): Promise<{ ok: true; matched: boolean; discrepancies: Discrepancy[] }> {
   const session = await requireRole(BILL_WRITE_ROLES);
   return db.$transaction(async (tx) => {
     const bill = await tx.vendorBill.findUnique({
@@ -658,8 +758,8 @@ export async function matchVendorBill(id: string) {
         po: { include: { lines: { include: { ingredient: true } } } },
       },
     });
-    if (!bill) throw new Error("Bill not found");
-    if (!bill.po) throw new Error("Bill has no linked PO — can't 3-way match");
+    if (!bill) throw new ActionError("Bill not found");
+    if (!bill.po) throw new ActionError("Bill has no linked PO — can't 3-way match");
 
     const discrepancies: Discrepancy[] = [];
 
@@ -734,24 +834,36 @@ export async function matchVendorBill(id: string) {
     });
 
     revalidatePath(`/procurement/vendor-bills/${id}`);
-    return { matched, discrepancies };
+    return { ok: true as const, matched, discrepancies };
   });
 }
 
-export async function approveVendorBill(id: string) {
-  const session = await requireRole(APPROVE_ROLES);
-  await db.$transaction(async (tx) => {
-    const bill = await tx.vendorBill.findUnique({ where: { id }, select: { status: true } });
-    if (!bill) throw new Error("Bill not found");
-    if (bill.status !== VendorBillStatus.MATCHED && bill.status !== VendorBillStatus.DISCREPANCY) {
-      throw new AuthorizationError(`Cannot approve a bill in status ${bill.status}`);
-    }
-    await tx.vendorBill.update({ where: { id }, data: { status: VendorBillStatus.APPROVED } });
-    await tx.auditLog.create({
-      data: { userId: session.user.id, action: "VENDOR_BILL_APPROVED", entity: "VendorBill", entityId: id },
+export async function approveVendorBill(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(APPROVE_ROLES);
+    await db.$transaction(async (tx) => {
+      const bill = await tx.vendorBill.findUnique({ where: { id }, select: { status: true } });
+      if (!bill) throw new ActionError("Bill not found");
+      if (bill.status !== VendorBillStatus.MATCHED && bill.status !== VendorBillStatus.DISCREPANCY) {
+        throw new ActionError(`Cannot approve a bill in status ${bill.status}`);
+      }
+      // Status guard: a double-approve loses the race with a clear message.
+      const updated = await tx.vendorBill.updateMany({
+        where: { id, status: { in: [VendorBillStatus.MATCHED, VendorBillStatus.DISCREPANCY] } },
+        data: { status: VendorBillStatus.APPROVED },
+      });
+      if (updated.count === 0) {
+        throw new ActionError("This bill was already approved — refresh the page.");
+      }
+      await tx.auditLog.create({
+        data: { userId: session.user.id, action: "VENDOR_BILL_APPROVED", entity: "VendorBill", entityId: id },
+      });
     });
-  });
-  revalidatePath(`/procurement/vendor-bills/${id}`);
+    revalidatePath(`/procurement/vendor-bills/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 /**
@@ -766,7 +878,21 @@ export async function markVendorBillPaid(input: {
   reference?: string | null;
   paidAt?: string | null;
   notes?: string | null;
-}) {
+}): Promise<ActionResult> {
+  try {
+    return await markVendorBillPaidInner(input);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function markVendorBillPaidInner(input: {
+  id: string;
+  method: PaymentMethod;
+  reference?: string | null;
+  paidAt?: string | null;
+  notes?: string | null;
+}): Promise<{ ok: true }> {
   // Vendor side: accounts is the one who actually pays the supplier,
   // so they get the mark-paid action (plus admin/manager). Customer
   // side stays admin/manager only — see markCustomerInvoicePaid.
@@ -774,19 +900,19 @@ export async function markVendorBillPaid(input: {
   const { id } = input;
   const paidAtDate = input.paidAt ? new Date(input.paidAt) : new Date();
   if (Number.isNaN(paidAtDate.getTime())) {
-    throw new Error("paidAt is not a valid date");
+    throw new ActionError("paidAt is not a valid date");
   }
   await db.$transaction(async (tx) => {
     const bill = await tx.vendorBill.findUnique({
       where: { id },
       select: { id: true, status: true, grandTotal: true, amountPaid: true },
     });
-    if (!bill) throw new Error("Bill not found");
+    if (!bill) throw new ActionError("Bill not found");
     if (bill.status === VendorBillStatus.PAID) {
-      throw new Error("Bill is already marked paid");
+      throw new ActionError("Bill is already marked paid");
     }
     if (bill.status === VendorBillStatus.DRAFT || bill.status === VendorBillStatus.PENDING_MATCH) {
-      throw new Error("Run the 3-way match (or save the bill) before marking it paid");
+      throw new ActionError("Run the 3-way match (or save the bill) before marking it paid");
     }
     const balance = toDecimal(bill.grandTotal).minus(toDecimal(bill.amountPaid));
     if (balance.gt(0)) {
@@ -822,11 +948,13 @@ export async function markVendorBillPaid(input: {
   });
 
   // Notify Store + Procurement so they can stop chasing the bill.
-  const billAfter = await db.vendorBill.findUnique({
-    where: { id },
-    select: { billNo: true, vendor: { select: { name: true } } },
-  });
-  if (billAfter) {
+  // Deferred — best-effort fan-out after the response.
+  deferAfterResponse("vendor-bill-paid:notify", async () => {
+    const billAfter = await db.vendorBill.findUnique({
+      where: { id },
+      select: { billNo: true, vendor: { select: { name: true } } },
+    });
+    if (!billAfter) return;
     await notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
       kind: "VENDOR_BILL_PAID",
       title: `Vendor bill ${billAfter.billNo} paid`,
@@ -834,11 +962,12 @@ export async function markVendorBillPaid(input: {
       link: `/procurement/vendor-bills/${id}`,
       dedupeKey: `vendor-bill-paid:${id}`,
     });
-  }
+  });
 
   revalidatePath("/procurement/vendor-bills");
   revalidatePath(`/procurement/vendor-bills/${id}`);
   revalidatePath("/payments/payables");
+  return { ok: true };
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────

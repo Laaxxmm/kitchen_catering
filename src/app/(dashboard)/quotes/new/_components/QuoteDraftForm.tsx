@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { isNextNavigationError } from "@/lib/next-error";
 import { QuickAddCustomer, type QuickCustomerInput } from "@/components/ik/QuickAddCustomer";
 import type { QuoteCreateInputT } from "@/lib/validators";
+import type { ActionResultWith } from "@/lib/action-result";
 
 interface CustomerOption {
   id: string;
@@ -41,10 +42,12 @@ interface DraftLine {
 interface Props {
   customers: CustomerOption[];
   dishes: DishOption[];
-  onSubmit: (input: QuoteCreateInputT) => Promise<{ id: string; quoteNo: string }>;
+  onSubmit: (input: QuoteCreateInputT) => Promise<ActionResultWith<{ id: string; quoteNo: string }>>;
   /** Optional inline customer creator. When passed, the form shows a
    *  "+ Add new customer" toggle under the customer dropdown. */
-  onQuickAddCustomer?: (input: QuickCustomerInput) => Promise<{ id: string; name: string; stateCode: string }>;
+  onQuickAddCustomer?: (
+    input: QuickCustomerInput,
+  ) => Promise<ActionResultWith<{ id: string; name: string; stateCode: string }>>;
 }
 
 function emptyLine(): DraftLine {
@@ -155,6 +158,10 @@ export function QuoteDraftForm({ customers, dishes, onSubmit, onQuickAddCustomer
             hsnSac: l.hsnSac.trim() || null,
           })),
         });
+        if (!r.ok) {
+          toast.error(r.error);
+          return;
+        }
         toast.success(`Quote ${r.quoteNo} created`);
         router.push(`/quotes/${r.id}`);
         router.refresh();

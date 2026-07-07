@@ -10,10 +10,13 @@ import {
   VendorBillStatus,
 } from "@prisma/client";
 import { db } from "@/server/db";
+import { requireRole } from "@/server/rbac";
 import {
-  AuthorizationError,
-  requireRole,
-} from "@/server/rbac";
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
 import {
   CustomerInvoicePaymentInput,
   PaymentReversalInput,
@@ -37,22 +40,32 @@ function methodCanonical(m: string | PaymentMethod): PaymentMethod {
  * If the invoice flips to PAID and is tied to an Order, the order also
  * flips to PAID.
  */
-export async function recordCustomerInvoicePayment(raw: unknown) {
+export async function recordCustomerInvoicePayment(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await recordCustomerInvoicePaymentInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function recordCustomerInvoicePaymentInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = CustomerInvoicePaymentInput.parse(raw);
-  if (toDecimal(input.amount).lte(0)) throw new Error("Amount must be positive");
+  if (toDecimal(input.amount).lte(0)) throw new ActionError("Amount must be positive");
 
   const result = await db.$transaction(async (tx) => {
     const invoice = await tx.customerInvoice.findUnique({
       where: { id: input.invoiceId },
       select: { id: true, status: true, grandTotal: true, orderId: true },
     });
-    if (!invoice) throw new Error("Invoice not found");
+    if (!invoice) throw new ActionError("Invoice not found");
     if (
       invoice.status !== CustomerInvoiceStatus.ISSUED &&
       invoice.status !== CustomerInvoiceStatus.PARTIAL
     ) {
-      throw new AuthorizationError(`Cannot record payment on invoice in status ${invoice.status}`);
+      throw new ActionError(`Cannot record payment on invoice in status ${invoice.status}`);
     }
 
     // Guardrail: block over-recording. If this payment would push total
@@ -66,7 +79,7 @@ export async function recordCustomerInvoicePayment(raw: unknown) {
     const grandTotal = toDecimal(invoice.grandTotal);
     const wouldBe = priorPaid.plus(toDecimal(input.amount));
     if (wouldBe.gt(grandTotal)) {
-      throw new Error(
+      throw new ActionError(
         `Recorded payments would be ₹${wouldBe.toFixed(2)} on a ₹${grandTotal.toFixed(2)} invoice ` +
           `(₹${priorPaid.toFixed(2)} already recorded). Check for a duplicate payment.`,
       );
@@ -129,10 +142,18 @@ export async function recordCustomerInvoicePayment(raw: unknown) {
 
   revalidatePath(`/invoices/${input.invoiceId}`);
   revalidatePath("/payments/receivables");
-  return { id: result.id };
+  return { ok: true, id: result.id };
 }
 
-export async function reverseCustomerInvoicePayment(raw: unknown) {
+export async function reverseCustomerInvoicePayment(raw: unknown): Promise<ActionResult> {
+  try {
+    return await reverseCustomerInvoicePaymentInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function reverseCustomerInvoicePaymentInner(raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const input = PaymentReversalInput.parse(raw);
 
@@ -141,8 +162,8 @@ export async function reverseCustomerInvoicePayment(raw: unknown) {
       where: { id: input.paymentId },
       select: { id: true, invoiceId: true, reversedAt: true },
     });
-    if (!payment) throw new Error("Payment not found");
-    if (payment.reversedAt) throw new Error("Payment is already reversed");
+    if (!payment) throw new ActionError("Payment not found");
+    if (payment.reversedAt) throw new ActionError("Payment is already reversed");
 
     await tx.customerInvoicePayment.update({
       where: { id: payment.id },
@@ -158,7 +179,7 @@ export async function reverseCustomerInvoicePayment(raw: unknown) {
       where: { id: payment.invoiceId },
       select: { id: true, grandTotal: true, orderId: true },
     });
-    if (!invoice) throw new Error("Parent invoice missing");
+    if (!invoice) throw new ActionError("Parent invoice missing");
     const liveRows = await tx.customerInvoicePayment.findMany({
       where: { invoiceId: invoice.id, reversedAt: null },
       select: { amount: true },
@@ -207,6 +228,7 @@ export async function reverseCustomerInvoicePayment(raw: unknown) {
   });
 
   revalidatePath("/payments/receivables");
+  return { ok: true };
 }
 
 export async function listReceivablePayments(limit = 100) {
@@ -225,19 +247,29 @@ export async function listReceivablePayments(limit = 100) {
 // VENDOR BILL PAYMENTS (AP) — Phase 2 wires this up
 // =====================================================================
 
-export async function recordVendorBillPayment(raw: unknown) {
+export async function recordVendorBillPayment(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await recordVendorBillPaymentInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function recordVendorBillPaymentInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = VendorBillPaymentInput.parse(raw);
-  if (toDecimal(input.amount).lte(0)) throw new Error("Amount must be positive");
+  if (toDecimal(input.amount).lte(0)) throw new ActionError("Amount must be positive");
 
   const result = await db.$transaction(async (tx) => {
     const bill = await tx.vendorBill.findUnique({
       where: { id: input.billId },
       select: { id: true, status: true, grandTotal: true },
     });
-    if (!bill) throw new Error("Bill not found");
+    if (!bill) throw new ActionError("Bill not found");
     if (bill.status !== VendorBillStatus.APPROVED && bill.status !== VendorBillStatus.MATCHED) {
-      throw new AuthorizationError(`Cannot pay a bill in status ${bill.status}`);
+      throw new ActionError(`Cannot pay a bill in status ${bill.status}`);
     }
     const payment = await tx.vendorBillPayment.create({
       data: {
@@ -281,10 +313,18 @@ export async function recordVendorBillPayment(raw: unknown) {
 
   revalidatePath(`/procurement/vendor-bills/${input.billId}`);
   revalidatePath("/payments/payables");
-  return { id: result.id };
+  return { ok: true, id: result.id };
 }
 
-export async function reverseVendorBillPayment(raw: unknown) {
+export async function reverseVendorBillPayment(raw: unknown): Promise<ActionResult> {
+  try {
+    return await reverseVendorBillPaymentInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function reverseVendorBillPaymentInner(raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const input = PaymentReversalInput.parse(raw);
 
@@ -293,8 +333,8 @@ export async function reverseVendorBillPayment(raw: unknown) {
       where: { id: input.paymentId },
       select: { id: true, vendorBillId: true, reversedAt: true },
     });
-    if (!payment) throw new Error("Payment not found");
-    if (payment.reversedAt) throw new Error("Payment already reversed");
+    if (!payment) throw new ActionError("Payment not found");
+    if (payment.reversedAt) throw new ActionError("Payment already reversed");
     await tx.vendorBillPayment.update({
       where: { id: payment.id },
       data: {
@@ -307,7 +347,7 @@ export async function reverseVendorBillPayment(raw: unknown) {
       where: { id: payment.vendorBillId },
       select: { id: true, grandTotal: true },
     });
-    if (!bill) throw new Error("Parent bill missing");
+    if (!bill) throw new ActionError("Parent bill missing");
     const liveRows = await tx.vendorBillPayment.findMany({
       where: { vendorBillId: bill.id, reversedAt: null },
       select: { amount: true },
@@ -334,6 +374,7 @@ export async function reverseVendorBillPayment(raw: unknown) {
     });
   });
   revalidatePath("/payments/payables");
+  return { ok: true };
 }
 
 export async function listPayablePayments(limit = 100) {

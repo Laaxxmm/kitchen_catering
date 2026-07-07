@@ -23,8 +23,9 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
 
   async function update(input: CustomerInputT) {
     "use server";
-    await updateCustomer(id, input);
-    return { id };
+    const res = await updateCustomer(id, input);
+    if (!res.ok) return res;
+    return { ok: true as const, id };
   }
   async function deactivate() {
     "use server";

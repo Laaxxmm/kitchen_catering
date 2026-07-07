@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 /**
  * Modal triggered by the "Mark paid" button on the customer-invoice
@@ -27,7 +28,7 @@ interface Props {
     reference: string | null;
     paidAt: string;
     notes: string | null;
-  }) => Promise<void>;
+  }) => Promise<ActionResult | void>;
 }
 
 function defaultPaidAt(): string {
@@ -59,12 +60,16 @@ export function MarkPaidModal({ outstanding, onSubmit }: Props) {
     }
     startTransition(async () => {
       try {
-        await onSubmit({
+        const res = await onSubmit({
           method,
           reference: reference.trim() || null,
           paidAt,
           notes: notes.trim() || null,
         });
+        if (res && !res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Marked paid");
         setOpen(false);
         // Reset for the next time the modal opens.

@@ -13,11 +13,14 @@ import {
   Role,
 } from "@prisma/client";
 import { db } from "@/server/db";
+import { requireRole, requireSession } from "@/server/rbac";
 import {
-  AuthorizationError,
-  requireRole,
-  requireSession,
-} from "@/server/rbac";
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
+import { deferAfterResponse } from "@/server/defer";
 import { isImmediateChannel } from "@/lib/order-channels";
 import { nextCustomerInvoiceNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
@@ -50,7 +53,19 @@ function newShareToken(): string {
  *
  * e-invoicing fields stay NOT_REQUIRED until Phase 3 wires the GSP.
  */
-export async function createCustomerInvoiceFromOrder(orderId: string) {
+export async function createCustomerInvoiceFromOrder(
+  orderId: string,
+): Promise<ActionResultWith<{ id: string; invoiceNo: string }>> {
+  try {
+    return await createCustomerInvoiceFromOrderInner(orderId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createCustomerInvoiceFromOrderInner(
+  orderId: string,
+): Promise<{ ok: true; id: string; invoiceNo: string }> {
   const session = await requireRole(WRITE_ROLES);
 
   const result = await db.$transaction(async (tx) => {
@@ -67,9 +82,9 @@ export async function createCustomerInvoiceFromOrder(orderId: string) {
         },
       },
     });
-    if (!order) throw new Error("Order not found");
+    if (!order) throw new ActionError("Order not found");
     if (order.status !== OrderStatus.DELIVERED) {
-      throw new AuthorizationError(`Cannot invoice order in status ${order.status}`);
+      throw new ActionError(`Cannot invoice order in status ${order.status}`);
     }
     // Guardrail: one non-cancelled TAX invoice per order. The auto-generated
     // PROFORMA (kind PROFORMA) is informational and must NOT block creating
@@ -83,7 +98,7 @@ export async function createCustomerInvoiceFromOrder(orderId: string) {
       },
     });
     if (existing) {
-      throw new Error(`${order.code} already has invoice ${existing.invoiceNo} — cancel it first to re-invoice.`);
+      throw new ActionError(`${order.code} already has invoice ${existing.invoiceNo} — cancel it first to re-invoice.`);
     }
 
     const supplierState = indefineStateCode();
@@ -205,7 +220,7 @@ export async function createCustomerInvoiceFromOrder(orderId: string) {
   revalidatePath("/invoices");
   revalidatePath(`/orders/${orderId}`);
   revalidatePath(`/invoices/${result.id}`);
-  return { id: result.id, invoiceNo: result.invoiceNo };
+  return { ok: true, id: result.id, invoiceNo: result.invoiceNo };
 }
 
 // ─── Proforma invoice (workflow v2) ─────────────────────────────────────
@@ -411,17 +426,29 @@ interface StandaloneInvoiceInput {
   lines: StandaloneLineInput[];
 }
 
-export async function createStandaloneCustomerInvoice(raw: StandaloneInvoiceInput) {
+export async function createStandaloneCustomerInvoice(
+  raw: StandaloneInvoiceInput,
+): Promise<ActionResultWith<{ id: string; invoiceNo: string }>> {
+  try {
+    return await createStandaloneCustomerInvoiceInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createStandaloneCustomerInvoiceInner(
+  raw: StandaloneInvoiceInput,
+): Promise<{ ok: true; id: string; invoiceNo: string }> {
   const session = await requireRole(WRITE_ROLES);
-  if (!raw.customerId) throw new Error("Customer is required");
-  if (!raw.lines || raw.lines.length === 0) throw new Error("Add at least one line");
+  if (!raw.customerId) throw new ActionError("Customer is required");
+  if (!raw.lines || raw.lines.length === 0) throw new ActionError("Add at least one line");
 
   const result = await db.$transaction(async (tx) => {
     const customer = await tx.customer.findUnique({
       where: { id: raw.customerId },
       select: { id: true },
     });
-    if (!customer) throw new Error("Customer not found");
+    if (!customer) throw new ActionError("Customer not found");
 
     const supplierState = indefineStateCode();
     const summary = summarise({
@@ -495,7 +522,7 @@ export async function createStandaloneCustomerInvoice(raw: StandaloneInvoiceInpu
   });
 
   revalidatePath("/invoices");
-  return { id: result.id, invoiceNo: result.invoiceNo };
+  return { ok: true, id: result.id, invoiceNo: result.invoiceNo };
 }
 
 // ─── Edit lines on a DRAFT invoice ──────────────────────────────────────
@@ -509,18 +536,26 @@ interface EditInvoiceInput {
   lines: StandaloneLineInput[];
 }
 
-export async function updateDraftInvoice(id: string, input: EditInvoiceInput) {
+export async function updateDraftInvoice(id: string, input: EditInvoiceInput): Promise<ActionResult> {
+  try {
+    return await updateDraftInvoiceInner(id, input);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function updateDraftInvoiceInner(id: string, input: EditInvoiceInput): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
-  if (!input.lines || input.lines.length === 0) throw new Error("Add at least one line");
+  if (!input.lines || input.lines.length === 0) throw new ActionError("Add at least one line");
 
   await db.$transaction(async (tx) => {
     const inv = await tx.customerInvoice.findUnique({
       where: { id },
       select: { id: true, status: true, placeOfSupplyStateCode: true },
     });
-    if (!inv) throw new Error("Invoice not found");
+    if (!inv) throw new ActionError("Invoice not found");
     if (inv.status !== CustomerInvoiceStatus.DRAFT) {
-      throw new AuthorizationError("Only DRAFT invoices can be edited. Cancel and re-create to amend a non-draft.");
+      throw new ActionError("Only DRAFT invoices can be edited. Cancel and re-create to amend a non-draft.");
     }
 
     const supplierState = indefineStateCode();
@@ -593,6 +628,7 @@ export async function updateDraftInvoice(id: string, input: EditInvoiceInput) {
 
   revalidatePath("/invoices");
   revalidatePath(`/invoices/${id}`);
+  return { ok: true };
 }
 
 /**
@@ -707,30 +743,35 @@ export async function createTaxInvoiceForOrderInTx(
 /**
  * Best-effort email of a freshly-issued tax invoice. Runs post-commit so
  * SMTP latency doesn't hold the delivery confirmation transaction open.
- * Failures are logged and swallowed; the invoice still exists in the
- * system and can be re-sent manually if the customer never receives it.
+ * On the auto-send pass failures are logged and swallowed (the invoice
+ * still exists and can be re-sent manually); with `force: true` (the
+ * user's explicit "Resend by email" click — kept awaited, the button
+ * exists to send the email) failures come back as `{ ok: false }`.
  */
 export async function emailTaxInvoice(
   invoiceId: string,
   opts: { force?: boolean } = {},
-): Promise<void> {
+): Promise<ActionResult> {
   try {
     const invoice = await db.customerInvoice.findUnique({
       where: { id: invoiceId },
       include: { customer: true, order: { select: { eventDate: true } } },
     });
-    if (!invoice) return;
+    if (!invoice) {
+      if (opts.force) return { ok: false, error: "Invoice not found" };
+      return { ok: true };
+    }
     if (!invoice.customer.email) {
       // No email on file — surface this if it was a manual click. The
       // user is responsible for handling missing-email customers.
       if (opts.force) {
-        throw new Error("Customer has no email on file. Add one on the customer page first.");
+        throw new ActionError("Customer has no email on file. Add one on the customer page first.");
       }
-      return;
+      return { ok: true };
     }
     // Silent skip when called as the auto-send pass; force=true means
     // the user clicked "Resend by email" deliberately.
-    if (invoice.emailedAt && !opts.force) return;
+    if (invoice.emailedAt && !opts.force) return { ok: true };
 
     const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
     const publicUrl = `${baseUrl}/i/${invoice.shareToken}`;
@@ -756,12 +797,15 @@ export async function emailTaxInvoice(
         data: { emailedAt: new Date(), emailedTo: invoice.customer.email },
       });
     }
+    return { ok: true };
   } catch (err) {
     console.error(
       `[emailTaxInvoice ${invoiceId}] failed: ${err instanceof Error ? err.message : err}`,
     );
-    // Re-throw on force so the UI can show the failure (e.g. no email on file).
-    if (opts.force) throw err;
+    // Surface the failure on force so the UI can show it (e.g. no email
+    // on file); the auto-send pass stays best-effort and swallows it.
+    if (opts.force) return actionFailure(err);
+    return { ok: true };
   }
 }
 
@@ -796,7 +840,15 @@ interface MarkPaidInput {
  *
  * For partial payments use `recordCustomerInvoicePayment` instead.
  */
-export async function markCustomerInvoicePaid(input: MarkPaidInput) {
+export async function markCustomerInvoicePaid(input: MarkPaidInput): Promise<ActionResult> {
+  try {
+    return await markCustomerInvoicePaidInner(input);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function markCustomerInvoicePaidInner(input: MarkPaidInput): Promise<{ ok: true }> {
   // Tighter gate than the rest of the WRITE_ROLES set — admin / manager
   // only. Accounts records detailed payments through the RecordPayment
   // form; this one-click action belongs to the people who can also
@@ -805,22 +857,22 @@ export async function markCustomerInvoicePaid(input: MarkPaidInput) {
   const { invoiceId } = input;
   const paidAtDate = input.paidAt ? new Date(input.paidAt) : new Date();
   if (Number.isNaN(paidAtDate.getTime())) {
-    throw new Error("paidAt is not a valid date");
+    throw new ActionError("paidAt is not a valid date");
   }
   await db.$transaction(async (tx) => {
     const invoice = await tx.customerInvoice.findUnique({
       where: { id: invoiceId },
       select: { id: true, status: true, grandTotal: true, amountPaid: true, orderId: true },
     });
-    if (!invoice) throw new Error("Invoice not found");
+    if (!invoice) throw new ActionError("Invoice not found");
     if (invoice.status === CustomerInvoiceStatus.PAID) {
-      throw new Error("Invoice is already marked paid");
+      throw new ActionError("Invoice is already marked paid");
     }
     if (invoice.status === CustomerInvoiceStatus.CANCELLED) {
-      throw new Error("Cannot mark a cancelled invoice paid");
+      throw new ActionError("Cannot mark a cancelled invoice paid");
     }
     if (invoice.status === CustomerInvoiceStatus.DRAFT) {
-      throw new Error("Issue the invoice first, then mark it paid");
+      throw new ActionError("Issue the invoice first, then mark it paid");
     }
     const balance = new Decimal(invoice.grandTotal.toString()).minus(invoice.amountPaid.toString());
     if (balance.lte(0)) {
@@ -868,11 +920,13 @@ export async function markCustomerInvoicePaid(input: MarkPaidInput) {
     });
   });
 
-  const invoiceAfter = await db.customerInvoice.findUnique({
-    where: { id: invoiceId },
-    select: { invoiceNo: true, customer: { select: { name: true } } },
-  });
-  if (invoiceAfter) {
+  // Post-commit fan-out — best-effort, don't hold the button for it.
+  deferAfterResponse("invoice-paid:notify", async () => {
+    const invoiceAfter = await db.customerInvoice.findUnique({
+      where: { id: invoiceId },
+      select: { invoiceNo: true, customer: { select: { name: true } } },
+    });
+    if (!invoiceAfter) return;
     await notifyRoles([Role.SALES, Role.ACCOUNTS, Role.ADMIN, Role.MANAGER], {
       kind: "CUSTOMER_INVOICE_PAID",
       title: `Invoice ${invoiceAfter.invoiceNo} paid`,
@@ -880,14 +934,23 @@ export async function markCustomerInvoicePaid(input: MarkPaidInput) {
       link: `/invoices/${invoiceId}`,
       dedupeKey: `customer-invoice-paid:${invoiceId}`,
     });
-  }
+  });
 
   revalidatePath("/invoices");
   revalidatePath(`/invoices/${invoiceId}`);
   revalidatePath("/payments/receivables");
+  return { ok: true };
 }
 
-export async function issueCustomerInvoice(id: string) {
+export async function issueCustomerInvoice(id: string): Promise<ActionResult> {
+  try {
+    return await issueCustomerInvoiceInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const wantsEInvoice = await eInvoiceEnabled();
 
@@ -896,18 +959,22 @@ export async function issueCustomerInvoice(id: string) {
       where: { id },
       select: { status: true, orderId: true },
     });
-    if (!invoice) throw new Error("Invoice not found");
+    if (!invoice) throw new ActionError("Invoice not found");
     if (invoice.status !== CustomerInvoiceStatus.DRAFT) {
-      throw new AuthorizationError(`Cannot issue an invoice in status ${invoice.status}`);
+      throw new ActionError(`Cannot issue an invoice in status ${invoice.status}`);
     }
-    await tx.customerInvoice.update({
-      where: { id },
+    // Status guard: a concurrent issue loses the race cleanly.
+    const updated = await tx.customerInvoice.updateMany({
+      where: { id, status: CustomerInvoiceStatus.DRAFT },
       data: {
         status: CustomerInvoiceStatus.ISSUED,
         issuedAt: new Date(),
         eInvoiceStatus: wantsEInvoice ? EInvoiceStatus.PENDING : EInvoiceStatus.NOT_REQUIRED,
       },
     });
+    if (updated.count === 0) {
+      throw new ActionError("This invoice was already issued — refresh the page.");
+    }
     if (invoice.orderId) {
       await tx.order.update({
         where: { id: invoice.orderId },
@@ -932,6 +999,7 @@ export async function issueCustomerInvoice(id: string) {
   }
   revalidatePath("/invoices");
   revalidatePath(`/invoices/${id}`);
+  return { ok: true };
 }
 
 // ─── E-Invoice generation (fire-and-forget after issue) ────────────────
@@ -1001,23 +1069,37 @@ async function generateIRNForInvoice(invoiceId: string): Promise<void> {
   }
 }
 
-export async function cancelCustomerInvoiceEInvoice(invoiceId: string, reason: string) {
+export async function cancelCustomerInvoiceEInvoice(
+  invoiceId: string,
+  reason: string,
+): Promise<ActionResult> {
+  try {
+    return await cancelCustomerInvoiceEInvoiceInner(invoiceId, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function cancelCustomerInvoiceEInvoiceInner(
+  invoiceId: string,
+  reason: string,
+): Promise<{ ok: true }> {
   const session = await requireRole([Role.ADMIN, Role.ACCOUNTS]);
-  if (!reason.trim()) throw new Error("Reason required");
+  if (!reason.trim()) throw new ActionError("Reason required");
 
   const invoice = await db.customerInvoice.findUnique({
     where: { id: invoiceId },
     select: { eInvoiceStatus: true, irn: true, ackDate: true },
   });
-  if (!invoice) throw new Error("Invoice not found");
+  if (!invoice) throw new ActionError("Invoice not found");
   if (invoice.eInvoiceStatus !== EInvoiceStatus.GENERATED || !invoice.irn) {
-    throw new Error("Invoice does not have a GENERATED IRN to cancel");
+    throw new ActionError("Invoice does not have a GENERATED IRN to cancel");
   }
   const hoursSinceAck = invoice.ackDate
     ? (Date.now() - invoice.ackDate.getTime()) / (60 * 60 * 1000)
     : 999;
   if (hoursSinceAck > 24) {
-    throw new Error("IRN can only be cancelled within 24 hours of issue. Issue a credit note instead.");
+    throw new ActionError("IRN can only be cancelled within 24 hours of issue. Issue a credit note instead.");
   }
 
   const provider = await getEInvoiceProvider();
@@ -1048,27 +1130,33 @@ export async function cancelCustomerInvoiceEInvoice(invoiceId: string, reason: s
     });
   });
   revalidatePath(`/invoices/${invoiceId}`);
+  return { ok: true };
 }
 
-export async function cancelCustomerInvoice(id: string, reason: string) {
-  const session = await requireRole([Role.ADMIN, Role.MANAGER]);
-  if (!reason.trim()) throw new Error("Reason required");
-  await db.$transaction(async (tx) => {
-    await tx.customerInvoice.update({
-      where: { id },
-      data: { status: CustomerInvoiceStatus.CANCELLED },
+export async function cancelCustomerInvoice(id: string, reason: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole([Role.ADMIN, Role.MANAGER]);
+    if (!reason.trim()) throw new ActionError("Reason required");
+    await db.$transaction(async (tx) => {
+      await tx.customerInvoice.update({
+        where: { id },
+        data: { status: CustomerInvoiceStatus.CANCELLED },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "CUSTOMER_INVOICE_CANCELLED",
+          entity: "CustomerInvoice",
+          entityId: id,
+          payloadHash: sha256Json({ reason }),
+        },
+      });
     });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "CUSTOMER_INVOICE_CANCELLED",
-        entity: "CustomerInvoice",
-        entityId: id,
-        payloadHash: sha256Json({ reason }),
-      },
-    });
-  });
-  revalidatePath(`/invoices/${id}`);
+    revalidatePath(`/invoices/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────
@@ -1158,10 +1246,22 @@ export async function listBillableInHouseOrders() {
  * the GST split once (same customer ⇒ same place of supply), credits any
  * payment collected on the way, and advances all the orders to INVOICED.
  */
-export async function createConsolidatedInHouseInvoice(orderIds: string[]) {
+export async function createConsolidatedInHouseInvoice(
+  orderIds: string[],
+): Promise<ActionResultWith<{ id: string; invoiceNo: string }>> {
+  try {
+    return await createConsolidatedInHouseInvoiceInner(orderIds);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createConsolidatedInHouseInvoiceInner(
+  orderIds: string[],
+): Promise<{ ok: true; id: string; invoiceNo: string }> {
   const session = await requireRole(INHOUSE_BILL_ROLES);
   if (!orderIds || orderIds.length === 0) {
-    throw new Error("Pick at least one order to bill.");
+    throw new ActionError("Pick at least one order to bill.");
   }
 
   const result = await db.$transaction(async (tx) => {
@@ -1179,19 +1279,19 @@ export async function createConsolidatedInHouseInvoice(orderIds: string[]) {
         },
       },
     });
-    if (orders.length === 0) throw new Error("Orders not found.");
+    if (orders.length === 0) throw new ActionError("Orders not found.");
 
     const customerId = orders[0].customer.id;
     const pos = orders[0].placeOfSupplyStateCode;
     for (const o of orders) {
       if (o.status !== OrderStatus.DELIVERED) {
-        throw new Error(`${o.code} isn't ready to bill yet (it's ${o.status.toLowerCase()}).`);
+        throw new ActionError(`${o.code} isn't ready to bill yet (it's ${o.status.toLowerCase()}).`);
       }
       if (!isImmediateChannel(o.channel)) {
-        throw new Error(`${o.code} isn't an in-house order.`);
+        throw new ActionError(`${o.code} isn't an in-house order.`);
       }
       if (o.customer.id !== customerId) {
-        throw new Error("All orders on one bill must belong to the same customer.");
+        throw new ActionError("All orders on one bill must belong to the same customer.");
       }
     }
 
@@ -1296,7 +1396,7 @@ export async function createConsolidatedInHouseInvoice(orderIds: string[]) {
 
   revalidatePath("/invoices");
   revalidatePath("/invoices/room-service");
-  return { id: result.id, invoiceNo: result.invoiceNo };
+  return { ok: true, id: result.id, invoiceNo: result.invoiceNo };
 }
 
 export async function getCustomerInvoice(id: string) {

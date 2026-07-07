@@ -4,6 +4,8 @@ import { Role, VendorBillStatus } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { notifyRoles } from "@/server/actions/notifications";
+import { actionFailure, type ActionResultWith } from "@/server/action-result";
+import { deferAfterResponse } from "@/server/defer";
 
 /**
  * Workflow doc:
@@ -45,11 +47,16 @@ function ymd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-export async function runVendorPaymentReminders(): Promise<ReminderRunResult> {
+export async function runVendorPaymentReminders(): Promise<ActionResultWith<ReminderRunResult>> {
   // Admin/Manager/Accounts can trigger manually; cron route below skips
   // the auth gate by calling the internal runner directly.
-  await requireRole([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
-  return runVendorPaymentRemindersInternal();
+  try {
+    await requireRole([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
+    const result = await runVendorPaymentRemindersInternal();
+    return { ok: true, ...result };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 /** Internal runner — no auth check. Used by the cron API route. */
@@ -109,14 +116,18 @@ export async function runVendorPaymentRemindersInternal(): Promise<ReminderRunRe
     // check on Task (we look up first).
     const taskDedupe = `vendor-reminder:${b.id}:${todayKey}`;
 
-    // Notify Accounts + Admin/Manager via the bell.
-    await notifyRoles([Role.ACCOUNTS, Role.ADMIN, Role.MANAGER], {
-      kind: "VENDOR_PAYMENT_REMINDER",
-      title: `${isStatutory ? "Statutory " : ""}Payment due: ${b.billNo}`,
-      body: `${b.vendor.name} · ₹${outstanding}${dueDate ? ` · due ${ymd(dueDate)}` : ""}`,
-      link: `/procurement/vendor-bills/${b.id}`,
-      dedupeKey: taskDedupe,
-    });
+    // Notify Accounts + Admin/Manager via the bell — after the response,
+    // so a manual "Run reminders" click doesn't wait on N notification
+    // inserts. dedupeKey keeps a re-run the same day a no-op.
+    deferAfterResponse(`vendor-reminder:notify:${b.id}`, () =>
+      notifyRoles([Role.ACCOUNTS, Role.ADMIN, Role.MANAGER], {
+        kind: "VENDOR_PAYMENT_REMINDER",
+        title: `${isStatutory ? "Statutory " : ""}Payment due: ${b.billNo}`,
+        body: `${b.vendor.name} · ₹${outstanding}${dueDate ? ` · due ${ymd(dueDate)}` : ""}`,
+        link: `/procurement/vendor-bills/${b.id}`,
+        dedupeKey: taskDedupe,
+      }),
+    );
     notified++;
 
     // Also create a Task for someone in Accounts to action it.

@@ -20,8 +20,8 @@ export default async function MobileDeliveryDetailPage({ params }: { params: Pro
   const delivery = await getDelivery(id);
   if (!delivery) notFound();
 
-  async function doDispatch() { "use server"; await dispatchDelivery(id); }
-  async function doArrived() { "use server"; await markDeliveryArrived(id); }
+  async function doDispatch() { "use server"; return dispatchDelivery(id); }
+  async function doArrived() { "use server"; return markDeliveryArrived(id); }
   async function doOTP(payload: {
     otp?: string;
     paymentCollected: boolean;
@@ -30,11 +30,11 @@ export default async function MobileDeliveryDetailPage({ params }: { params: Pro
     paymentReference?: string;
   }) {
     "use server";
-    await confirmDeliveryOTP(id, payload);
+    return confirmDeliveryOTP(id, payload);
   }
   async function doFail(reason: string) {
     "use server";
-    await failDelivery(id, { reason });
+    return failDelivery(id, { reason });
   }
 
   const phoneLink = delivery.recipientPhone ? `tel:${delivery.recipientPhone.replace(/\s+/g, "")}` : null;

@@ -9,11 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isNextNavigationError } from "@/lib/next-error";
 import { roleLabel } from "@/lib/role-labels";
+import type { ActionResultWith } from "@/lib/action-result";
 
 interface Props {
   defaults?: { name?: string; email?: string; role?: Role; phone?: string | null; active?: boolean };
   requirePassword: boolean;
-  onSubmit: (input: { email: string; name: string; role: Role; phone: string | null; password: string | undefined; active?: boolean }) => Promise<{ id?: string } | void>;
+  onSubmit: (input: { email: string; name: string; role: Role; phone: string | null; password: string | undefined; active?: boolean }) => Promise<ActionResultWith<{ id?: string }>>;
   submitLabel?: string;
   redirectOnSuccess?: string;
 }
@@ -40,8 +41,12 @@ export function UserForm({ defaults, requirePassword, onSubmit, submitLabel = "S
           password: password || undefined,
           active,
         });
+        if (!result.ok) {
+          toast.error(result.error);
+          return;
+        }
         toast.success("Saved");
-        const targetId = result && "id" in result ? result.id : undefined;
+        const targetId = result.id;
         if (redirectOnSuccess && targetId) router.push(redirectOnSuccess.replace(":id", targetId));
         else router.refresh();
       } catch (err) {

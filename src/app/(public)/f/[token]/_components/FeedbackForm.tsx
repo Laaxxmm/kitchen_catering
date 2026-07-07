@@ -23,7 +23,11 @@ export function FeedbackForm({ token }: { token: string }) {
     }
     startTransition(async () => {
       try {
-        await submitFeedback({ token, rating, comment: comment.trim() });
+        const res = await submitFeedback({ token, rating, comment: comment.trim() });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Thanks for your feedback!");
         router.refresh();
       } catch (err) {

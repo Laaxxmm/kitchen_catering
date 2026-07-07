@@ -23,7 +23,11 @@ export function ReviewControls({
   function approve() {
     startTransition(async () => {
       try {
-        await reviewTask({ id: taskId, decision: "APPROVE" });
+        const res = await reviewTask({ id: taskId, decision: "APPROVE" });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Approved");
         router.refresh();
       } catch (err) {
@@ -40,11 +44,15 @@ export function ReviewControls({
     }
     startTransition(async () => {
       try {
-        await reviewTask({
+        const res = await reviewTask({
           id: taskId,
           decision: "REJECT",
           rejectionReason: reason.trim(),
         });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Rejected — assignee will see your reason");
         setReason("");
         setMode("idle");
@@ -59,7 +67,11 @@ export function ReviewControls({
   function cancel() {
     startTransition(async () => {
       try {
-        await cancelTask({ id: taskId, reason: reason.trim() || undefined });
+        const res = await cancelTask({ id: taskId, reason: reason.trim() || undefined });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Task cancelled");
         setReason("");
         setMode("idle");

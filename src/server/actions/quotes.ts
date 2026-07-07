@@ -10,11 +10,13 @@ import {
   Role,
 } from "@prisma/client";
 import { db } from "@/server/db";
+import { requireRole, requireSession } from "@/server/rbac";
 import {
-  AuthorizationError,
-  requireRole,
-  requireSession,
-} from "@/server/rbac";
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
 import { QuoteCreateInput, QuoteLineInput } from "@/lib/validators";
 import { nextOrderCode, nextQuoteNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
@@ -42,7 +44,15 @@ function newShareToken(): string {
  * Totals are computed via the same `summarise()` helper used by orders
  * and invoices — same GST math, same Indian rounding rule.
  */
-export async function createQuote(raw: unknown) {
+export async function createQuote(raw: unknown): Promise<ActionResultWith<{ id: string; quoteNo: string }>> {
+  try {
+    return await createQuoteInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createQuoteInner(raw: unknown): Promise<{ ok: true; id: string; quoteNo: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = QuoteCreateInput.parse(raw);
 
@@ -119,7 +129,7 @@ export async function createQuote(raw: unknown) {
   });
 
   revalidatePath("/quotes");
-  return { id: result.id, quoteNo: result.quoteNo };
+  return { ok: true, id: result.id, quoteNo: result.quoteNo };
 }
 
 // ─── Status transitions ─────────────────────────────────────────────────
@@ -132,19 +142,32 @@ export async function createQuote(raw: unknown) {
  *
  * Stamps `sentAt` and writes a QuoteEvent on every send.
  */
-export async function sendQuote(id: string) {
+export async function sendQuote(id: string): Promise<ActionResult> {
+  try {
+    return await sendQuoteInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function sendQuoteInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const ctx = await db.$transaction(async (tx) => {
     const q = await tx.quote.findUnique({ where: { id }, select: { status: true, lines: true } });
-    if (!q) throw new Error("Quote not found");
+    if (!q) throw new ActionError("Quote not found");
     if (q.status !== QuoteStatus.DRAFT && q.status !== QuoteStatus.REVISED) {
-      throw new AuthorizationError(`Only DRAFT / REVISED quotes can be sent (current: ${q.status})`);
+      throw new ActionError(`Only DRAFT / REVISED quotes can be sent (current: ${q.status})`);
     }
-    if (q.lines.length === 0) throw new Error("Add at least one line before sending");
-    await tx.quote.update({
-      where: { id },
+    if (q.lines.length === 0) throw new ActionError("Add at least one line before sending");
+    // Status guard in the WHERE clause: a concurrent double-send loses the
+    // race and gets a clear message instead of double-transitioning.
+    const updated = await tx.quote.updateMany({
+      where: { id, status: { in: [QuoteStatus.DRAFT, QuoteStatus.REVISED] } },
       data: { status: QuoteStatus.SENT, sentAt: new Date() },
     });
+    if (updated.count === 0) {
+      throw new ActionError("This quote was already sent — refresh the page.");
+    }
     await tx.quoteEvent.create({
       data: {
         quoteId: id,
@@ -160,10 +183,13 @@ export async function sendQuote(id: string) {
   });
 
   // Post-commit: best-effort email to the customer with the share link.
+  // Kept awaited — this button exists to send the email, and the quote
+  // timeline note it writes must be visible when the page revalidates.
   await emailQuoteToCustomerInternal(id, ctx.sessionUserId, "first-send");
 
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
+  return { ok: true };
 }
 
 /**
@@ -171,21 +197,26 @@ export async function sendQuote(id: string) {
  * your email" or when a revision is issued. Doesn't change the quote's
  * status; just shoots another email and logs an event in the timeline.
  */
-export async function resendQuoteEmail(id: string) {
-  const session = await requireRole(WRITE_ROLES);
-  const quote = await db.quote.findUnique({
-    where: { id },
-    select: { status: true, customer: { select: { email: true } } },
-  });
-  if (!quote) throw new Error("Quote not found");
-  if (quote.status === QuoteStatus.DRAFT) {
-    throw new AuthorizationError("Draft quotes cannot be emailed yet — hit 'Send to customer' first");
+export async function resendQuoteEmail(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(WRITE_ROLES);
+    const quote = await db.quote.findUnique({
+      where: { id },
+      select: { status: true, customer: { select: { email: true } } },
+    });
+    if (!quote) throw new ActionError("Quote not found");
+    if (quote.status === QuoteStatus.DRAFT) {
+      throw new ActionError("Draft quotes cannot be emailed yet — hit 'Send to customer' first");
+    }
+    if (!quote.customer.email) {
+      throw new ActionError("Customer has no email on file. Add one on the customer page first.");
+    }
+    await emailQuoteToCustomerInternal(id, session.user.id, "resend");
+    revalidatePath(`/quotes/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
   }
-  if (!quote.customer.email) {
-    throw new Error("Customer has no email on file. Add one on the customer page first.");
-  }
-  await emailQuoteToCustomerInternal(id, session.user.id, "resend");
-  revalidatePath(`/quotes/${id}`);
 }
 
 /**
@@ -270,23 +301,38 @@ async function emailQuoteToCustomerInternal(
 }
 
 /** Move SENT/NEGOTIATING → ACCEPTED. Recorded against the customer's behalf. */
-export async function acceptQuote(id: string, note?: string) {
+export async function acceptQuote(id: string, note?: string): Promise<ActionResult> {
+  try {
+    return await acceptQuoteInner(id, note);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+const ACCEPTABLE_STATUSES: QuoteStatus[] = [
+  QuoteStatus.SENT,
+  QuoteStatus.NEGOTIATING,
+  QuoteStatus.CHANGES_REQUESTED,
+  QuoteStatus.REVISED,
+];
+
+async function acceptQuoteInner(id: string, note?: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   await db.$transaction(async (tx) => {
     const q = await tx.quote.findUnique({ where: { id }, select: { status: true } });
-    if (!q) throw new Error("Quote not found");
-    if (
-      q.status !== QuoteStatus.SENT &&
-      q.status !== QuoteStatus.NEGOTIATING &&
-      q.status !== QuoteStatus.CHANGES_REQUESTED &&
-      q.status !== QuoteStatus.REVISED
-    ) {
-      throw new AuthorizationError(`Cannot accept a quote in status ${q.status}`);
+    if (!q) throw new ActionError("Quote not found");
+    if (!ACCEPTABLE_STATUSES.includes(q.status)) {
+      throw new ActionError(`Cannot accept a quote in status ${q.status}`);
     }
-    await tx.quote.update({
-      where: { id },
+    // Status guard: a concurrent transition loses the race with a clear
+    // message instead of double-accepting.
+    const updated = await tx.quote.updateMany({
+      where: { id, status: { in: ACCEPTABLE_STATUSES } },
       data: { status: QuoteStatus.ACCEPTED, acceptedAt: new Date() },
     });
+    if (updated.count === 0) {
+      throw new ActionError("Quote status just changed — refresh the page.");
+    }
     await tx.quoteEvent.create({
       data: {
         quoteId: id,
@@ -303,19 +349,35 @@ export async function acceptQuote(id: string, note?: string) {
   });
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
+  return { ok: true };
 }
 
 /** Customer didn't go with us — terminal. */
-export async function markQuoteLost(id: string, reason: string) {
+export async function markQuoteLost(id: string, reason: string): Promise<ActionResult> {
+  try {
+    return await markQuoteLostInner(id, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function markQuoteLostInner(id: string, reason: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
-  if (!reason.trim()) throw new Error("Please record why this quote was lost");
+  if (!reason.trim()) throw new ActionError("Please record why this quote was lost");
   await db.$transaction(async (tx) => {
     const q = await tx.quote.findUnique({ where: { id }, select: { status: true } });
-    if (!q) throw new Error("Quote not found");
+    if (!q) throw new ActionError("Quote not found");
     if (q.status === QuoteStatus.CONVERTED || q.status === QuoteStatus.LOST) {
-      throw new AuthorizationError(`Quote is already ${q.status}`);
+      throw new ActionError(`Quote is already ${q.status}`);
     }
-    await tx.quote.update({ where: { id }, data: { status: QuoteStatus.LOST } });
+    // Status guard: don't mark lost if someone converted/closed it meanwhile.
+    const updated = await tx.quote.updateMany({
+      where: { id, status: { notIn: [QuoteStatus.CONVERTED, QuoteStatus.LOST] } },
+      data: { status: QuoteStatus.LOST },
+    });
+    if (updated.count === 0) {
+      throw new ActionError("Quote was already closed — refresh the page.");
+    }
     await tx.quoteEvent.create({
       data: {
         quoteId: id,
@@ -338,6 +400,7 @@ export async function markQuoteLost(id: string, reason: string) {
   });
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
+  return { ok: true };
 }
 
 /**
@@ -345,19 +408,31 @@ export async function markQuoteLost(id: string, reason: string) {
  * writes an event with the customer's note. The salesperson then edits
  * the lines and uses `reviseQuote` to issue a new version.
  */
-export async function flagQuoteChangesRequested(id: string, note: string) {
+export async function flagQuoteChangesRequested(id: string, note: string): Promise<ActionResult> {
+  try {
+    return await flagQuoteChangesRequestedInner(id, note);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function flagQuoteChangesRequestedInner(id: string, note: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
-  if (!note.trim()) throw new Error("Capture what the customer wants changed");
+  if (!note.trim()) throw new ActionError("Capture what the customer wants changed");
   await db.$transaction(async (tx) => {
     const q = await tx.quote.findUnique({ where: { id }, select: { status: true } });
-    if (!q) throw new Error("Quote not found");
+    if (!q) throw new ActionError("Quote not found");
     if (q.status !== QuoteStatus.SENT && q.status !== QuoteStatus.NEGOTIATING) {
-      throw new AuthorizationError(`Cannot mark changes-requested from ${q.status}`);
+      throw new ActionError(`Cannot mark changes-requested from ${q.status}`);
     }
-    await tx.quote.update({
-      where: { id },
+    // Status guard: a concurrent transition loses the race cleanly.
+    const updated = await tx.quote.updateMany({
+      where: { id, status: { in: [QuoteStatus.SENT, QuoteStatus.NEGOTIATING] } },
       data: { status: QuoteStatus.CHANGES_REQUESTED },
     });
+    if (updated.count === 0) {
+      throw new ActionError("Quote status just changed — refresh the page.");
+    }
     await tx.quoteEvent.create({
       data: {
         quoteId: id,
@@ -370,11 +445,20 @@ export async function flagQuoteChangesRequested(id: string, note: string) {
     });
   });
   revalidatePath(`/quotes/${id}`);
+  return { ok: true };
 }
 
 // ─── Edit (DRAFT only) ───────────────────────────────────────────────────
 
-export async function addQuoteLine(quoteId: string, raw: unknown) {
+export async function addQuoteLine(quoteId: string, raw: unknown): Promise<ActionResult> {
+  try {
+    return await addQuoteLineInner(quoteId, raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function addQuoteLineInner(quoteId: string, raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const input = QuoteLineInput.parse(raw);
   await db.$transaction(async (tx) => {
@@ -382,9 +466,9 @@ export async function addQuoteLine(quoteId: string, raw: unknown) {
       where: { id: quoteId },
       select: { status: true, _count: { select: { lines: true } } },
     });
-    if (!q) throw new Error("Quote not found");
+    if (!q) throw new ActionError("Quote not found");
     if (q.status !== QuoteStatus.DRAFT) {
-      throw new AuthorizationError("Lines can only be added to a DRAFT quote");
+      throw new ActionError("Lines can only be added to a DRAFT quote");
     }
     const qty = toDecimal(input.quantity);
     const price = toDecimal(input.unitPrice);
@@ -415,25 +499,31 @@ export async function addQuoteLine(quoteId: string, raw: unknown) {
     });
   });
   revalidatePath(`/quotes/${quoteId}`);
+  return { ok: true };
 }
 
-export async function removeQuoteLine(lineId: string) {
-  const session = await requireRole(WRITE_ROLES);
-  await db.$transaction(async (tx) => {
-    const line = await tx.quoteLine.findUnique({
-      where: { id: lineId },
-      include: { quote: { select: { id: true, status: true } } },
+export async function removeQuoteLine(lineId: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(WRITE_ROLES);
+    await db.$transaction(async (tx) => {
+      const line = await tx.quoteLine.findUnique({
+        where: { id: lineId },
+        include: { quote: { select: { id: true, status: true } } },
+      });
+      if (!line) throw new ActionError("Line not found");
+      if (line.quote.status !== QuoteStatus.DRAFT) {
+        throw new ActionError("Lines can only be removed from a DRAFT quote");
+      }
+      await tx.quoteLine.delete({ where: { id: lineId } });
+      await recomputeQuoteTotals(tx, line.quote.id);
+      await tx.auditLog.create({
+        data: { userId: session.user.id, action: "QUOTE_LINE_REMOVED", entity: "Quote", entityId: line.quote.id },
+      });
     });
-    if (!line) throw new Error("Line not found");
-    if (line.quote.status !== QuoteStatus.DRAFT) {
-      throw new AuthorizationError("Lines can only be removed from a DRAFT quote");
-    }
-    await tx.quoteLine.delete({ where: { id: lineId } });
-    await recomputeQuoteTotals(tx, line.quote.id);
-    await tx.auditLog.create({
-      data: { userId: session.user.id, action: "QUOTE_LINE_REMOVED", entity: "Quote", entityId: line.quote.id },
-    });
-  });
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 /**
@@ -474,14 +564,22 @@ async function recomputeQuoteTotals(
  * what you sent me" link still resolves to the old prices; the new
  * draft can be edited freely and re-sent.
  */
-export async function reviseQuote(parentId: string) {
+export async function reviseQuote(parentId: string): Promise<ActionResultWith<{ id: string; quoteNo: string }>> {
+  try {
+    return await reviseQuoteInner(parentId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function reviseQuoteInner(parentId: string): Promise<{ ok: true; id: string; quoteNo: string }> {
   const session = await requireRole(WRITE_ROLES);
   const result = await db.$transaction(async (tx) => {
     const parent = await tx.quote.findUnique({
       where: { id: parentId },
       include: { lines: { orderBy: { sortOrder: "asc" } } },
     });
-    if (!parent) throw new Error("Parent quote not found");
+    if (!parent) throw new ActionError("Parent quote not found");
 
     const quoteNo = await nextQuoteNumber(tx);
     const revision = await tx.quote.create({
@@ -540,7 +638,7 @@ export async function reviseQuote(parentId: string) {
     return revision;
   });
   revalidatePath("/quotes");
-  return { id: result.id, quoteNo: result.quoteNo };
+  return { ok: true, id: result.id, quoteNo: result.quoteNo };
 }
 
 // ─── Convert to Order ────────────────────────────────────────────────────
@@ -551,7 +649,19 @@ export async function reviseQuote(parentId: string) {
  * dish references where present and the customer + event details from
  * the quote header.
  */
-export async function convertQuoteToOrder(quoteId: string) {
+export async function convertQuoteToOrder(
+  quoteId: string,
+): Promise<ActionResultWith<{ orderId: string; orderCode: string }>> {
+  try {
+    return await convertQuoteToOrderInner(quoteId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function convertQuoteToOrderInner(
+  quoteId: string,
+): Promise<{ ok: true; orderId: string; orderCode: string }> {
   const session = await requireRole(WRITE_ROLES);
   const result = await db.$transaction(async (tx) => {
     const quote = await tx.quote.findUnique({
@@ -561,19 +671,19 @@ export async function convertQuoteToOrder(quoteId: string) {
         lines: { orderBy: { sortOrder: "asc" } },
       },
     });
-    if (!quote) throw new Error("Quote not found");
+    if (!quote) throw new ActionError("Quote not found");
     if (quote.status !== QuoteStatus.ACCEPTED) {
-      throw new AuthorizationError(`Only ACCEPTED quotes can be converted (current: ${quote.status})`);
+      throw new ActionError(`Only ACCEPTED quotes can be converted (current: ${quote.status})`);
     }
     if (quote.orderId) {
-      throw new Error("Quote already has an order linked");
+      throw new ActionError("Quote already has an order linked");
     }
     if (!quote.eventDate || !quote.mealType || !quote.deliveryAddress || !quote.headcount) {
-      throw new Error("Quote is missing event date, meal type, delivery address, or headcount — fill these in before converting");
+      throw new ActionError("Quote is missing event date, meal type, delivery address, or headcount — fill these in before converting");
     }
     const orderableLines = quote.lines.filter((l) => l.dishId);
     if (orderableLines.length === 0) {
-      throw new Error("No dish-backed lines on this quote — only dish-linked lines convert into order items");
+      throw new ActionError("No dish-backed lines on this quote — only dish-linked lines convert into order items");
     }
 
     // Pull dish details so OrderItem fields line up.
@@ -633,10 +743,16 @@ export async function convertQuoteToOrder(quoteId: string) {
         },
       },
     });
-    await tx.quote.update({
-      where: { id: quoteId },
+    // Status guard: two concurrent converts can't both create an order —
+    // the loser matches zero rows and the transaction (order included)
+    // rolls back.
+    const updated = await tx.quote.updateMany({
+      where: { id: quoteId, status: QuoteStatus.ACCEPTED },
       data: { status: QuoteStatus.CONVERTED, convertedAt: new Date(), orderId: order.id },
     });
+    if (updated.count === 0) {
+      throw new ActionError("This quote was already converted — refresh the page.");
+    }
     await tx.quoteEvent.create({
       data: {
         quoteId,
@@ -662,7 +778,7 @@ export async function convertQuoteToOrder(quoteId: string) {
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
   revalidatePath("/orders");
-  return result;
+  return { ok: true, ...result };
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────

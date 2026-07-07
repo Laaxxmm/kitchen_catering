@@ -7,13 +7,17 @@ import { Decimal } from "decimal.js";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import type { ActionResultWith } from "@/lib/action-result";
 import { isNextNavigationError } from "@/lib/next-error";
 
 interface Ingredient { id: string; sku: string; name: string; unit: string; system: string; avgCost: string }
 
 interface Props {
   ingredients: Ingredient[];
-  onSubmit: (input: { lines: Array<{ ingredientId: string; physicalCount: string }>; notes: string | null }) => Promise<{ changes: Array<{ ingredient: string; from: string; to: string; delta: string }> }>;
+  onSubmit: (input: {
+    lines: Array<{ ingredientId: string; physicalCount: string }>;
+    notes: string | null;
+  }) => Promise<ActionResultWith<{ changes: Array<{ ingredient: string; from: string; to: string; delta: string }> }>>;
 }
 
 export function AuditForm({ ingredients, onSubmit }: Props) {
@@ -44,6 +48,10 @@ export function AuditForm({ ingredients, onSubmit }: Props) {
     startTransition(async () => {
       try {
         const r = await onSubmit({ lines: payload, notes: notes || null });
+        if (!r.ok) {
+          toast.error(r.error);
+          return;
+        }
         toast.success(`Posted ${r.changes.length} adjustment(s).`);
         router.refresh();
       } catch (err) {

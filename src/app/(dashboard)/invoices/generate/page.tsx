@@ -41,6 +41,7 @@ export default async function GenerateInvoicePage() {
     const orderId = String(formData.get("orderId") ?? "");
     if (!orderId) return;
     const r = await createCustomerInvoiceFromOrder(orderId);
+    if (!r.ok) throw new Error(r.error);
     redirect(`/invoices/${r.id}`);
   }
 

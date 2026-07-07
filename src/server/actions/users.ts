@@ -7,14 +7,28 @@ import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { UserInput, UserUpdateInput } from "@/lib/validators";
 import { sha256Json } from "@/lib/audit";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
 
 const ADMIN_ONLY = [Role.ADMIN];
 
-export async function createUser(raw: unknown) {
+export async function createUser(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await createUserInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createUserInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(ADMIN_ONLY);
   const input = UserInput.parse(raw);
-  if (!input.password) throw new Error("Password is required when creating a user");
-  if (input.password.length < 8) throw new Error("Password must be at least 8 characters");
+  if (!input.password) throw new ActionError("Password is required when creating a user");
+  if (input.password.length < 8) throw new ActionError("Password must be at least 8 characters");
 
   const passwordHash = await bcrypt.hash(input.password, 12);
 
@@ -41,53 +55,63 @@ export async function createUser(raw: unknown) {
   });
 
   revalidatePath("/admin/users");
-  return { id: user.id };
+  return { ok: true, id: user.id };
 }
 
-export async function updateUser(id: string, raw: unknown) {
-  const session = await requireRole(ADMIN_ONLY);
-  const input = UserUpdateInput.parse(raw);
+export async function updateUser(id: string, raw: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireRole(ADMIN_ONLY);
+    const input = UserUpdateInput.parse(raw);
 
-  await db.$transaction(async (tx) => {
-    const data: Record<string, unknown> = {};
-    if (input.email) data.email = input.email;
-    if (input.name) data.name = input.name;
-    if (input.role) data.role = input.role;
-    if (input.phone !== undefined) data.phone = input.phone;
-    if (input.active !== undefined) data.active = input.active;
-    if (input.password) {
-      if (input.password.length < 8) throw new Error("Password must be at least 8 characters");
-      data.passwordHash = await bcrypt.hash(input.password, 12);
-    }
-    await tx.user.update({ where: { id }, data });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "USER_UPDATED",
-        entity: "User",
-        entityId: id,
-      },
+    await db.$transaction(async (tx) => {
+      const data: Record<string, unknown> = {};
+      if (input.email) data.email = input.email;
+      if (input.name) data.name = input.name;
+      if (input.role) data.role = input.role;
+      if (input.phone !== undefined) data.phone = input.phone;
+      if (input.active !== undefined) data.active = input.active;
+      if (input.password) {
+        if (input.password.length < 8) throw new ActionError("Password must be at least 8 characters");
+        data.passwordHash = await bcrypt.hash(input.password, 12);
+      }
+      await tx.user.update({ where: { id }, data });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "USER_UPDATED",
+          entity: "User",
+          entityId: id,
+        },
+      });
     });
-  });
-  revalidatePath("/admin/users");
-  revalidatePath(`/admin/users/${id}`);
+    revalidatePath("/admin/users");
+    revalidatePath(`/admin/users/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function deactivateUser(id: string) {
-  const session = await requireRole(ADMIN_ONLY);
-  if (id === session.user.id) throw new Error("You cannot deactivate yourself");
-  await db.$transaction(async (tx) => {
-    await tx.user.update({ where: { id }, data: { active: false } });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "USER_DEACTIVATED",
-        entity: "User",
-        entityId: id,
-      },
+export async function deactivateUser(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(ADMIN_ONLY);
+    if (id === session.user.id) throw new ActionError("You cannot deactivate yourself");
+    await db.$transaction(async (tx) => {
+      await tx.user.update({ where: { id }, data: { active: false } });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "USER_DEACTIVATED",
+          entity: "User",
+          entityId: id,
+        },
+      });
     });
-  });
-  revalidatePath("/admin/users");
+    revalidatePath("/admin/users");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 export async function listUsers(opts: { active?: boolean } = {}) {

@@ -41,10 +41,14 @@ export function TemplateManager({ templates }: { templates: Template[] }) {
     }
     startTransition(async () => {
       try {
-        await upsertTaskTemplate({
+        const res = await upsertTaskTemplate({
           title: draft.title.trim(),
           description: draft.description.trim() || null,
         });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Preset added");
         setDraft({ title: "", description: "" });
         router.refresh();
@@ -58,7 +62,11 @@ export function TemplateManager({ templates }: { templates: Template[] }) {
   function deactivate(id: string) {
     startTransition(async () => {
       try {
-        await deactivateTaskTemplate(id);
+        const res = await deactivateTaskTemplate(id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Preset deactivated");
         router.refresh();
       } catch (err) {
@@ -71,12 +79,16 @@ export function TemplateManager({ templates }: { templates: Template[] }) {
   function reactivate(t: Template) {
     startTransition(async () => {
       try {
-        await upsertTaskTemplate({
+        const res = await upsertTaskTemplate({
           id: t.id,
           title: t.title,
           description: t.description,
           active: true,
         });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Preset reactivated");
         router.refresh();
       } catch (err) {

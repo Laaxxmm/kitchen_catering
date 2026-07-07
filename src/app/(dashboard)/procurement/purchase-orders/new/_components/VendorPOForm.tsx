@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface Vendor { id: string; name: string; code: string; stateCode: string }
 interface Ingredient { id: string; sku: string; name: string; unit: string; gstRatePct: string }
@@ -33,7 +34,7 @@ interface Props {
     expectedDate: string | undefined;
     notes: string | null;
     lines: Array<{ ingredientId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
-  }) => Promise<void>;
+  }) => Promise<ActionResult | void>;
   // Pre-fill when the PO is being spun out of an approved PR — the lines
   // come straight from the request so the user only has to fill in prices.
   initialVendorId?: string | null;
@@ -120,7 +121,7 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
     if (payload.length === 0) return toast.error("Add at least one line");
     startTransition(async () => {
       try {
-        await onSubmit({
+        const res = await onSubmit({
           vendorId,
           procurementType,
           placeOfSupplyStateCode,
@@ -136,6 +137,10 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
             gstRatePct: l.gstRatePct,
           })),
         });
+        if (res && !res.ok) {
+          toast.error(res.error);
+          return;
+        }
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");

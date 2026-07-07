@@ -3,6 +3,7 @@ import { createCustomer, listCustomers } from "@/server/actions/customers";
 import { listDishes } from "@/server/actions/dishes";
 import { createQuote } from "@/server/actions/quotes";
 import type { QuoteCreateInputT } from "@/lib/validators";
+import type { ActionResultWith } from "@/lib/action-result";
 import { QuoteDraftForm } from "./_components/QuoteDraftForm";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export default async function NewQuotePage() {
     email?: string;
     phone?: string;
     gstin?: string;
-  }): Promise<{ id: string; name: string; stateCode: string }> {
+  }): Promise<ActionResultWith<{ id: string; name: string; stateCode: string }>> {
     "use server";
     const r = await createCustomer({
       name: input.name,
@@ -43,7 +44,8 @@ export default async function NewQuotePage() {
       notes: null,
       groupId: null,
     });
-    return { id: r.id, name: input.name, stateCode: input.stateCode };
+    if (!r.ok) return r;
+    return { ok: true, id: r.id, name: input.name, stateCode: input.stateCode };
   }
 
   return (

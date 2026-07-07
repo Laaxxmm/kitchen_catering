@@ -83,7 +83,7 @@ export function AssignTaskForm({ users, templates }: Props) {
   function onSubmit(values: FormValues) {
     startTransition(async () => {
       try {
-        await assignTask({
+        const res = await assignTask({
           assignedToId: values.assignedToId,
           title: values.title.trim(),
           description: values.description.trim() || null,
@@ -91,6 +91,10 @@ export function AssignTaskForm({ users, templates }: Props) {
           targetDate: values.targetDate,
           templateId: values.templateId || null,
         });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Task assigned");
         reset({
           assignedToId: "",

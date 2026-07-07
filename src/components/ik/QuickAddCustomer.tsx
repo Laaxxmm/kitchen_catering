@@ -6,11 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import type { ActionResultWith } from "@/lib/action-result";
 import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   /** Server action that creates a customer and returns the new id. */
-  onCreate: (input: QuickCustomerInput) => Promise<{ id: string; name: string; stateCode: string }>;
+  onCreate: (
+    input: QuickCustomerInput,
+  ) => Promise<ActionResultWith<{ id: string; name: string; stateCode: string }>>;
   /** Called once the customer is created so the parent form can
    *  auto-select it in its dropdown. */
   onCreated: (customer: { id: string; name: string; stateCode: string }) => void;
@@ -59,8 +62,12 @@ export function QuickAddCustomer({ onCreate, onCreated }: Props) {
           phone: phone.trim() || undefined,
           gstin: gstin.trim() || undefined,
         });
+        if (!result.ok) {
+          toast.error(result.error);
+          return;
+        }
         toast.success(`Added ${result.name}`);
-        onCreated(result);
+        onCreated({ id: result.id, name: result.name, stateCode: result.stateCode });
         // Reset + collapse
         setName("");
         setBillingAddress("");

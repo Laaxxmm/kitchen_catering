@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatINR } from "@/lib/money";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface CustomerOption {
   id: string;
@@ -61,7 +62,7 @@ interface CreateProps extends CommonProps {
       discountPct: string;
       gstRatePct: string;
     }>;
-  }) => Promise<void>;
+  }) => Promise<ActionResult | void>;
 }
 
 interface EditProps extends CommonProps {
@@ -82,7 +83,7 @@ interface EditProps extends CommonProps {
       discountPct: string;
       gstRatePct: string;
     }>;
-  }) => Promise<void>;
+  }) => Promise<ActionResult | void>;
 }
 
 type Props = CreateProps | EditProps;
@@ -160,25 +161,28 @@ export function InvoiceLineEditor(props: Props) {
 
     startTransition(async () => {
       try {
-        if (props.mode === "create") {
-          await props.onSubmit({
-            customerId,
-            placeOfSupplyStateCode,
-            dueDate: dueDate || null,
-            notes: notes || null,
-            termsMd: termsMd || null,
-            poRef: poRef || null,
-            lines: payload,
-          });
-        } else {
-          await props.onSubmit({
-            placeOfSupplyStateCode,
-            dueDate: dueDate || null,
-            notes: notes || null,
-            termsMd: termsMd || null,
-            poRef: poRef || null,
-            lines: payload,
-          });
+        const res =
+          props.mode === "create"
+            ? await props.onSubmit({
+                customerId,
+                placeOfSupplyStateCode,
+                dueDate: dueDate || null,
+                notes: notes || null,
+                termsMd: termsMd || null,
+                poRef: poRef || null,
+                lines: payload,
+              })
+            : await props.onSubmit({
+                placeOfSupplyStateCode,
+                dueDate: dueDate || null,
+                notes: notes || null,
+                termsMd: termsMd || null,
+                poRef: poRef || null,
+                lines: payload,
+              });
+        if (res && !res.ok) {
+          toast.error(res.error);
+          return;
         }
       } catch (err) {
         if (isNextNavigationError(err)) throw err;

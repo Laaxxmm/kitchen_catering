@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ThreeWayMatchInfo } from "@/components/ik/ThreeWayMatchInfo";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface Vendor { id: string; name: string; code: string }
 interface PO { id: string; poNo: string; vendorId: string; vendorName: string }
@@ -23,7 +24,7 @@ interface Props {
     vendorId: string; poId: string | null; vendorBillNo: string | null;
     issueDate: string | undefined; dueDate: string | null; notes: string | null;
     lines: DraftLine[];
-  }) => Promise<void>;
+  }) => Promise<ActionResult | void>;
   // Pre-fill when the bill is being recorded against a known PO (the
   // "Record supplier bill" button on the PO/GRN detail page).
   initialVendorId?: string | null;
@@ -69,7 +70,7 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
     if (payload.length === 0) return toast.error("Add at least one line");
     startTransition(async () => {
       try {
-        await onSubmit({
+        const res = await onSubmit({
           vendorId,
           poId: poId || null,
           vendorBillNo: vendorBillNo || null,
@@ -78,6 +79,10 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
           notes: notes || null,
           lines: payload,
         });
+        if (res && !res.ok) {
+          toast.error(res.error);
+          return;
+        }
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");

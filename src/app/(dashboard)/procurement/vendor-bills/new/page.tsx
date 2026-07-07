@@ -62,6 +62,7 @@ export default async function NewVendorBillPage({
   }) {
     "use server";
     const r = await createVendorBill(input);
+    if (!r.ok) return r;
     redirect(`/procurement/vendor-bills/${r.id}`);
   }
 

@@ -51,11 +51,13 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   async function doRevise() {
     "use server";
     const r = await reviseQuote(id);
+    if (!r.ok) throw new Error(r.error);
     redirect(`/quotes/${r.id}`);
   }
   async function doConvert() {
     "use server";
     const r = await convertQuoteToOrder(id);
+    if (!r.ok) throw new Error(r.error);
     redirect(`/orders/${r.orderId}`);
   }
 

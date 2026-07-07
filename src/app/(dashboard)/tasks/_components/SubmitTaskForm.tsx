@@ -38,11 +38,15 @@ export function SubmitTaskForm({
   function onSubmit(values: FormValues) {
     startTransition(async () => {
       try {
-        await submitTask({
+        const res = await submitTask({
           id: taskId,
           completionRemarks: values.completionRemarks.trim(),
           completedAt: values.completedAt,
         });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(rejected ? "Resubmitted" : "Submitted for review");
         router.refresh();
       } catch (err) {

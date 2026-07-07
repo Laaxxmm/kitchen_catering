@@ -52,7 +52,9 @@ interface Props {
   inHouseOnly?: boolean;
   /** Optional inline customer creator — when present, shows a
    *  "+ Add new customer" toggle under the dropdown. */
-  onQuickAddCustomer?: (input: QuickCustomerInput) => Promise<{ id: string; name: string; stateCode: string }>;
+  onQuickAddCustomer?: (
+    input: QuickCustomerInput,
+  ) => Promise<ActionResultWith<{ id: string; name: string; stateCode: string }>>;
 }
 
 interface DraftLine {

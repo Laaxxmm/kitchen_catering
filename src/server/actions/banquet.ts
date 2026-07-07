@@ -9,6 +9,7 @@ import { istToUtc } from "@/lib/time";
 import { sha256Json } from "@/lib/audit";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import { notifyRoles } from "@/server/actions/notifications";
+import { deferAfterResponse } from "@/server/defer";
 import {
   BanquetItemInput,
   BanquetIssueInput,
@@ -531,13 +532,15 @@ export async function requestGoodsFromStore(input: { summary: string; note?: str
     return t;
   });
 
-  await notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
-    kind: "TASK_ASSIGNED",
-    title: "F&B needs goods procured",
-    body: `${summary}. Raise a purchase order (and GRN on receipt).`,
-    link: "/procurement/purchase-orders/new",
-    dedupeKey: `fnb-store-request:${task.id}`,
-  });
+  deferAfterResponse("fnb-store-request:notify", () =>
+    notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+      kind: "TASK_ASSIGNED",
+      title: "F&B needs goods procured",
+      body: `${summary}. Raise a purchase order (and GRN on receipt).`,
+      link: "/procurement/purchase-orders/new",
+      dedupeKey: `fnb-store-request:${task.id}`,
+    }),
+  );
 
   revalidatePath("/banquet");
   revalidatePath("/tasks");

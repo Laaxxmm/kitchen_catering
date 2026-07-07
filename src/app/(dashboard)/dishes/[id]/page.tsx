@@ -27,8 +27,9 @@ export default async function DishDetailPage({ params }: { params: Promise<{ id:
 
   async function update(input: DishInputT) {
     "use server";
-    await updateDish(id, input);
-    return { id };
+    const res = await updateDish(id, input);
+    if (!res.ok) return res;
+    return { ok: true as const, id };
   }
   async function deactivate() {
     "use server";

@@ -6,12 +6,13 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface Row { key: string; value: unknown; notes: string | null; updatedAt: string }
 
 interface Props {
   rows: Row[];
-  onSave: (key: string, value: unknown, notes: string | null) => Promise<void>;
+  onSave: (key: string, value: unknown, notes: string | null) => Promise<ActionResult>;
 }
 
 function classify(v: unknown): "bool" | "number" | "string" | "json" {
@@ -31,7 +32,11 @@ export function SettingsEditor({ rows, onSave }: Props) {
   function save(key: string, value: unknown, notes: string | null) {
     startTransition(async () => {
       try {
-        await onSave(key, value, notes);
+        const res = await onSave(key, value, notes);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(`Saved ${key}`);
         router.refresh();
       } catch (err) {

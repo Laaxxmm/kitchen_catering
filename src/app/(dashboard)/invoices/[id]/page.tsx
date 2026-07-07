@@ -39,7 +39,8 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   }
   async function doEmailToCustomer() {
     "use server";
-    await emailTaxInvoice(id, { force: true });
+    const res = await emailTaxInvoice(id, { force: true });
+    if (!res.ok) throw new Error(res.error);
   }
   async function doMarkPaid(input: {
     method: PaymentMethod;
@@ -48,7 +49,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     notes: string | null;
   }) {
     "use server";
-    await markCustomerInvoicePaid({
+    return markCustomerInvoicePaid({
       invoiceId: id,
       method: input.method,
       reference: input.reference,

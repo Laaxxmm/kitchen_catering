@@ -19,6 +19,26 @@ export default async function FeedbackPage({
 
   const submitted = order.feedbackSubmittedAt != null;
 
+  // Feedback links go stale after 30 days — an old forwarded link
+  // shouldn't accept ratings forever. Already-submitted feedback still
+  // shows its thank-you state below.
+  const FEEDBACK_LINK_MAX_AGE_DAYS = 30;
+  const expired =
+    !submitted &&
+    order.feedbackSentAt != null &&
+    Date.now() - order.feedbackSentAt.getTime() > FEEDBACK_LINK_MAX_AGE_DAYS * 24 * 3600 * 1000;
+  if (expired) {
+    return (
+      <main className="mx-auto max-w-xl bg-ik-paper px-6 py-16 text-center font-ik-sans text-ik-ink">
+        <h1 className="text-[18px] font-medium">This feedback link has expired</h1>
+        <p className="mt-2 text-[13px] text-ik-ink-2">
+          Feedback links stay open for {FEEDBACK_LINK_MAX_AGE_DAYS} days after your order.
+          We&apos;d still love to hear from you — please reach out to us directly.
+        </p>
+      </main>
+    );
+  }
+
   return (
     <main className="mx-auto max-w-xl bg-ik-paper px-6 py-12 font-ik-sans text-ik-ink">
       <header className="mb-6 text-center">

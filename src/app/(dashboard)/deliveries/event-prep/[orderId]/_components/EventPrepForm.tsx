@@ -73,7 +73,11 @@ export function EventPrepForm({ order, items }: { order: Order; items: Item[] })
   function markReady() {
     startMark(async () => {
       try {
-        await markEventPrepReady(order.id);
+        const res = await markEventPrepReady(order.id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Marked ready — kitchen + management notified");
         router.push("/dashboard");
       } catch (err) {

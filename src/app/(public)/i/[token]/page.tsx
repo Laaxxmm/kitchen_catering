@@ -10,10 +10,28 @@ export const dynamic = "force-dynamic";
 // Token-gated public view. No auth required. Token is unguessable
 // (24 bytes base64url). Per SECURITY.md §6, no PII appears in the URL
 // query string; everything is in the response body.
+
+// Share links stop working this long after issue — an old forwarded link
+// shouldn't expose the customer's billing details forever.
+const SHARE_LINK_MAX_AGE_DAYS = 90;
+
 export default async function PublicInvoicePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const invoice = await getCustomerInvoiceByToken(token);
   if (!invoice) notFound();
+
+  const issuedAt = invoice.issuedAt ?? invoice.createdAt;
+  if (issuedAt && Date.now() - issuedAt.getTime() > SHARE_LINK_MAX_AGE_DAYS * 24 * 3600 * 1000) {
+    return (
+      <main className="mx-auto max-w-xl bg-ik-paper px-6 py-16 text-center font-ik-sans text-ik-ink">
+        <h1 className="text-[18px] font-medium">This invoice link has expired</h1>
+        <p className="mt-2 text-[13px] text-ik-ink-2">
+          For your security, invoice links stop working {SHARE_LINK_MAX_AGE_DAYS} days after issue.
+          Please contact us for a fresh copy of invoice details.
+        </p>
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto max-w-3xl bg-ik-paper px-6 py-10 font-ik-sans text-ik-ink">

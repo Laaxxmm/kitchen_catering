@@ -10,7 +10,7 @@ export default async function SettingsPage() {
 
   async function upsert(key: string, value: unknown, notes: string | null) {
     "use server";
-    await upsertSetting(key, value, notes);
+    return upsertSetting(key, value, notes);
   }
 
   return (

@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Countdown } from "@/components/ik/dashboard/Countdown";
 import { formatIST } from "@/lib/time";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 import {
   claimDelivery,
   dispatchDelivery,
@@ -299,7 +300,11 @@ function PickupCard({ order, highlight }: { order: PickupOrder; highlight: boole
   function take() {
     startTransition(async () => {
       try {
-        await claimDelivery(order.id);
+        const res = await claimDelivery(order.id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Delivery is yours — it's now in “To dispatch”");
         router.refresh();
       } catch (err) {
@@ -337,10 +342,14 @@ function DeliveryCard({ delivery, highlight }: { delivery: DriverDelivery; highl
   const [failReason, setFailReason] = useState("");
   const isScheduled = delivery.status === DeliveryStatus.SCHEDULED;
 
-  function run(fn: () => Promise<unknown>, successMsg: string) {
+  function run(fn: () => Promise<ActionResult>, successMsg: string) {
     startTransition(async () => {
       try {
-        await fn();
+        const res = await fn();
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(successMsg);
         setShowFail(false);
         setFailReason("");

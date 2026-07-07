@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ik/FormKit";
 import { formatINR } from "@/lib/money";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface BillItem { name: string; portions: string }
 interface BillOrder {
@@ -37,7 +38,7 @@ export function InHouseBilling({
 }: {
   orders: BillOrder[];
   todayIst: string;
-  onGenerate: (orderIds: string[]) => Promise<void>;
+  onGenerate: (orderIds: string[]) => Promise<ActionResult | void>;
 }) {
   const [pending, startTransition] = useTransition();
   const [date, setDate] = useState(todayIst);
@@ -85,7 +86,11 @@ export function InHouseBilling({
     setBusyKey(folio.key);
     startTransition(async () => {
       try {
-        await onGenerate(ids);
+        const res = await onGenerate(ids);
+        if (res && !res.ok) {
+          toast.error(res.error);
+          return;
+        }
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Could not generate the bill");

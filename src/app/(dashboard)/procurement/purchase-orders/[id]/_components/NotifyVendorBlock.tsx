@@ -6,6 +6,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface Props {
   vendor: { name: string; phone: string | null; email: string | null };
@@ -13,7 +14,7 @@ interface Props {
   messageText: string;
   emailSubject: string;
   receiveHref: string;
-  onMarkSent: () => Promise<void>;
+  onMarkSent: () => Promise<ActionResult | void>;
 }
 
 /**
@@ -41,7 +42,11 @@ export function NotifyVendorBlock({
   function markSent(after?: () => void) {
     startTransition(async () => {
       try {
-        await onMarkSent();
+        const res = await onMarkSent();
+        if (res && !res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("PO marked as sent — waiting for delivery");
         router.refresh();
       } catch (err) {

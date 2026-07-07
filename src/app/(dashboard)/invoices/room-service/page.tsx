@@ -37,6 +37,7 @@ export default async function RoomServiceBillingPage() {
   async function generate(orderIds: string[]) {
     "use server";
     const r = await createConsolidatedInHouseInvoice(orderIds);
+    if (!r.ok) return r;
     redirect(`/invoices/${r.id}`);
   }
 

@@ -31,21 +31,21 @@ export default async function DeliveryDetailPage({ params }: { params: Promise<{
 
   async function doDispatch() {
     "use server";
-    await dispatchDelivery(id);
+    return dispatchDelivery(id);
   }
   async function doArrived() {
     "use server";
-    await markDeliveryArrived(id);
+    return markDeliveryArrived(id);
   }
   async function doOTP() {
     "use server";
     // OTP step retired — confirmation is a single click. Pass an empty
     // payload; the server treats absent OTP as "no readback required".
-    await confirmDeliveryOTP(id, {});
+    return confirmDeliveryOTP(id, {});
   }
   async function doFail(reason: string) {
     "use server";
-    await failDelivery(id, { reason });
+    return failDelivery(id, { reason });
   }
 
   return (

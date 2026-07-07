@@ -15,7 +15,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
 
   async function update(input: { email: string; name: string; role: Role; phone: string | null; password: string | undefined; active?: boolean }) {
     "use server";
-    await updateUser(id, input);
+    return updateUser(id, input);
   }
   async function deactivate() {
     "use server";

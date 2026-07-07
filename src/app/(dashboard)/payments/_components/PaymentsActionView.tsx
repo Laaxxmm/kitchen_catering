@@ -85,9 +85,9 @@ export function PaymentsActionView({ toPay, toCollect, overpaid, canMarkCustomer
                 <span className="ml-auto font-mono text-[13px] text-ik-ink">{formatINRWhole(b.amount)}</span>
                 <MarkPaidModal
                   outstanding={b.amount}
-                  onSubmit={async (input) => {
-                    await markVendorBillPaid({ id: b.id, method: input.method, reference: input.reference, paidAt: input.paidAt, notes: input.notes });
-                  }}
+                  onSubmit={(input) =>
+                    markVendorBillPaid({ id: b.id, method: input.method, reference: input.reference, paidAt: input.paidAt, notes: input.notes })
+                  }
                 />
               </li>
             ))}
@@ -117,15 +117,15 @@ export function PaymentsActionView({ toPay, toCollect, overpaid, canMarkCustomer
                 {canMarkCustomerPaid ? (
                   <MarkPaidModal
                     outstanding={inv.amount}
-                    onSubmit={async (input) => {
-                      await markCustomerInvoicePaid({
+                    onSubmit={(input) =>
+                      markCustomerInvoicePaid({
                         invoiceId: inv.id,
                         method: input.method,
                         reference: input.reference,
                         paidAt: input.paidAt,
                         notes: input.notes,
-                      });
-                    }}
+                      })
+                    }
                   />
                 ) : (
                   <Link href={`/invoices/${inv.id}`}>

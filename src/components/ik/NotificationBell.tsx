@@ -41,6 +41,12 @@ export function NotificationBell({ placement = "up" }: { placement?: "up" | "dow
   // Last count we saw from the server. Starts null so the very first load
   // (which may surface pre-existing unread items) doesn't chime.
   const lastCountRef = useRef<number | null>(null);
+  // Build fingerprint from the server. When it changes mid-session the app
+  // was redeployed under this tab — its server-action IDs are stale and
+  // every button would fail with "Server Action not found", so prompt one
+  // refresh instead. Only ever prompts once per tab.
+  const buildRef = useRef<string | null>(null);
+  const refreshPromptedRef = useRef(false);
   // Chime on/off, persisted in localStorage. The ref mirrors state so the
   // polling closure always reads the current preference.
   const [muted, setMuted] = useState(false);
@@ -75,8 +81,19 @@ export function NotificationBell({ placement = "up" }: { placement?: "up" | "dow
         // across a redeploy keeps working instead of spamming the server logs.
         const res = await fetch("/api/notifications/unread-count", { cache: "no-store" });
         if (!res.ok) return;
-        const { count: c } = (await res.json()) as { count: number };
+        const { count: c, build } = (await res.json()) as { count: number; build?: string };
         if (cancelled) return;
+        if (build) {
+          if (buildRef.current === null) {
+            buildRef.current = build;
+          } else if (buildRef.current !== build && !refreshPromptedRef.current) {
+            refreshPromptedRef.current = true;
+            toast.info("Greenpath was just updated — refresh to keep working.", {
+              duration: Infinity,
+              action: { label: "Refresh", onClick: () => window.location.reload() },
+            });
+          }
+        }
         setCount(c);
         const prev = lastCountRef.current;
         if (prev !== null && c > prev && !mutedRef.current) playChime();

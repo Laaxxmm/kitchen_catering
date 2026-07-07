@@ -13,6 +13,9 @@ export default function NewSalaryRunPage() {
     // <input type="month"> returns "YYYY-MM"; convert to ISO date string.
     const periodMonth = `${month}-01T00:00:00`;
     const r = await createSalaryRun({ periodMonth });
+    // Form action has no toast channel — surface the failure via the
+    // error boundary (same visibility as the pre-conversion throw).
+    if (!r.ok) throw new Error(r.error);
     redirect(`/salary/runs/${r.id}`);
   }
   return (

@@ -14,6 +14,13 @@ import {
   TaskUpdateInput,
 } from "@/lib/validators";
 import { createNotification } from "@/server/actions/notifications";
+import { deferAfterResponse } from "@/server/defer";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
 
 // Admin/manager line-management tasks distinct from operational workflow.
 // Lifecycle:
@@ -29,7 +36,15 @@ const ASSIGNER_ROLES = [Role.ADMIN, Role.MANAGER];
 
 // ─── Templates ────────────────────────────────────────────────────────
 
-export async function upsertTaskTemplate(raw: unknown) {
+export async function upsertTaskTemplate(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await upsertTaskTemplateInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function upsertTaskTemplateInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(ASSIGNER_ROLES);
   const input = TaskTemplateInput.parse(raw);
 
@@ -72,23 +87,28 @@ export async function upsertTaskTemplate(raw: unknown) {
   });
 
   revalidatePath("/tasks/admin");
-  return { id: row.id };
+  return { ok: true, id: row.id };
 }
 
-export async function deactivateTaskTemplate(id: string) {
-  const session = await requireRole(ASSIGNER_ROLES);
-  await db.$transaction(async (tx) => {
-    await tx.taskTemplate.update({ where: { id }, data: { active: false } });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "TASK_TEMPLATE_DEACTIVATED",
-        entity: "TaskTemplate",
-        entityId: id,
-      },
+export async function deactivateTaskTemplate(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(ASSIGNER_ROLES);
+    await db.$transaction(async (tx) => {
+      await tx.taskTemplate.update({ where: { id }, data: { active: false } });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "TASK_TEMPLATE_DEACTIVATED",
+          entity: "TaskTemplate",
+          entityId: id,
+        },
+      });
     });
-  });
-  revalidatePath("/tasks/admin");
+    revalidatePath("/tasks/admin");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 export async function listTaskTemplates(opts: { activeOnly?: boolean } = {}) {
@@ -101,7 +121,15 @@ export async function listTaskTemplates(opts: { activeOnly?: boolean } = {}) {
 
 // ─── Assigner: assign / edit / cancel ─────────────────────────────────
 
-export async function assignTask(raw: unknown) {
+export async function assignTask(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await assignTaskInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function assignTaskInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(ASSIGNER_ROLES);
   const input = TaskAssignInput.parse(raw);
 
@@ -111,7 +139,7 @@ export async function assignTask(raw: unknown) {
     select: { id: true, active: true },
   });
   if (!assignee || !assignee.active) {
-    throw new Error("Assignee not found or inactive");
+    throw new ActionError("Assignee not found or inactive");
   }
 
   const targetUtc = istToUtc(input.targetDate);
@@ -140,39 +168,46 @@ export async function assignTask(raw: unknown) {
     return row;
   });
 
-  // Notify the assignee that a new task is waiting for them. dedupe by
+  // Notify the assignee that a new task is waiting for them — after the
+  // response, so the assign button doesn't wait on the insert. dedupe by
   // task id so a redundant re-fire doesn't create duplicates.
-  await createNotification({
-    userId: input.assignedToId,
-    kind: "TASK_ASSIGNED",
-    title: `New task: ${input.title.trim().slice(0, 80)}`,
-    body: input.description?.slice(0, 200) ?? null,
-    link: `/tasks/${task.id}`,
-    dedupeKey: `task-assigned:${task.id}`,
-  });
+  deferAfterResponse("task-assign:notify", () =>
+    createNotification({
+      userId: input.assignedToId,
+      kind: "TASK_ASSIGNED",
+      title: `New task: ${input.title.trim().slice(0, 80)}`,
+      body: input.description?.slice(0, 200) ?? null,
+      link: `/tasks/${task.id}`,
+      dedupeKey: `task-assigned:${task.id}`,
+    }),
+  );
 
   revalidatePath("/tasks");
   revalidatePath("/tasks/admin");
   revalidatePath("/dashboard");
-  return { id: task.id };
+  return { ok: true, id: task.id };
 }
 
-export async function updateTask(raw: unknown) {
+export async function updateTask(raw: unknown): Promise<ActionResult> {
+  try {
+    return await updateTaskInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function updateTaskInner(raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(ASSIGNER_ROLES);
   const input = TaskUpdateInput.parse(raw);
 
   await db.$transaction(async (tx) => {
     const existing = await tx.task.findUnique({ where: { id: input.id } });
-    if (!existing) throw new Error("Task not found");
-    // Only editable in ASSIGNED or REJECTED states.
-    if (
-      existing.status !== TaskStatus.ASSIGNED &&
-      existing.status !== TaskStatus.REJECTED
-    ) {
-      throw new Error("This task can no longer be edited");
-    }
-    await tx.task.update({
-      where: { id: input.id },
+    if (!existing) throw new ActionError("Task not found");
+    // Only editable in ASSIGNED or REJECTED states. Status guard lives in
+    // the WHERE clause so a concurrent transition (submit/cancel) can't be
+    // silently overwritten — the loser gets count 0.
+    const updated = await tx.task.updateMany({
+      where: { id: input.id, status: { in: [TaskStatus.ASSIGNED, TaskStatus.REJECTED] } },
       data: {
         title: input.title ?? existing.title,
         description:
@@ -182,6 +217,9 @@ export async function updateTask(raw: unknown) {
         assignedToId: input.assignedToId ?? existing.assignedToId,
       },
     });
+    if (updated.count === 0) {
+      throw new ActionError("This task can no longer be edited — refresh the page.");
+    }
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -195,20 +233,29 @@ export async function updateTask(raw: unknown) {
   revalidatePath("/tasks");
   revalidatePath("/tasks/admin");
   revalidatePath(`/tasks/${input.id}`);
+  return { ok: true };
 }
 
-export async function cancelTask(raw: unknown) {
+export async function cancelTask(raw: unknown): Promise<ActionResult> {
+  try {
+    return await cancelTaskInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function cancelTaskInner(raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(ASSIGNER_ROLES);
   const input = TaskCancelInput.parse(raw);
 
   await db.$transaction(async (tx) => {
-    const t = await tx.task.findUnique({ where: { id: input.id } });
-    if (!t) throw new Error("Task not found");
-    if (t.status === TaskStatus.COMPLETED || t.status === TaskStatus.CANCELLED) {
-      throw new Error("Task is already closed");
-    }
-    await tx.task.update({
-      where: { id: input.id },
+    // Status guard in the WHERE clause: closed tasks can't be cancelled,
+    // and two concurrent cancels can't both proceed.
+    const updated = await tx.task.updateMany({
+      where: {
+        id: input.id,
+        status: { notIn: [TaskStatus.COMPLETED, TaskStatus.CANCELLED] },
+      },
       data: {
         status: TaskStatus.CANCELLED,
         reviewedAt: new Date(),
@@ -216,6 +263,11 @@ export async function cancelTask(raw: unknown) {
         rejectionReason: input.reason || null,
       },
     });
+    if (updated.count === 0) {
+      const t = await tx.task.findUnique({ where: { id: input.id }, select: { id: true } });
+      if (!t) throw new ActionError("Task not found");
+      throw new ActionError("Task is already closed — refresh the page.");
+    }
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -229,25 +281,33 @@ export async function cancelTask(raw: unknown) {
   revalidatePath("/tasks");
   revalidatePath("/tasks/admin");
   revalidatePath(`/tasks/${input.id}`);
+  return { ok: true };
 }
 
 // ─── Assignee: submit ─────────────────────────────────────────────────
 
-export async function submitTask(raw: unknown) {
+export async function submitTask(raw: unknown): Promise<ActionResult> {
+  try {
+    return await submitTaskInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function submitTaskInner(raw: unknown): Promise<{ ok: true }> {
   const session = await requireSession();
   const input = TaskSubmitInput.parse(raw);
 
   await db.$transaction(async (tx) => {
     const t = await tx.task.findUnique({ where: { id: input.id } });
-    if (!t) throw new Error("Task not found");
+    if (!t) throw new ActionError("Task not found");
     if (t.assignedToId !== session.user.id) {
-      throw new Error("You cannot submit someone else's task");
+      throw new ActionError("You cannot submit someone else's task");
     }
-    if (t.status !== TaskStatus.ASSIGNED && t.status !== TaskStatus.REJECTED) {
-      throw new Error("This task isn't open for submission");
-    }
-    await tx.task.update({
-      where: { id: input.id },
+    // Status guard in the WHERE clause: a double-submit (two tabs /
+    // double-click) loses the race and gets a clear message.
+    const updated = await tx.task.updateMany({
+      where: { id: input.id, status: { in: [TaskStatus.ASSIGNED, TaskStatus.REJECTED] } },
       data: {
         status: TaskStatus.SUBMITTED,
         submittedAt: new Date(),
@@ -257,6 +317,9 @@ export async function submitTask(raw: unknown) {
         rejectionReason: null,
       },
     });
+    if (updated.count === 0) {
+      throw new ActionError("This task isn't open for submission — refresh the page.");
+    }
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -267,12 +330,14 @@ export async function submitTask(raw: unknown) {
     });
   });
 
-  // Notify the assigner that the task is awaiting their review.
-  const taskAfter = await db.task.findUnique({
-    where: { id: input.id },
-    select: { title: true, assignedById: true, submittedAt: true },
-  });
-  if (taskAfter) {
+  // Notify the assigner that the task is awaiting their review — after the
+  // response, so the submit button doesn't wait on the lookup + insert.
+  deferAfterResponse("task-submit:notify", async () => {
+    const taskAfter = await db.task.findUnique({
+      where: { id: input.id },
+      select: { title: true, assignedById: true, submittedAt: true },
+    });
+    if (!taskAfter) return;
     await createNotification({
       userId: taskAfter.assignedById,
       kind: "TASK_SUBMITTED",
@@ -283,34 +348,40 @@ export async function submitTask(raw: unknown) {
       // submittedAt timestamp so the assigner sees each cycle.
       dedupeKey: `task-submitted:${input.id}:${taskAfter.submittedAt?.toISOString() ?? ""}`,
     });
-  }
+  });
 
   revalidatePath("/tasks");
   revalidatePath("/tasks/admin");
   revalidatePath(`/tasks/${input.id}`);
   revalidatePath("/dashboard");
+  return { ok: true };
 }
 
 // ─── Assigner: review (approve / reject) ──────────────────────────────
 
-export async function reviewTask(raw: unknown) {
+export async function reviewTask(raw: unknown): Promise<ActionResult> {
+  try {
+    return await reviewTaskInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function reviewTaskInner(raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(ASSIGNER_ROLES);
   const input = TaskReviewInput.parse(raw);
 
   if (input.decision === "REJECT") {
     if (!input.rejectionReason || input.rejectionReason.trim().length < 3) {
-      throw new Error("Rejection reason is required");
+      throw new ActionError("Rejection reason is required");
     }
   }
 
   await db.$transaction(async (tx) => {
-    const t = await tx.task.findUnique({ where: { id: input.id } });
-    if (!t) throw new Error("Task not found");
-    if (t.status !== TaskStatus.SUBMITTED) {
-      throw new Error("Only submitted tasks can be reviewed");
-    }
-    await tx.task.update({
-      where: { id: input.id },
+    // Status guard in the WHERE clause: two reviewers acting at once
+    // can't both transition the task — the loser gets count 0.
+    const updated = await tx.task.updateMany({
+      where: { id: input.id, status: TaskStatus.SUBMITTED },
       data: {
         status:
           input.decision === "APPROVE" ? TaskStatus.COMPLETED : TaskStatus.REJECTED,
@@ -320,6 +391,11 @@ export async function reviewTask(raw: unknown) {
           input.decision === "REJECT" ? input.rejectionReason!.trim() : null,
       },
     });
+    if (updated.count === 0) {
+      const t = await tx.task.findUnique({ where: { id: input.id }, select: { id: true } });
+      if (!t) throw new ActionError("Task not found");
+      throw new ActionError("Only submitted tasks can be reviewed — refresh the page.");
+    }
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -334,6 +410,7 @@ export async function reviewTask(raw: unknown) {
   revalidatePath("/tasks/admin");
   revalidatePath(`/tasks/${input.id}`);
   revalidatePath("/dashboard");
+  return { ok: true };
 }
 
 // ─── Read helpers ─────────────────────────────────────────────────────

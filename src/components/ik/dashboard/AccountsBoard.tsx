@@ -72,15 +72,15 @@ export function AccountsBoard({ receivables, payables }: { receivables: Receivab
                 <div className="mt-2.5 flex items-center gap-2">
                   <MarkPaidModal
                     outstanding={p.outstanding}
-                    onSubmit={async (input) => {
-                      await markVendorBillPaid({
+                    onSubmit={(input) =>
+                      markVendorBillPaid({
                         id: p.id,
                         method: input.method,
                         reference: input.reference,
                         paidAt: input.paidAt,
                         notes: input.notes,
-                      });
-                    }}
+                      })
+                    }
                   />
                   <Link href={`/procurement/vendor-bills/${p.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open</Link>
                 </div>

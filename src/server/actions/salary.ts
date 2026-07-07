@@ -5,6 +5,12 @@ import { Decimal } from "decimal.js";
 import { EmploymentType, Role, SalaryRunStatus } from "@prisma/client";
 import { db } from "@/server/db";
 import { AuthorizationError, requireRole } from "@/server/rbac";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResult,
+  type ActionResultWith,
+} from "@/server/action-result";
 import { SalaryStructureInput, SalaryRunCreateInput } from "@/lib/validators";
 import { salaryRunNo } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
@@ -18,7 +24,15 @@ const APPROVAL_LARGE_THRESHOLD = new Decimal(500_000); // ≥ ₹5L needs ADMIN
 
 // ─── Salary structures (per-employee) ────────────────────────────────────
 
-export async function upsertSalaryStructure(raw: unknown) {
+export async function upsertSalaryStructure(raw: unknown): Promise<ActionResult> {
+  try {
+    return await upsertSalaryStructureInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function upsertSalaryStructureInner(raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(ADMIN_ONLY);
   const input = SalaryStructureInput.parse(raw);
 
@@ -57,6 +71,7 @@ export async function upsertSalaryStructure(raw: unknown) {
     });
   });
   revalidatePath("/salary/structures");
+  return { ok: true };
 }
 
 export async function listSalaryStructures() {
@@ -78,7 +93,17 @@ export async function listSalaryStructures() {
  *     Phase 4 polish can add it from TimeEntry data)
  *   - deductions = 0 (PF/ESI/PT/IT deferred to Zoho Payroll integration)
  */
-export async function createSalaryRun(raw: unknown) {
+export async function createSalaryRun(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string; runNo: string }>> {
+  try {
+    return await createSalaryRunInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createSalaryRunInner(raw: unknown): Promise<{ ok: true; id: string; runNo: string }> {
   const session = await requireRole(ADMIN_OR_MANAGER);
   const input = SalaryRunCreateInput.parse(raw);
   const periodMonth = istMonthStart(new Date(input.periodMonth));
@@ -87,7 +112,7 @@ export async function createSalaryRun(raw: unknown) {
 
   const result = await db.$transaction(async (tx) => {
     const existing = await tx.salaryRun.findUnique({ where: { periodMonth } });
-    if (existing) throw new Error(`Salary run already exists for ${runNo}`);
+    if (existing) throw new ActionError(`Salary run already exists for ${runNo}`);
 
     // Find active structures effective at month-start
     const structures = await tx.salaryStructure.findMany({
@@ -172,62 +197,75 @@ export async function createSalaryRun(raw: unknown) {
   });
 
   revalidatePath("/salary/runs");
-  return { id: result.id, runNo };
+  return { ok: true, id: result.id, runNo };
 }
 
-export async function approveSalaryRun(id: string) {
-  const session = await requireRole(ADMIN_OR_MANAGER);
-  await db.$transaction(async (tx) => {
-    const run = await tx.salaryRun.findUnique({ where: { id }, select: { status: true, totalAmount: true } });
-    if (!run) throw new Error("Run not found");
-    if (run.status !== SalaryRunStatus.DRAFT) {
-      throw new AuthorizationError("Only DRAFT runs can be approved");
-    }
-    if (toDecimal(run.totalAmount).gte(APPROVAL_LARGE_THRESHOLD) && session.user.role !== Role.ADMIN) {
-      throw new AuthorizationError(`Runs of ₹5L+ require ADMIN approval`);
-    }
-    await tx.salaryRun.update({
-      where: { id },
-      data: { status: SalaryRunStatus.APPROVED, approvedById: session.user.id, approvedAt: new Date() },
+export async function approveSalaryRun(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(ADMIN_OR_MANAGER);
+    await db.$transaction(async (tx) => {
+      const run = await tx.salaryRun.findUnique({ where: { id }, select: { totalAmount: true } });
+      if (!run) throw new ActionError("Run not found");
+      if (toDecimal(run.totalAmount).gte(APPROVAL_LARGE_THRESHOLD) && session.user.role !== Role.ADMIN) {
+        throw new AuthorizationError(`Runs of ₹5L+ require ADMIN approval`);
+      }
+      // Status guard in the WHERE clause: two approvers acting at once
+      // can't both transition the run — the loser gets count 0.
+      const updated = await tx.salaryRun.updateMany({
+        where: { id, status: SalaryRunStatus.DRAFT },
+        data: { status: SalaryRunStatus.APPROVED, approvedById: session.user.id, approvedAt: new Date() },
+      });
+      if (updated.count === 0) {
+        throw new ActionError("Only DRAFT runs can be approved — refresh the page.");
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "SALARY_RUN_APPROVED",
+          entity: "SalaryRun",
+          entityId: id,
+        },
+      });
     });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "SALARY_RUN_APPROVED",
-        entity: "SalaryRun",
-        entityId: id,
-      },
-    });
-  });
-  revalidatePath(`/salary/runs/${id}`);
+    revalidatePath(`/salary/runs/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function postSalaryRun(id: string) {
-  const session = await requireRole(ADMIN_OR_MANAGER);
-  await db.$transaction(async (tx) => {
-    const run = await tx.salaryRun.findUnique({ where: { id }, select: { status: true } });
-    if (!run) throw new Error("Run not found");
-    if (run.status !== SalaryRunStatus.APPROVED) {
-      throw new AuthorizationError("Only APPROVED runs can be posted");
-    }
-    await tx.salaryRun.update({
-      where: { id },
-      data: { status: SalaryRunStatus.POSTED, postedAt: new Date() },
+export async function postSalaryRun(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(ADMIN_OR_MANAGER);
+    await db.$transaction(async (tx) => {
+      // Status guard in the WHERE clause — see approveSalaryRun.
+      const updated = await tx.salaryRun.updateMany({
+        where: { id, status: SalaryRunStatus.APPROVED },
+        data: { status: SalaryRunStatus.POSTED, postedAt: new Date() },
+      });
+      if (updated.count === 0) {
+        const run = await tx.salaryRun.findUnique({ where: { id }, select: { status: true } });
+        if (!run) throw new ActionError("Run not found");
+        throw new ActionError("Only APPROVED runs can be posted — refresh the page.");
+      }
+      // We don't create AP payment rows here in Phase 3 — the salary lines
+      // themselves are the source of truth, and disbursement is recorded
+      // out-of-band via bank transfers logged by accounts. Future phases
+      // could optionally create a VendorBill-style payable per employee.
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "SALARY_RUN_POSTED",
+          entity: "SalaryRun",
+          entityId: id,
+        },
+      });
     });
-    // We don't create AP payment rows here in Phase 3 — the salary lines
-    // themselves are the source of truth, and disbursement is recorded
-    // out-of-band via bank transfers logged by accounts. Future phases
-    // could optionally create a VendorBill-style payable per employee.
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "SALARY_RUN_POSTED",
-        entity: "SalaryRun",
-        entityId: id,
-      },
-    });
-  });
-  revalidatePath(`/salary/runs/${id}`);
+    revalidatePath(`/salary/runs/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 export async function listSalaryRuns() {

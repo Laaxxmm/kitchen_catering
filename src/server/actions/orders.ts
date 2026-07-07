@@ -45,6 +45,7 @@ import { indefineStateCode } from "@/lib/org";
 import { isImmediateChannel, channelWantsFeedback, isEventDeliveryChannel } from "@/lib/order-channels";
 import { getOrCreateHouseCustomerId } from "@/lib/house-customer";
 import { createNotification, notifyRoles } from "@/server/actions/notifications";
+import { deferAfterResponse } from "@/server/defer";
 import { formatIST, istToUtc } from "@/lib/time";
 
 // Every role the middleware lets onto /orders must be listed here, or the
@@ -520,11 +521,12 @@ async function submitOrderInner(id: string): Promise<{ ok: true }> {
   // Chime the right desk. A manager-taken catering order jumps the gate, so
   // it lands in the chef's queue — send the same "approved, chef review"
   // heads-up (which also loops in delivery for event channels) rather than
-  // the "awaiting approval" notice.
+  // the "awaiting approval" notice. Deferred — the submitter's button
+  // shouldn't wait on the fan-out.
   if (skippedGate) {
-    await notifyOrderToChef(id);
+    deferAfterResponse("submit:notify-chef", () => notifyOrderToChef(id));
   } else {
-    await notifyOrderSubmitted(id);
+    deferAfterResponse("submit:notify", () => notifyOrderSubmitted(id));
   }
   return { ok: true };
 }
@@ -592,9 +594,9 @@ export async function adminApproveOrder(
     revalidatePath("/queue/admin-approvals");
     revalidatePath("/queue/chef-approvals");
 
-    // On approval the order moves to the chef — chime them.
+    // On approval the order moves to the chef — chime them (deferred).
     if (input.decision === "APPROVED") {
-      await notifyOrderToChef(id);
+      deferAfterResponse("admin-approve:notify-chef", () => notifyOrderToChef(id));
     }
     return { ok: true };
   } catch (err) {
@@ -671,17 +673,19 @@ export async function chefApproveOrder(
     revalidatePath("/queue/chef-approvals");
     revalidatePath("/queue/manager-approvals");
 
-    // Auto-create + email the proforma invoice OUTSIDE the transaction so
-    // a slow SMTP / PDF render doesn't hold a row lock.
+    // Auto-create + email the proforma AFTER the response — the PDF render
+    // + SMTP handshake took seconds and froze the chef's approve button.
     if (triggerProforma) {
-      const { createProformaInvoiceForOrder } = await import("./customer-invoices");
-      try {
-        await createProformaInvoiceForOrder(id);
-      } catch (err) {
-        console.error(`[proforma] order ${id} failed:`, err);
-      }
-      // Confirm to kitchen + delivery now that the order is going ahead.
-      await notifyOrderApproved(id);
+      deferAfterResponse("chef-approve:proforma+notify", async () => {
+        const { createProformaInvoiceForOrder } = await import("./customer-invoices");
+        try {
+          await createProformaInvoiceForOrder(id);
+        } catch (err) {
+          console.error(`[proforma] order ${id} failed:`, err);
+        }
+        // Confirm to kitchen + delivery now that the order is going ahead.
+        await notifyOrderApproved(id);
+      });
     }
     return { ok: true };
   } catch (err) {
@@ -750,14 +754,16 @@ export async function managerApproveChefSuggestion(
     revalidatePath("/queue/manager-approvals");
 
     if (triggerProforma) {
-      const { createProformaInvoiceForOrder } = await import("./customer-invoices");
-      try {
-        await createProformaInvoiceForOrder(id);
-      } catch (err) {
-        console.error(`[proforma] order ${id} failed:`, err);
-      }
-      // Manager OK'd the chef's changes — order is now going ahead.
-      await notifyOrderApproved(id);
+      deferAfterResponse("manager-approve:proforma+notify", async () => {
+        const { createProformaInvoiceForOrder } = await import("./customer-invoices");
+        try {
+          await createProformaInvoiceForOrder(id);
+        } catch (err) {
+          console.error(`[proforma] order ${id} failed:`, err);
+        }
+        // Manager OK'd the chef's changes — order is now going ahead.
+        await notifyOrderApproved(id);
+      });
     }
     return { ok: true };
   } catch (err) {
@@ -1085,14 +1091,16 @@ async function allocateOrderFeedbackInner(
     return t;
   });
 
-  await createNotification({
-    userId: assigneeId,
-    kind: "TASK_ASSIGNED",
-    title: `Collect feedback — order ${order.code}`,
-    body: `Get ${order.customer.name}'s feedback and record it.`,
-    link: `/orders/${orderId}`,
-    dedupeKey: `order-feedback:${task.id}`,
-  });
+  deferAfterResponse("feedback-allocation:notify", () =>
+    createNotification({
+      userId: assigneeId,
+      kind: "TASK_ASSIGNED",
+      title: `Collect feedback — order ${order.code}`,
+      body: `Get ${order.customer.name}'s feedback and record it.`,
+      link: `/orders/${orderId}`,
+      dedupeKey: `order-feedback:${task.id}`,
+    }),
+  );
 
   revalidatePath(`/orders/${orderId}`);
   return { ok: true, taskId: task.id };

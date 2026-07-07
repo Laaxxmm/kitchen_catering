@@ -10,7 +10,6 @@ import {
 } from "@prisma/client";
 import { db } from "@/server/db";
 import {
-  AuthorizationError,
   ORDER_KITCHEN_ROLES,
   ORDER_MANAGER_ROLES,
   requireRole,
@@ -19,6 +18,7 @@ import {
 import { ProductionJobItemAssignInput } from "@/lib/validators";
 import { nextProductionJobNo } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
+import { ActionError, actionFailure, type ActionResult } from "@/server/action-result";
 
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD, Role.STORE_KEEPER, Role.SALES, Role.ACCOUNTS,
@@ -71,47 +71,59 @@ export async function createProductionJobForOrder(
   return job.id;
 }
 
-export async function assignChef(raw: unknown) {
-  const session = await requireRole([...ORDER_MANAGER_ROLES, ...ORDER_KITCHEN_ROLES]);
-  const input = ProductionJobItemAssignInput.parse(raw);
+export async function assignChef(raw: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireRole([...ORDER_MANAGER_ROLES, ...ORDER_KITCHEN_ROLES]);
+    const input = ProductionJobItemAssignInput.parse(raw);
 
-  await db.$transaction(async (tx) => {
-    const item = await tx.productionJobItem.findUnique({
-      where: { id: input.itemId },
-      select: { jobId: true },
+    await db.$transaction(async (tx) => {
+      const item = await tx.productionJobItem.findUnique({
+        where: { id: input.itemId },
+        select: { jobId: true },
+      });
+      if (!item) throw new ActionError("Production item not found");
+      await tx.productionJobItem.update({
+        where: { id: input.itemId },
+        data: { chefUserId: input.chefUserId },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "PRODUCTION_ITEM_ASSIGNED",
+          entity: "ProductionJobItem",
+          entityId: input.itemId,
+          payloadHash: sha256Json({ chefUserId: input.chefUserId }),
+        },
+      });
     });
-    if (!item) throw new Error("Production item not found");
-    await tx.productionJobItem.update({
-      where: { id: input.itemId },
-      data: { chefUserId: input.chefUserId },
-    });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "PRODUCTION_ITEM_ASSIGNED",
-        entity: "ProductionJobItem",
-        entityId: input.itemId,
-        payloadHash: sha256Json({ chefUserId: input.chefUserId }),
-      },
-    });
-  });
 
-  revalidatePath("/kitchen");
+    revalidatePath("/kitchen");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
-export async function startProductionItem(itemId: string) {
+export async function startProductionItem(itemId: string): Promise<ActionResult> {
+  try {
+    return await startProductionItemInner(itemId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function startProductionItemInner(itemId: string): Promise<{ ok: true }> {
   const session = await requireRole([...ORDER_KITCHEN_ROLES, Role.MANAGER]);
   await db.$transaction(async (tx) => {
     const item = await tx.productionJobItem.findUnique({
       where: { id: itemId },
       select: { id: true, status: true, jobId: true, chefUserId: true },
     });
-    if (!item) throw new Error("Production item not found");
-    if (item.status !== ProductionJobItemStatus.QUEUED) {
-      throw new AuthorizationError(`Cannot start item in status ${item.status}`);
-    }
-    await tx.productionJobItem.update({
-      where: { id: itemId },
+    if (!item) throw new ActionError("Production item not found");
+    // Status guard in the WHERE clause: a concurrent double-click loses
+    // the race and gets a clear message instead of double-transitioning.
+    const updated = await tx.productionJobItem.updateMany({
+      where: { id: itemId, status: ProductionJobItemStatus.QUEUED },
       data: {
         status: ProductionJobItemStatus.IN_PROGRESS,
         startedAt: new Date(),
@@ -121,6 +133,11 @@ export async function startProductionItem(itemId: string) {
         ...(item.chefUserId ? {} : { chefUserId: session.user.id }),
       },
     });
+    if (updated.count === 0) {
+      throw new ActionError(
+        `Cannot start an item that is ${item.status} — refresh the page.`,
+      );
+    }
 
     // If this is the first item in PREP, cascade the parent job.
     const job = await tx.productionJob.findUnique({
@@ -147,22 +164,34 @@ export async function startProductionItem(itemId: string) {
     });
   });
   revalidatePath("/kitchen");
+  return { ok: true };
 }
 
-export async function markProductionItemReady(itemId: string) {
+export async function markProductionItemReady(itemId: string): Promise<ActionResult> {
+  try {
+    return await markProductionItemReadyInner(itemId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function markProductionItemReadyInner(itemId: string): Promise<{ ok: true }> {
   const session = await requireRole([...ORDER_KITCHEN_ROLES, Role.MANAGER]);
   await db.$transaction(async (tx) => {
     const item = await tx.productionJobItem.findUnique({
       where: { id: itemId },
       select: { id: true, status: true, jobId: true },
     });
-    if (!item) throw new Error("Production item not found");
+    if (!item) throw new ActionError("Production item not found");
     if (item.status === ProductionJobItemStatus.READY) return;
 
-    await tx.productionJobItem.update({
-      where: { id: itemId },
+    // Guarded transition: a concurrent double-tap that already flipped the
+    // item to READY matches zero rows (harmless no-op, same as above).
+    const updated = await tx.productionJobItem.updateMany({
+      where: { id: itemId, status: { not: ProductionJobItemStatus.READY } },
       data: { status: ProductionJobItemStatus.READY, readyAt: new Date() },
     });
+    if (updated.count === 0) return;
 
     // If every sibling item is READY, mark the job READY and cascade order.
     const siblings = await tx.productionJobItem.findMany({
@@ -195,6 +224,7 @@ export async function markProductionItemReady(itemId: string) {
   });
   revalidatePath("/kitchen");
   revalidatePath("/orders");
+  return { ok: true };
 }
 
 // ─── Order-level convenience actions (chef work-screen) ────────────────────
@@ -206,20 +236,32 @@ export async function markProductionItemReady(itemId: string) {
  * production job exists, marks every item IN_PROGRESS, and advances the
  * order. Idempotent-ish: safe to re-run while already IN_PREP.
  */
-export async function startCookingOrder(orderId: string) {
+export async function startCookingOrder(orderId: string): Promise<ActionResult> {
+  try {
+    return await startCookingOrderInner(orderId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function startCookingOrderInner(orderId: string): Promise<{ ok: true }> {
   const session = await requireRole([...ORDER_KITCHEN_ROLES, Role.MANAGER]);
   await db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({
-      where: { id: orderId },
-      select: { status: true },
+    // Status guard in the WHERE clause: two chefs tapping at once can't
+    // both transition the order — the loser gets count 0 and a clear
+    // message. (IN_PREP is allowed so a re-run stays a safe no-op-ish.)
+    const updated = await tx.order.updateMany({
+      where: {
+        id: orderId,
+        status: { in: [OrderStatus.READY_FOR_PRODUCTION, OrderStatus.IN_PREP] },
+      },
+      data: { status: OrderStatus.IN_PREP },
     });
-    if (!order) throw new Error("Order not found");
-    if (
-      order.status !== OrderStatus.READY_FOR_PRODUCTION &&
-      order.status !== OrderStatus.IN_PREP
-    ) {
-      throw new AuthorizationError(
-        `Cannot start cooking from status ${order.status}`,
+    if (updated.count === 0) {
+      const order = await tx.order.findUnique({ where: { id: orderId }, select: { status: true } });
+      if (!order) throw new ActionError("Order not found");
+      throw new ActionError(
+        `Cannot start cooking from status ${order.status} — refresh the page.`,
       );
     }
     const jobId = await createProductionJobForOrder(tx, orderId);
@@ -233,10 +275,6 @@ export async function startCookingOrder(orderId: string) {
         data: { status: ProductionJobStatus.PREP, actualStart: new Date() },
       });
     }
-    await tx.order.update({
-      where: { id: orderId },
-      data: { status: OrderStatus.IN_PREP },
-    });
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -250,6 +288,7 @@ export async function startCookingOrder(orderId: string) {
   revalidatePath("/kitchen");
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
 }
 
 /**
@@ -257,20 +296,30 @@ export async function startCookingOrder(orderId: string) {
  * Marks every production item READY, the job READY, and advances the order
  * so the delivery team can dispatch.
  */
-export async function markOrderCooked(orderId: string) {
+export async function markOrderCooked(orderId: string): Promise<ActionResult> {
+  try {
+    return await markOrderCookedInner(orderId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function markOrderCookedInner(orderId: string): Promise<{ ok: true }> {
   const session = await requireRole([...ORDER_KITCHEN_ROLES, Role.MANAGER]);
   await db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({
-      where: { id: orderId },
-      select: { status: true },
+    // Status guard in the WHERE clause — see startCookingOrder.
+    const updated = await tx.order.updateMany({
+      where: {
+        id: orderId,
+        status: { in: [OrderStatus.IN_PREP, OrderStatus.READY_FOR_PRODUCTION] },
+      },
+      data: { status: OrderStatus.READY },
     });
-    if (!order) throw new Error("Order not found");
-    if (
-      order.status !== OrderStatus.IN_PREP &&
-      order.status !== OrderStatus.READY_FOR_PRODUCTION
-    ) {
-      throw new AuthorizationError(
-        `Cannot mark ready from status ${order.status}`,
+    if (updated.count === 0) {
+      const order = await tx.order.findUnique({ where: { id: orderId }, select: { status: true } });
+      if (!order) throw new ActionError("Order not found");
+      throw new ActionError(
+        `Cannot mark ready from status ${order.status} — refresh the page.`,
       );
     }
     const job = await tx.productionJob.findFirst({ where: { orderId } });
@@ -284,10 +333,6 @@ export async function markOrderCooked(orderId: string) {
         data: { status: ProductionJobStatus.READY, actualReady: new Date() },
       });
     }
-    await tx.order.update({
-      where: { id: orderId },
-      data: { status: OrderStatus.READY },
-    });
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -301,6 +346,7 @@ export async function markOrderCooked(orderId: string) {
   revalidatePath("/kitchen");
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
 }
 
 /**

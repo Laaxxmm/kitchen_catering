@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EmptyState } from "@/components/ik/FormKit";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResultWith } from "@/lib/action-result";
 
 interface OrderOption { id: string; code: string; customerName: string; eventDate: string }
 interface DriverOption { id: string; name: string }
@@ -16,7 +17,7 @@ interface DriverOption { id: string; name: string }
 interface Props {
   orders: OrderOption[];
   drivers: DriverOption[];
-  onSubmit: (input: { orderId: string; driverUserId: string; vehicleNo: string | null; scheduledAt: string }) => Promise<{ id: string; deliveryNo: string }>;
+  onSubmit: (input: { orderId: string; driverUserId: string; vehicleNo: string | null; scheduledAt: string }) => Promise<ActionResultWith<{ id: string; deliveryNo: string }>>;
   // Pre-select an order when the page was reached via "Schedule delivery
   // for ORD-XX" from the order detail page.
   initialOrderId?: string | null;
@@ -43,6 +44,10 @@ export function ScheduleDeliveryForm({ orders, drivers, onSubmit, initialOrderId
           vehicleNo: vehicleNo || null,
           scheduledAt,
         });
+        if (!result.ok) {
+          toast.error(result.error);
+          return;
+        }
         toast.success(`Scheduled ${result.deliveryNo}`);
         router.push(`/deliveries/${result.id}`);
         router.refresh();

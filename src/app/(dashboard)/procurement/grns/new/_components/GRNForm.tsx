@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface POLine {
   id: string;
@@ -20,7 +21,7 @@ interface POLine {
 interface Props {
   poId: string;
   lines: POLine[];
-  onSubmit: (input: { poId: string; notes: string | null; lines: Array<{ poLineId: string; acceptedQty: string; rejectedQty: string; reason: string | null }> }) => Promise<void>;
+  onSubmit: (input: { poId: string; notes: string | null; lines: Array<{ poLineId: string; acceptedQty: string; rejectedQty: string; reason: string | null }> }) => Promise<ActionResult | void>;
 }
 
 interface DraftRow { acceptedQty: string; rejectedQty: string; reason: string }
@@ -50,7 +51,11 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
     if (payload.length === 0) return toast.error("Enter accepted or rejected qty on at least one line");
     startTransition(async () => {
       try {
-        await onSubmit({ poId, notes: notes || null, lines: payload });
+        const res = await onSubmit({ poId, notes: notes || null, lines: payload });
+        if (res && !res.ok) {
+          toast.error(res.error);
+          return;
+        }
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");

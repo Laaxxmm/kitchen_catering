@@ -9,11 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { DishInputT } from "@/lib/validators";
+import type { ActionResultWith } from "@/lib/action-result";
 import { isNextNavigationError } from "@/lib/next-error";
 
 interface Props {
   defaults?: Partial<DishInputT>;
-  onSubmit: (input: DishInputT) => Promise<{ id: string }>;
+  onSubmit: (input: DishInputT) => Promise<ActionResultWith<{ id: string }>>;
   submitLabel?: string;
   redirectOnSuccess?: string;
 }
@@ -45,6 +46,10 @@ export function DishForm({ defaults, onSubmit, submitLabel = "Save", redirectOnS
     startTransition(async () => {
       try {
         const result = await onSubmit(cleaned);
+        if (!result.ok) {
+          toast.error(result.error);
+          return;
+        }
         toast.success("Saved");
         if (redirectOnSuccess) router.push(redirectOnSuccess.replace(":id", result.id));
         router.refresh();

@@ -106,6 +106,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   async function doGenerateInvoice() {
     "use server";
     const result = await createCustomerInvoiceFromOrder(id);
+    if (!result.ok) throw new Error(result.error);
     redirect(`/invoices/${result.id}`);
   }
   async function doIngredientsAvailable() {

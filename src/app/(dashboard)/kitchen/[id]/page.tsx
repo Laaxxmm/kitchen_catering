@@ -21,11 +21,11 @@ export default async function KitchenJobDetailPage({ params }: { params: Promise
 
   async function doStart(itemId: string) {
     "use server";
-    await startProductionItem(itemId);
+    return startProductionItem(itemId);
   }
   async function doReady(itemId: string) {
     "use server";
-    await markProductionItemReady(itemId);
+    return markProductionItemReady(itemId);
   }
 
   return (

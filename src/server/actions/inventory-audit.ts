@@ -8,6 +8,7 @@ import { requireRole } from "@/server/rbac";
 import { InventoryAuditPostInput } from "@/lib/validators";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
+import { ActionError, actionFailure, type ActionResultWith } from "@/server/action-result";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD];
@@ -46,7 +47,26 @@ export async function listAuditTargets() {
   });
 }
 
-export async function postInventoryAudit(raw: unknown) {
+export interface AuditChange {
+  ingredient: string;
+  from: string;
+  to: string;
+  delta: string;
+}
+
+export async function postInventoryAudit(
+  raw: unknown,
+): Promise<ActionResultWith<{ changes: AuditChange[] }>> {
+  try {
+    return await postInventoryAuditInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function postInventoryAuditInner(
+  raw: unknown,
+): Promise<{ ok: true; changes: AuditChange[] }> {
   const session = await requireRole(WRITE_ROLES);
   const input = InventoryAuditPostInput.parse(raw);
 
@@ -57,7 +77,7 @@ export async function postInventoryAudit(raw: unknown) {
   const auditOrder = await ensureAuditOrder();
 
   const result = await db.$transaction(async (tx) => {
-    const changes: Array<{ ingredient: string; from: string; to: string; delta: string }> = [];
+    const changes: AuditChange[] = [];
 
     for (const lineInput of input.lines) {
       await lockIngredientRow(tx, lineInput.ingredientId);
@@ -69,7 +89,7 @@ export async function postInventoryAudit(raw: unknown) {
 
       const system = toDecimal(ing.onHandQty);
       const physical = toDecimal(lineInput.physicalCount);
-      if (physical.lt(0)) throw new Error(`Physical count cannot be negative for ${ing.name}`);
+      if (physical.lt(0)) throw new ActionError(`Physical count cannot be negative for ${ing.name}`);
       const delta = physical.minus(system);
       if (delta.eq(0)) continue;
 
@@ -128,7 +148,7 @@ export async function postInventoryAudit(raw: unknown) {
 
   revalidatePath("/inventory/ingredients");
   revalidatePath("/inventory/audit");
-  return { changes: result };
+  return { ok: true, changes: result };
 }
 
 /**
@@ -155,7 +175,7 @@ async function ensureAuditOrder() {
   }
   // Sentinel admin user as creator
   const admin = await db.user.findFirst({ where: { role: "ADMIN" }, select: { id: true } });
-  if (!admin) throw new Error("Cannot create audit anchor — no ADMIN user found");
+  if (!admin) throw new ActionError("Cannot create audit anchor — no ADMIN user found");
 
   return db.order.create({
     data: {

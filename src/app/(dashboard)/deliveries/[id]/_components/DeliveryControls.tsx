@@ -6,24 +6,29 @@ import { toast } from "sonner";
 import { DeliveryStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResult } from "@/lib/action-result";
 
 interface Props {
   status: DeliveryStatus;
-  onDispatch: () => Promise<void>;
-  onArrived: () => Promise<void>;
+  onDispatch: () => Promise<ActionResult>;
+  onArrived: () => Promise<ActionResult>;
   /** OTP-less confirm. Name kept for backwards compat with the page shim. */
-  onConfirmOTP: () => Promise<void>;
-  onFail: (reason: string) => Promise<void>;
+  onConfirmOTP: () => Promise<ActionResult>;
+  onFail: (reason: string) => Promise<ActionResult>;
 }
 
 export function DeliveryControls({ status, onDispatch, onArrived, onConfirmOTP, onFail }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
-  function call(fn: () => Promise<void>) {
+  function call(fn: () => Promise<ActionResult>) {
     startTransition(async () => {
       try {
-        await fn();
+        const res = await fn();
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Saved");
         router.refresh();
       } catch (err) {

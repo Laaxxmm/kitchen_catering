@@ -81,6 +81,7 @@ export default async function NewVendorPOPage({
   }) {
     "use server";
     const r = await createVendorPO(input);
+    if (!r.ok) return r;
     redirect(`/procurement/purchase-orders/${r.id}`);
   }
 
