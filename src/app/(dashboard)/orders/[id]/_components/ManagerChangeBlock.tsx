@@ -76,7 +76,7 @@ export function ManagerChangeBlock({ chefNote, chefName, onApprove, onReject }: 
             type="button"
             disabled={pending}
             onClick={() =>
-              run(() => onApprove(note), "Approved — order moves to chef requisition")
+              run(() => onApprove(note), "Approved — back to the chef to accept")
             }
           >
             {pending ? "Saving…" : "Approve chef's changes"}

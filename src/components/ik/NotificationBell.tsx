@@ -47,6 +47,8 @@ export function NotificationBell({ placement = "up" }: { placement?: "up" | "dow
   // refresh instead. Only ever prompts once per tab.
   const buildRef = useRef<string | null>(null);
   const refreshPromptedRef = useRef(false);
+  // Page title without our "(N) " unread prefix, captured on first poll.
+  const baseTitleRef = useRef<string | null>(null);
   // Chime on/off, persisted in localStorage. The ref mirrors state so the
   // polling closure always reads the current preference.
   const [muted, setMuted] = useState(false);
@@ -95,7 +97,15 @@ export function NotificationBell({ placement = "up" }: { placement?: "up" | "dow
           }
         }
         setCount(c);
+        // Unread badge in the browser tab, so a desk that keeps Greenpath
+        // in a background tab still sees work arriving at a glance.
+        if (baseTitleRef.current === null) baseTitleRef.current = document.title.replace(/^\(\d+\)\s*/, "");
+        document.title = c > 0 ? `(${c}) ${baseTitleRef.current}` : baseTitleRef.current;
         const prev = lastCountRef.current;
+        // Chime on every rise in unread count — including background tabs,
+        // so the chef/store desk hears new work without watching the screen.
+        // (Browsers keep audio suspended until the user has interacted with
+        // the page once per session; after that, background chimes play.)
         if (prev !== null && c > prev && !mutedRef.current) playChime();
         lastCountRef.current = c;
       } catch {
@@ -103,11 +113,13 @@ export function NotificationBell({ placement = "up" }: { placement?: "up" | "dow
       }
     }
     refresh();
-    // 60s cadence, and skip ticks while the tab is hidden — with every
-    // signed-in user polling, this halves the background query load and
-    // stops parked tabs from hammering the server all day.
+    // 60s cadence in the foreground; hidden tabs still poll (so they can
+    // chime + badge the tab title) but at half rate to keep the background
+    // query load down.
+    let tick = 0;
     const t = window.setInterval(() => {
-      if (document.visibilityState === "visible") refresh();
+      tick += 1;
+      if (document.visibilityState === "visible" || tick % 2 === 0) refresh();
     }, 60_000);
     const onVisible = () => {
       if (document.visibilityState === "visible") refresh();

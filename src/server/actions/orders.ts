@@ -695,9 +695,13 @@ export async function chefApproveOrder(
 
 /**
  * Manager reviews the chef's proposed changes. Two outcomes:
- *   - APPROVED → advances straight to CHEF_REQUISITION_PENDING (per the
- *                product decision: chef doesn't re-confirm, manager OK is
- *                enough). Auto-creates + emails the proforma.
+ *   - APPROVED → back to PENDING_CHEF_APPROVAL: the order returns to the
+ *                chef's new-orders queue so they see the approved changes
+ *                and formally accept before raising the requisition.
+ *                (Product decision July 2026 — previously it skipped
+ *                straight to CHEF_REQUISITION_PENDING; the chef never got
+ *                a look at what was approved. The proforma is sent by the
+ *                chef's own approval, as with any order.)
  *   - REJECTED → REJECTED_BY_MANAGER (terminal).
  *
  * Only callable from CHANGES_PROPOSED_BY_CHEF.
@@ -709,12 +713,10 @@ export async function managerApproveChefSuggestion(
   try {
     const session = await requireRole(ORDER_MANAGER_ROLES);
 
-    let triggerProforma = false;
-
     await db.$transaction(async (tx) => {
       const nextStatus =
         input.decision === "APPROVED"
-          ? OrderStatus.CHEF_REQUISITION_PENDING
+          ? OrderStatus.PENDING_CHEF_APPROVAL
           : OrderStatus.REJECTED_BY_MANAGER;
 
       const updated = await tx.order.updateMany({
@@ -726,6 +728,11 @@ export async function managerApproveChefSuggestion(
           managerChangeDecision:
             input.decision === "APPROVED" ? ApprovalDecision.APPROVED : ApprovalDecision.REJECTED,
           managerChangeNote: input.note ?? null,
+          // Clear the chef's decision stamp so the order reads as freshly
+          // awaiting chef review — their suggestion note stays on the record.
+          ...(input.decision === "APPROVED"
+            ? { chefDecision: null, chefReviewedAt: null, chefReviewedById: null }
+            : {}),
         },
       });
       if (updated.count === 0) {
@@ -744,26 +751,26 @@ export async function managerApproveChefSuggestion(
           payloadHash: sha256Json({ decision: input.decision, note: input.note ?? null }),
         },
       });
-      if (input.decision === "APPROVED") {
-        triggerProforma = true;
-      }
     });
 
     revalidatePath(`/orders/${id}`);
     revalidatePath("/orders");
     revalidatePath("/queue/manager-approvals");
+    revalidatePath("/queue/chef-approvals");
 
-    if (triggerProforma) {
-      deferAfterResponse("manager-approve:proforma+notify", async () => {
-        const { createProformaInvoiceForOrder } = await import("./customer-invoices");
-        try {
-          await createProformaInvoiceForOrder(id);
-        } catch (err) {
-          console.error(`[proforma] order ${id} failed:`, err);
-        }
-        // Manager OK'd the chef's changes — order is now going ahead.
-        await notifyOrderApproved(id);
-      });
+    // Approved changes send the order BACK to the chef's queue — tell them
+    // to review + accept. (The proforma goes out when the chef accepts,
+    // exactly like a first-time approval.)
+    if (input.decision === "APPROVED") {
+      deferAfterResponse("manager-approve-changes:notify-chef", () =>
+        notifyRoles([Role.KITCHEN_HEAD], {
+          kind: "GENERIC",
+          title: `Your proposed changes were approved`,
+          body: `Order is back in your queue — review the approved changes, then accept to proceed to ingredients.`,
+          link: `/orders/${id}`,
+          dedupeKey: `order-changes-approved:${id}:${Date.now()}`,
+        }),
+      );
     }
     return { ok: true };
   } catch (err) {

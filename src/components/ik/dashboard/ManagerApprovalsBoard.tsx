@@ -209,7 +209,7 @@ function OrderChangeCard({ change }: { change: OrderChange }) {
       {change.note && <div className="mt-1 rounded bg-ik-card p-2 text-[12px] text-ik-ink-2 ring-1 ring-ik-rule">{change.note}</div>}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <Button size="sm" disabled={pending}
-          onClick={() => run(() => managerApproveChefSuggestion(change.id, { decision: "APPROVED", note: note || undefined }), "Approved — order continues")}>
+          onClick={() => run(() => managerApproveChefSuggestion(change.id, { decision: "APPROVED", note: note || undefined }), "Approved — back to the chef to accept")}>
           Approve
         </Button>
         <Button size="sm" variant="outline" disabled={pending} onClick={() => setShowReject((v) => !v)}>Reject</Button>

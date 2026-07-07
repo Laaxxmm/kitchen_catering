@@ -22,7 +22,7 @@ export default async function ManagerApprovalsQueuePage() {
       <PageHeader
         eyebrow="Queue · Manager"
         title="Chef-suggested changes"
-        description="Orders where the chef has proposed changes. Review the chef's note on each order detail page, then approve (proforma sends) or reject."
+        description="Orders where the chef has proposed changes. Review the chef's note on each order detail page, then approve (sends it back to the chef to accept) or reject."
       />
       {orders.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">Queue is clear.</p>
