@@ -198,15 +198,21 @@ export async function listEventPrepQueue() {
  * the kitchen + management so everyone knows the front-of-house side is set.
  * Idempotent: a second tap (or a stale card) is a harmless no-op.
  */
-export async function markEventPrepReady(orderId: string): Promise<ActionResult> {
+export async function markEventPrepReady(
+  orderId: string,
+  opts: { noCutleryRequired?: boolean } = {},
+): Promise<ActionResult> {
   try {
-    return await markEventPrepReadyInner(orderId);
+    return await markEventPrepReadyInner(orderId, opts);
   } catch (err) {
     return actionFailure(err);
   }
 }
 
-async function markEventPrepReadyInner(orderId: string): Promise<{ ok: true }> {
+async function markEventPrepReadyInner(
+  orderId: string,
+  opts: { noCutleryRequired?: boolean },
+): Promise<{ ok: true }> {
   const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
   const order = await db.order.findUnique({
     where: { id: orderId },
@@ -229,11 +235,28 @@ async function markEventPrepReadyInner(orderId: string): Promise<{ ok: true }> {
     revalidatePath("/dashboard");
     return { ok: true };
   }
+  // Every event must either issue cutlery or explicitly log that none is
+  // needed — no silent skips, so the returns ledger is always meaningful.
+  const issuedCount = await db.banquetIssue.count({ where: { orderId } });
+  if (issuedCount === 0 && !opts.noCutleryRequired) {
+    throw new ActionError(
+      "Nothing has been issued for this event. Issue the cutlery/arrangements first, or tick “No cutlery required”.",
+    );
+  }
+  if (issuedCount > 0 && opts.noCutleryRequired) {
+    throw new ActionError(
+      "Cutlery has already been issued to this event — untick “No cutlery required”.",
+    );
+  }
   // Guarded write: a concurrent tap that already stamped it simply
   // matches zero rows — same harmless no-op.
   const updated = await db.order.updateMany({
     where: { id: orderId, eventPrepReadyAt: null },
-    data: { eventPrepReadyAt: new Date(), eventPrepReadyById: session.user.id },
+    data: {
+      eventPrepReadyAt: new Date(),
+      eventPrepReadyById: session.user.id,
+      eventPrepNoCutlery: opts.noCutleryRequired === true && issuedCount === 0,
+    },
   });
   if (updated.count === 0) {
     revalidatePath("/dashboard");

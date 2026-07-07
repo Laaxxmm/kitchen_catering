@@ -825,6 +825,13 @@ export const BanquetIssueInput = z.object({
   lines: z.array(BanquetIssueLineInput).min(1, "Add at least one item"),
 });
 
+export const BanquetReturnInput = z.object({
+  returnedAt: isoDate,
+  orderId: z.string().min(1),
+  notes: z.string().max(500).nullable().optional(),
+  lines: z.array(BanquetIssueLineInput).min(1, "Add at least one item"),
+});
+
 // =====================================================================
 // SETTINGS
 // =====================================================================

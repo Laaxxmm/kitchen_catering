@@ -10,10 +10,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatIST } from "@/lib/time";
 import { isNextNavigationError } from "@/lib/next-error";
-import { recordBanquetIssue } from "@/server/actions/banquet";
+import { recordBanquetIssue, recordBanquetReturn } from "@/server/actions/banquet";
 import { markEventPrepReady } from "@/server/actions/deliveries";
 
 interface Item { id: string; name: string; unit: string; currentStock: string }
+interface LedgerRow {
+  itemId: string; name: string; unit: string;
+  issued: string; returned: string; outstanding: string;
+}
 interface Order {
   id: string; code: string; customerName: string; channel: OrderChannel;
   headcount: number; eventDate: string; deliveryAddress: string;
@@ -30,13 +34,22 @@ function nowLocal(): string {
 /**
  * Cutlery/arrangements prep for an off-site event. Choose the banquet items
  * needed, issue what's in stock (linked to this order), request the rest from
- * the store, then mark the event prep ready.
+ * the store, then mark the event prep ready — either with cutlery issued or
+ * with an explicit "no cutlery required". After the event, record what came
+ * back; the ledger shows what's still out with the client.
  */
-export function EventPrepForm({ order, items }: { order: Order; items: Item[] }) {
+export function EventPrepForm({ order, items, ledger }: { order: Order; items: Item[]; ledger: LedgerRow[] }) {
   const router = useRouter();
   const [issuing, startIssue] = useTransition();
   const [marking, startMark] = useTransition();
+  const [returning, startReturn] = useTransition();
   const [lines, setLines] = useState<Line[]>([{ itemId: "", quantity: "" }]);
+  const [noCutlery, setNoCutlery] = useState(false);
+  // Return quantities keyed by itemId.
+  const [returnQty, setReturnQty] = useState<Record<string, string>>({});
+
+  const hasIssues = ledger.length > 0;
+  const anyOutstanding = ledger.some((r) => Number(r.outstanding) > 0);
 
   function addLine() { setLines((l) => [...l, { itemId: "", quantity: "" }]); }
   function removeLine(i: number) { setLines((l) => l.filter((_, idx) => idx !== i)); }
@@ -62,6 +75,7 @@ export function EventPrepForm({ order, items }: { order: Order; items: Item[] })
         }
         toast.success("Issued to the event — stock updated");
         setLines([{ itemId: "", quantity: "" }]);
+        setNoCutlery(false);
         router.refresh();
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
@@ -71,9 +85,14 @@ export function EventPrepForm({ order, items }: { order: Order; items: Item[] })
   }
 
   function markReady() {
+    if (!hasIssues && !noCutlery) {
+      return toast.error(
+        "Issue the cutlery/arrangements first, or tick “No cutlery required for this event”.",
+      );
+    }
     startMark(async () => {
       try {
-        const res = await markEventPrepReady(order.id);
+        const res = await markEventPrepReady(order.id, { noCutleryRequired: noCutlery });
         if (!res.ok) {
           toast.error(res.error);
           return;
@@ -83,6 +102,33 @@ export function EventPrepForm({ order, items }: { order: Order; items: Item[] })
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Could not mark ready");
+      }
+    });
+  }
+
+  function recordReturns() {
+    const entries = Object.entries(returnQty)
+      .map(([itemId, q]) => ({ itemId, quantity: q.trim() }))
+      .filter((e) => e.quantity && Number(e.quantity) > 0);
+    if (entries.length === 0) return toast.error("Enter how many pieces came back");
+    startReturn(async () => {
+      try {
+        const res = await recordBanquetReturn({
+          returnedAt: nowLocal(),
+          orderId: order.id,
+          notes: null,
+          lines: entries,
+        });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success("Return recorded — stock updated");
+        setReturnQty({});
+        router.refresh();
+      } catch (err) {
+        if (isNextNavigationError(err)) throw err;
+        toast.error(err instanceof Error ? err.message : "Could not record the return");
       }
     });
   }
@@ -106,6 +152,69 @@ export function EventPrepForm({ order, items }: { order: Order; items: Item[] })
           </div>
         )}
       </section>
+
+      {/* Cutlery ledger — what's out with this client */}
+      {hasIssues && (
+        <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[12px] font-medium text-ik-ink-2">Cutlery out with this client</div>
+            {anyOutstanding ? (
+              <span className="rounded-full bg-amber-wash px-2 py-0.5 text-[10.5px] font-medium text-amber-700">
+                Balance outstanding — chargeable to the client / handler
+              </span>
+            ) : (
+              <span className="rounded-full bg-positive/10 px-2 py-0.5 text-[10.5px] font-medium text-positive">
+                All returned
+              </span>
+            )}
+          </div>
+          <table className="w-full text-[12.5px]">
+            <thead className="border-b border-ik-rule text-left text-ik-ink-3">
+              <tr>
+                <th className="py-1 pr-2">Item</th>
+                <th className="w-20 py-1 pr-2 text-right">Went out</th>
+                <th className="w-20 py-1 pr-2 text-right">Came back</th>
+                <th className="w-20 py-1 pr-2 text-right">Still out</th>
+                <th className="w-28 py-1 pr-2 text-right">Return now</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ledger.map((r) => (
+                <tr key={r.itemId} className="border-b border-ik-rule/60">
+                  <td className="py-1.5 pr-2">{r.name}</td>
+                  <td className="py-1.5 pr-2 text-right font-mono">{r.issued}</td>
+                  <td className="py-1.5 pr-2 text-right font-mono">{r.returned}</td>
+                  <td className={"py-1.5 pr-2 text-right font-mono " + (Number(r.outstanding) > 0 ? "font-semibold text-amber-700" : "text-ik-ink-3")}>
+                    {r.outstanding}
+                  </td>
+                  <td className="py-1 pr-2">
+                    {Number(r.outstanding) > 0 ? (
+                      <Input
+                        type="number"
+                        step="any"
+                        min="0"
+                        placeholder="0"
+                        className="h-8 text-right font-mono"
+                        value={returnQty[r.itemId] ?? ""}
+                        onChange={(e) => setReturnQty((p) => ({ ...p, [r.itemId]: e.target.value }))}
+                      />
+                    ) : (
+                      <span className="block text-right text-[11px] text-ik-ink-3">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {anyOutstanding && (
+            <div className="mt-3">
+              <Button size="sm" variant="outline" disabled={returning} onClick={recordReturns}>
+                {returning ? "Recording…" : "Record returned pieces"}
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Choose + issue cutlery */}
       <section className="rounded-md border border-ik-rule bg-ik-card p-4">
@@ -144,13 +253,34 @@ export function EventPrepForm({ order, items }: { order: Order; items: Item[] })
         </div>
       </section>
 
-      {/* Final step */}
+      {/* Final step — issuing something OR an explicit "no cutlery" is mandatory */}
+      {!hasIssues && (
+        <label className="flex items-start gap-2 rounded-md border border-ik-rule bg-ik-card p-3 text-[13px]">
+          <input
+            type="checkbox"
+            checked={noCutlery}
+            onChange={(e) => setNoCutlery(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-brand-500"
+          />
+          <span>
+            <span className="font-medium">No cutlery required for this event</span>
+            <span className="block text-[11.5px] text-ik-ink-2">
+              Logged on the order — use only when the client provides their own or the packing needs nothing from the store.
+            </span>
+          </span>
+        </label>
+      )}
       <div className="flex flex-wrap gap-2">
-        <Button disabled={marking} onClick={markReady}>
+        <Button disabled={marking || (!hasIssues && !noCutlery)} onClick={markReady}>
           {marking ? "Saving…" : order.prepReadyAt ? "Re-confirm ready" : "Mark cutlery & arrangements ready"}
         </Button>
         <Button variant="outline" onClick={() => router.push("/dashboard")}>Back</Button>
       </div>
+      {!hasIssues && !noCutlery && !order.prepReadyAt && (
+        <p className="text-[11.5px] text-ik-ink-3">
+          To mark ready: issue at least one item above, or tick &ldquo;No cutlery required&rdquo;.
+        </p>
+      )}
     </div>
   );
 }

@@ -408,24 +408,25 @@ model User {
   salaryRunsApproved              SalaryRun[]              @relation("SalaryRunApprovedBy")
 
   // Task assignment
-  tasksAssignedTo                 Task[]                   @relation("TaskAssignedTo")
-  tasksAssignedBy                 Task[]                   @relation("TaskAssignedBy")
-  tasksReviewed                   Task[]                   @relation("TaskReviewedBy")
+  tasksAssignedTo Task[] @relation("TaskAssignedTo")
+  tasksAssignedBy Task[] @relation("TaskAssignedBy")
+  tasksReviewed   Task[] @relation("TaskReviewedBy")
 
   // Housekeeping
-  housekeepingReceiptsRecorded    HousekeepingReceipt[]    @relation("HousekeepingReceiptRecordedBy")
-  housekeepingIssuesRecorded      HousekeepingIssue[]      @relation("HousekeepingIssueRecordedBy")
+  housekeepingReceiptsRecorded HousekeepingReceipt[] @relation("HousekeepingReceiptRecordedBy")
+  housekeepingIssuesRecorded   HousekeepingIssue[]   @relation("HousekeepingIssueRecordedBy")
 
   // Maintenance
-  maintenanceReceiptsRecorded     MaintenanceReceipt[]     @relation("MaintenanceReceiptRecordedBy")
-  maintenanceActivitiesRecorded   MaintenanceActivity[]    @relation("MaintenanceActivityRecordedBy")
+  maintenanceReceiptsRecorded   MaintenanceReceipt[]  @relation("MaintenanceReceiptRecordedBy")
+  maintenanceActivitiesRecorded MaintenanceActivity[] @relation("MaintenanceActivityRecordedBy")
 
   // Banquet (F&B store)
-  banquetReceiptsRecorded         BanquetReceipt[]         @relation("BanquetReceiptRecordedBy")
-  banquetIssuesRecorded           BanquetIssue[]           @relation("BanquetIssueRecordedBy")
+  banquetReceiptsRecorded BanquetReceipt[] @relation("BanquetReceiptRecordedBy")
+  banquetIssuesRecorded   BanquetIssue[]   @relation("BanquetIssueRecordedBy")
+  banquetReturnsRecorded  BanquetReturn[]  @relation("BanquetReturnRecordedBy")
 
   // Notifications (Phase 5)
-  notifications                   Notification[]           @relation("NotificationToUser")
+  notifications Notification[] @relation("NotificationToUser")
 
   // Mobile
   mobileSessions MobileSession[] @relation("MobileSessions")
@@ -624,33 +625,33 @@ model RecipeSubRecipe {
 // links stay untouched) and route requisition approvals on this enum.
 enum IngredientSubStore {
   VEGETABLE // chef-side produce
-  GROCERY   // chef-side staples (dals, rice, flours, spices, oils)
-  MILK      // milk, curd, dairy
-  WATER     // packaged water bottles, cans
-  OTHER     // anything that doesn't fit; default for backfills
+  GROCERY // chef-side staples (dals, rice, flours, spices, oils)
+  MILK // milk, curd, dairy
+  WATER // packaged water bottles, cans
+  OTHER // anything that doesn't fit; default for backfills
 }
 
 model Ingredient {
-  id                String   @id @default(cuid())
-  sku               String   @unique
+  id                String             @id @default(cuid())
+  sku               String             @unique
   name              String
   category          String? // free-text legacy category — kept for backwards compat
   // Single source of truth for approval routing per the workflow matrix.
   // Backfilled to OTHER on existing rows; UI lets you reclassify.
   subStore          IngredientSubStore @default(OTHER)
   unit              String // 'kg' | 'g' | 'L' | 'mL' | 'pcs' | 'pkt' ...
-  openingQty        Decimal  @default(0) @db.Decimal(14, 3)
-  openingAvgCost    Decimal  @default(0) @db.Decimal(12, 4)
-  onHandQty         Decimal  @default(0) @db.Decimal(14, 3)
-  avgUnitCost       Decimal  @default(0) @db.Decimal(12, 4)
-  reorderLevel      Decimal  @default(0) @db.Decimal(14, 3)
+  openingQty        Decimal            @default(0) @db.Decimal(14, 3)
+  openingAvgCost    Decimal            @default(0) @db.Decimal(12, 4)
+  onHandQty         Decimal            @default(0) @db.Decimal(14, 3)
+  avgUnitCost       Decimal            @default(0) @db.Decimal(12, 4)
+  reorderLevel      Decimal            @default(0) @db.Decimal(14, 3)
   preferredVendorId String?
-  preferredVendor   Vendor?  @relation("PreferredVendor", fields: [preferredVendorId], references: [id])
+  preferredVendor   Vendor?            @relation("PreferredVendor", fields: [preferredVendorId], references: [id])
   hsnSac            String?
-  gstRatePct        Decimal  @default(0) @db.Decimal(5, 2)
-  active            Boolean  @default(true)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  gstRatePct        Decimal            @default(0) @db.Decimal(5, 2)
+  active            Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   receipts             IngredientReceipt[]
   issues               IngredientIssue[]
@@ -843,7 +844,7 @@ model Order {
 
   // How this order was taken. Drives line rendering, room/table
   // tracking, approval routing in later phases.
-  channel             OrderChannel @default(BANQUET)
+  channel OrderChannel @default(BANQUET)
 
   // Catering-specific
   eventDate           DateTime
@@ -863,10 +864,10 @@ model Order {
   // click /f/<token> to leave a review. feedbackRating is 1..5;
   // feedbackComment is free text. Both null until the customer fills
   // in the public form.
-  feedbackToken     String?   @unique
-  feedbackSentAt    DateTime?
-  feedbackRating    Int?
-  feedbackComment   String?
+  feedbackToken       String?   @unique
+  feedbackSentAt      DateTime?
+  feedbackRating      Int?
+  feedbackComment     String?
   feedbackSubmittedAt DateTime?
 
   // Feedback collection allocation — a manager assigns a staff member to
@@ -880,14 +881,17 @@ model Order {
   // delivery team has been pinged. The order stays READY until a delivery is
   // actually scheduled; this just lets the kitchen card show "Delivery
   // informed" instead of the action button after they've intimated.
-  handedToDeliveryAt     DateTime?
+  handedToDeliveryAt DateTime?
 
   // Off-site catering (banquet / ODC / packed): the delivery team prepares
   // cutlery, crockery and event arrangements ahead of the event and marks
   // them ready here. Null until they tap "Mark event prep ready".
-  eventPrepReadyAt       DateTime?
-  eventPrepReadyById     String?
-  eventPrepReadyBy       User?     @relation("OrderEventPrepReadyBy", fields: [eventPrepReadyById], references: [id])
+  eventPrepReadyAt   DateTime?
+  eventPrepReadyById String?
+  eventPrepReadyBy   User?     @relation("OrderEventPrepReadyBy", fields: [eventPrepReadyById], references: [id])
+  // Explicit "no cutlery required" choice — every event either issues
+  // cutlery or logs that none was needed; no silent skips.
+  eventPrepNoCutlery Boolean   @default(false)
 
   status                 OrderStatus @default(DRAFT)
   contractValue          Decimal     @db.Decimal(14, 2)
@@ -933,11 +937,11 @@ model Order {
   // raised by an admin themselves — sits at PENDING_ADMIN_APPROVAL until
   // an ADMIN approves it. Approval flips the status to
   // PENDING_CHEF_APPROVAL so the kitchen flow takes over.
-  adminReviewedById   String?
-  adminReviewedBy     User?             @relation("OrderAdminReviewedBy", fields: [adminReviewedById], references: [id])
-  adminReviewedAt     DateTime?
-  adminDecision       ApprovalDecision?
-  adminReviewNote     String?
+  adminReviewedById String?
+  adminReviewedBy   User?             @relation("OrderAdminReviewedBy", fields: [adminReviewedById], references: [id])
+  adminReviewedAt   DateTime?
+  adminDecision     ApprovalDecision?
+  adminReviewNote   String?
 
   // Chef-first review (workflow v2).
   // After admin approval the order lands at PENDING_CHEF_APPROVAL. The
@@ -945,17 +949,17 @@ model Order {
   // CHEF_REQUISITION_PENDING) or proposes changes
   // (chefDecision=SUGGESTED_CHANGES, chefSuggestionNotes populated,
   // advances to CHANGES_PROPOSED_BY_CHEF for the manager).
-  chefReviewedById     String?
-  chefReviewedBy       User?             @relation("OrderChefReviewedBy", fields: [chefReviewedById], references: [id])
-  chefReviewedAt       DateTime?
-  chefDecision         ApprovalDecision?
-  chefSuggestionNotes  String?
+  chefReviewedById    String?
+  chefReviewedBy      User?             @relation("OrderChefReviewedBy", fields: [chefReviewedById], references: [id])
+  chefReviewedAt      DateTime?
+  chefDecision        ApprovalDecision?
+  chefSuggestionNotes String?
 
   // Manager review of the chef's proposed changes. APPROVED here flips the
   // order back into the chef's queue at CHEF_REQUISITION_PENDING; REJECTED
   // is terminal (REJECTED_BY_MANAGER).
   managerChangeReviewedById String?
-  managerChangeReviewedBy   User?         @relation("OrderManagerChangeReviewedBy", fields: [managerChangeReviewedById], references: [id])
+  managerChangeReviewedBy   User?             @relation("OrderManagerChangeReviewedBy", fields: [managerChangeReviewedById], references: [id])
   managerChangeReviewedAt   DateTime?
   managerChangeDecision     ApprovalDecision?
   managerChangeNote         String?
@@ -984,6 +988,7 @@ model Order {
   timeEntries      TimeEntry[]               @relation("TimeEntryToOrder")
   chefRequisitions ChefRequisition[]
   banquetIssues    BanquetIssue[]            @relation("BanquetIssueOrder")
+  banquetReturns   BanquetReturn[]           @relation("BanquetReturnOrder")
 
   @@index([status])
   @@index([customerId])
@@ -1196,14 +1201,14 @@ model Delivery {
   // confirms OTP, they can also mark whether they collected payment on
   // the spot. If true, a CustomerInvoicePayment row is auto-created
   // against the order's invoice in the same transaction.
-  paymentCollected   Boolean? @default(false)
-  paymentAmount      Decimal? @db.Decimal(14, 2)
-  paymentMethod      String?  // 'CASH' | 'UPI' | 'CHEQUE' | 'NEFT' | 'OTHER'
-  paymentReference   String?  // UPI ref / cheque no
-  paymentRecordedAt  DateTime?
+  paymentCollected  Boolean?  @default(false)
+  paymentAmount     Decimal?  @db.Decimal(14, 2)
+  paymentMethod     String? // 'CASH' | 'UPI' | 'CHEQUE' | 'NEFT' | 'OTHER'
+  paymentReference  String? // UPI ref / cheque no
+  paymentRecordedAt DateTime?
 
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   attempts DeliveryAttempt[]
 
@@ -1315,19 +1320,19 @@ model PurchaseRequisitionLine {
 }
 
 model VendorPO {
-  id                     String         @id @default(cuid())
-  poNo                   String         @unique // VPO-26-27-0001
+  id                     String          @id @default(cuid())
+  poNo                   String          @unique // VPO-26-27-0001
   vendorId               String
-  vendor                 Vendor         @relation(fields: [vendorId], references: [id])
+  vendor                 Vendor          @relation(fields: [vendorId], references: [id])
   orderId                String? // optional link to the catering order being procured for
-  order                  Order?         @relation(fields: [orderId], references: [id], name: "VendorPOToOrder")
-  status                 VendorPOStatus @default(DRAFT)
-  issueDate              DateTime       @default(now())
+  order                  Order?          @relation(fields: [orderId], references: [id], name: "VendorPOToOrder")
+  status                 VendorPOStatus  @default(DRAFT)
+  issueDate              DateTime        @default(now())
   expectedDate           DateTime?
   placeOfSupplyStateCode String
-  subtotal               Decimal        @default(0) @db.Decimal(14, 2)
-  taxTotal               Decimal        @default(0) @db.Decimal(14, 2)
-  grandTotal             Decimal        @default(0) @db.Decimal(14, 2)
+  subtotal               Decimal         @default(0) @db.Decimal(14, 2)
+  taxTotal               Decimal         @default(0) @db.Decimal(14, 2)
+  grandTotal             Decimal         @default(0) @db.Decimal(14, 2)
   // approvalTier:
   //   "auto"   — skip approval entirely (rare, explicit override)
   //   "tiered" — apply Settings.po.approvalTiers thresholds:
@@ -1335,7 +1340,7 @@ model VendorPO {
   //              ≥ adminMin (default ₹5000 per Workflow doc).
   //   Legacy values "manager" / "admin" from earlier rollouts are treated
   //   as "tiered" by the engine.
-  approvalTier           String         @default("tiered")
+  approvalTier           String          @default("tiered")
   // How the store is procuring this. LOCAL (buy from a local shop) and ONLINE
   // (order online) always require BOTH manager AND admin sign-off, regardless
   // of value. STANDARD keeps the value-tier rule (Manager < ₹5k, Admin ≥ ₹5k).
@@ -1343,22 +1348,22 @@ model VendorPO {
   // Final approver — the person who clicked "Approve" on the LAST step
   // (manager-alone for <threshold POs, admin for ≥threshold).
   approvedByUserId       String?
-  approvedBy             User?          @relation("VendorPOApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedBy             User?           @relation("VendorPOApprovedBy", fields: [approvedByUserId], references: [id])
   approvedAt             DateTime?
   // Per-step approval breadcrumbs. Both populate on a tiered approval;
   // on a sub-threshold PO only managerApproved* is set + approvedAt
   // points to that timestamp.
   managerApprovedById    String?
-  managerApprovedBy      User?          @relation("VendorPOManagerApprovedBy", fields: [managerApprovedById], references: [id])
+  managerApprovedBy      User?           @relation("VendorPOManagerApprovedBy", fields: [managerApprovedById], references: [id])
   managerApprovedAt      DateTime?
   adminApprovedById      String?
-  adminApprovedBy        User?          @relation("VendorPOAdminApprovedBy", fields: [adminApprovedById], references: [id])
+  adminApprovedBy        User?           @relation("VendorPOAdminApprovedBy", fields: [adminApprovedById], references: [id])
   adminApprovedAt        DateTime?
   sentAt                 DateTime?
   closedAt               DateTime?
   notes                  String?
-  createdAt              DateTime       @default(now())
-  updatedAt              DateTime       @updatedAt
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
 
   lines VendorPOLine[]
   grns  GRN[]
@@ -1527,8 +1532,8 @@ model CustomerInvoice {
   // a proforma / tax invoice to the customer, capture the timestamp and the
   // destination so the audit trail and the UI can show "Sent to
   // ops@infosys.com at 14:32".
-  emailedAt   DateTime?
-  emailedTo   String?
+  emailedAt DateTime?
+  emailedTo String?
 
   lines        CustomerInvoiceLine[]
   payments     CustomerInvoicePayment[]
@@ -1980,37 +1985,37 @@ model TaskTemplate {
 }
 
 model Task {
-  id             String       @id @default(cuid())
-  title          String
-  description    String?
-  priority       TaskPriority @default(NORMAL)
-  status         TaskStatus   @default(ASSIGNED)
+  id          String       @id @default(cuid())
+  title       String
+  description String?
+  priority    TaskPriority @default(NORMAL)
+  status      TaskStatus   @default(ASSIGNED)
 
-  assignedToId   String
-  assignedTo     User         @relation("TaskAssignedTo", fields: [assignedToId], references: [id])
-  assignedById   String
-  assignedBy     User         @relation("TaskAssignedBy", fields: [assignedById], references: [id])
+  assignedToId String
+  assignedTo   User   @relation("TaskAssignedTo", fields: [assignedToId], references: [id])
+  assignedById String
+  assignedBy   User   @relation("TaskAssignedBy", fields: [assignedById], references: [id])
 
-  targetDate     DateTime     // when assigner wants it done by (UTC, displayed IST)
-  assignedAt     DateTime     @default(now())
+  targetDate DateTime // when assigner wants it done by (UTC, displayed IST)
+  assignedAt DateTime @default(now())
 
   // Submission (filled when assignee submits)
-  submittedAt    DateTime?
-  completionRemarks String?    // MANDATORY at submit; nullable in DB to allow re-submit cycles
-  completedAt    DateTime?    // event date entered by assignee (when they actually did the work)
+  submittedAt       DateTime?
+  completionRemarks String? // MANDATORY at submit; nullable in DB to allow re-submit cycles
+  completedAt       DateTime? // event date entered by assignee (when they actually did the work)
 
   // Review (filled when assigner approves or rejects)
-  reviewedAt     DateTime?
-  reviewedById   String?
-  reviewedBy     User?        @relation("TaskReviewedBy", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+  reviewedById    String?
+  reviewedBy      User?     @relation("TaskReviewedBy", fields: [reviewedById], references: [id])
   rejectionReason String?
 
   // Optional preset link
-  templateId     String?
-  template       TaskTemplate? @relation("TaskFromTemplate", fields: [templateId], references: [id])
+  templateId String?
+  template   TaskTemplate? @relation("TaskFromTemplate", fields: [templateId], references: [id])
 
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([assignedToId, status])
   @@index([assignedById])
@@ -2070,21 +2075,21 @@ model HousekeepingStaff {
 // denormalised (sum of receipts − sum of issues, maintained inside
 // transactions when receipts/issues are recorded).
 model HousekeepingItem {
-  id           String   @id @default(cuid())
-  name         String
-  sku          String? // optional internal SKU
-  unit         String   @default("piece") // "piece", "set", "ml", "kg", "pair"
-  currentStock Decimal  @default(0) @db.Decimal(14, 3) // clean / available stock
-  minStock     Decimal? @db.Decimal(14, 3) // optional low-stock threshold
+  id            String   @id @default(cuid())
+  name          String
+  sku           String? // optional internal SKU
+  unit          String   @default("piece") // "piece", "set", "ml", "kg", "pair"
+  currentStock  Decimal  @default(0) @db.Decimal(14, 3) // clean / available stock
+  minStock      Decimal? @db.Decimal(14, 3) // optional low-stock threshold
   // Reusable items (towels, linens, robes) loop: issuing moves units from
   // currentStock into inCirculation; returning after a wash moves them back.
   // Consumables (soap, tissue) stay reusable=false / inCirculation=0.
-  reusable      Boolean @default(false)
-  inCirculation Decimal @default(0) @db.Decimal(14, 3) // issued, not yet returned
-  notes        String?
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  reusable      Boolean  @default(false)
+  inCirculation Decimal  @default(0) @db.Decimal(14, 3) // issued, not yet returned
+  notes         String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   receiptLines HousekeepingReceiptLine[]
   issueLines   HousekeepingIssueLine[]
@@ -2097,13 +2102,13 @@ model HousekeepingItem {
 // manager (or admin) records this. `sourceNote` captures who supplied
 // it (e.g. "Maintenance — Mr Kumar, GRN-9183").
 model HousekeepingReceipt {
-  id           String   @id @default(cuid())
-  receivedAt   DateTime
-  recordedById String
-  recordedBy   User     @relation("HousekeepingReceiptRecordedBy", fields: [recordedById], references: [id])
-  sourceNote   String? // free-text — "from kitchen store", "vendor delivery"
+  id            String   @id @default(cuid())
+  receivedAt    DateTime
+  recordedById  String
+  recordedBy    User     @relation("HousekeepingReceiptRecordedBy", fields: [recordedById], references: [id])
+  sourceNote    String? // free-text — "from kitchen store", "vendor delivery"
   sourceContact String? // name of the maintenance person who handed over
-  createdAt    DateTime @default(now())
+  createdAt     DateTime @default(now())
 
   lines HousekeepingReceiptLine[]
 
@@ -2111,14 +2116,14 @@ model HousekeepingReceipt {
 }
 
 model HousekeepingReceiptLine {
-  id        String   @id @default(cuid())
-  receiptId String
-  receipt   HousekeepingReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
-  itemId    String
-  item      HousekeepingItem    @relation(fields: [itemId], references: [id])
-  quantity  Decimal             @db.Decimal(14, 3)
+  id          String              @id @default(cuid())
+  receiptId   String
+  receipt     HousekeepingReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        HousekeepingItem    @relation(fields: [itemId], references: [id])
+  quantity    Decimal             @db.Decimal(14, 3)
   // Optional cost tracking — useful for the admin consumption-value report.
-  costPerUnit Decimal? @db.Decimal(12, 2)
+  costPerUnit Decimal?            @db.Decimal(12, 2)
 
   @@index([receiptId])
   @@index([itemId])
@@ -2128,10 +2133,10 @@ model HousekeepingReceiptLine {
 // One issue = one trip by one staff member to one room. Lines are the
 // items they carried.
 model HousekeepingIssue {
-  id           String   @id @default(cuid())
+  id           String            @id @default(cuid())
   issuedAt     DateTime
   recordedById String
-  recordedBy   User     @relation("HousekeepingIssueRecordedBy", fields: [recordedById], references: [id])
+  recordedBy   User              @relation("HousekeepingIssueRecordedBy", fields: [recordedById], references: [id])
   staffId      String
   staff        HousekeepingStaff @relation(fields: [staffId], references: [id])
   roomId       String
@@ -2139,7 +2144,7 @@ model HousekeepingIssue {
   // Free-text e.g. "guest checkout cleaning", "fresh linen swap"
   purpose      String?
   notes        String?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime          @default(now())
 
   lines HousekeepingIssueLine[]
 
@@ -2149,7 +2154,7 @@ model HousekeepingIssue {
 }
 
 model HousekeepingIssueLine {
-  id       String   @id @default(cuid())
+  id       String            @id @default(cuid())
   issueId  String
   issue    HousekeepingIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
   itemId   String
@@ -2175,10 +2180,10 @@ enum MaintenanceCategory {
 }
 
 enum MaintenanceActivityStatus {
-  PENDING       // logged but the work hasn't been started yet
-  IN_PROGRESS   // staff is on it
-  COMPLETED     // resolved
-  CANCELLED     // false alarm / not needed
+  PENDING // logged but the work hasn't been started yet
+  IN_PROGRESS // staff is on it
+  COMPLETED // resolved
+  CANCELLED // false alarm / not needed
 }
 
 model MaintenanceStaff {
@@ -2234,7 +2239,7 @@ model MaintenanceReceipt {
 }
 
 model MaintenanceReceiptLine {
-  id          String   @id @default(cuid())
+  id          String             @id @default(cuid())
   receiptId   String
   receipt     MaintenanceReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   itemId      String
@@ -2250,20 +2255,20 @@ model MaintenanceReceiptLine {
 // the housekeeping / front-desk reported; "workDone" is what was actually
 // fixed. Items consumed are recorded on `lines` and decrement stock.
 model MaintenanceActivity {
-  id             String                    @id @default(cuid())
-  performedAt    DateTime
-  recordedById   String
-  recordedBy     User                      @relation("MaintenanceActivityRecordedBy", fields: [recordedById], references: [id])
-  staffId        String
-  staff          MaintenanceStaff          @relation(fields: [staffId], references: [id])
-  roomId         String
-  room           Room                      @relation(fields: [roomId], references: [id])
-  category       MaintenanceCategory
-  status         MaintenanceActivityStatus @default(COMPLETED)
-  issueReported  String // "AC not cooling", "tap dripping"
-  workDone       String? // "replaced capacitor", "tightened washer"
-  notes          String?
-  createdAt      DateTime                  @default(now())
+  id            String                    @id @default(cuid())
+  performedAt   DateTime
+  recordedById  String
+  recordedBy    User                      @relation("MaintenanceActivityRecordedBy", fields: [recordedById], references: [id])
+  staffId       String
+  staff         MaintenanceStaff          @relation(fields: [staffId], references: [id])
+  roomId        String
+  room          Room                      @relation(fields: [roomId], references: [id])
+  category      MaintenanceCategory
+  status        MaintenanceActivityStatus @default(COMPLETED)
+  issueReported String // "AC not cooling", "tap dripping"
+  workDone      String? // "replaced capacitor", "tightened washer"
+  notes         String?
+  createdAt     DateTime                  @default(now())
 
   lines MaintenanceActivityLine[]
 
@@ -2275,7 +2280,7 @@ model MaintenanceActivity {
 }
 
 model MaintenanceActivityLine {
-  id         String   @id @default(cuid())
+  id         String              @id @default(cuid())
   activityId String
   activity   MaintenanceActivity @relation(fields: [activityId], references: [id], onDelete: Cascade)
   itemId     String
@@ -2317,6 +2322,7 @@ model BanquetItem {
 
   receiptLines BanquetReceiptLine[]
   issueLines   BanquetIssueLine[]
+  returnLines  BanquetReturnLine[]
 
   @@unique([name])
   @@index([active])
@@ -2360,7 +2366,7 @@ model BanquetIssue {
   issuedAt     DateTime
   recordedById String
   recordedBy   User     @relation("BanquetIssueRecordedBy", fields: [recordedById], references: [id])
-  purpose      String   // e.g. "Wipro lunch ODC", "Floor 3 cleaning"
+  purpose      String // e.g. "Wipro lunch ODC", "Floor 3 cleaning"
   // Optional link to the catering order this stock served.
   orderId      String?
   order        Order?   @relation("BanquetIssueOrder", fields: [orderId], references: [id], onDelete: SetNull)
@@ -2382,6 +2388,38 @@ model BanquetIssueLine {
   quantity Decimal      @db.Decimal(14, 3)
 
   @@index([issueId])
+  @@index([itemId])
+}
+
+// Cutlery/arrangements coming BACK from an event. Paired with the
+// order-linked BanquetIssue rows this gives a per-client ledger:
+// issued − returned = still out (chargeable to the client or to the
+// person who handled the delivery).
+model BanquetReturn {
+  id           String   @id @default(cuid())
+  returnedAt   DateTime
+  recordedById String
+  recordedBy   User     @relation("BanquetReturnRecordedBy", fields: [recordedById], references: [id])
+  orderId      String
+  order        Order    @relation("BanquetReturnOrder", fields: [orderId], references: [id], onDelete: Cascade)
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  lines BanquetReturnLine[]
+
+  @@index([returnedAt])
+  @@index([orderId])
+}
+
+model BanquetReturnLine {
+  id       String        @id @default(cuid())
+  returnId String
+  return   BanquetReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  itemId   String
+  item     BanquetItem   @relation(fields: [itemId], references: [id])
+  quantity Decimal       @db.Decimal(14, 3)
+
+  @@index([returnId])
   @@index([itemId])
 }
 

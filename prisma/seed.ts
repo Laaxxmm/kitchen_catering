@@ -253,7 +253,9 @@ async function main() {
   for (const item of banquetItems) {
     await db.banquetItem.upsert({
       where: { name: item.name },
-      create: item,
+      // Fresh stores open with 100 pieces of everything (ops decision) —
+      // adjust per item from the Banquet store screen afterwards.
+      create: { ...item, currentStock: 100 },
       update: {}, // don't overwrite category/unit/stock if it already exists
     });
   }

@@ -14,6 +14,7 @@ import {
   BanquetItemInput,
   BanquetIssueInput,
   BanquetReceiptInput,
+  BanquetReturnInput,
 } from "@/lib/validators";
 import {
   ActionError,
@@ -335,6 +336,143 @@ async function recordBanquetIssueInner(raw: unknown): Promise<{ ok: true; id: st
   revalidatePath("/banquet/items");
   revalidatePath("/banquet");
   return { ok: true, id: issue.id };
+}
+
+// ─── Cutlery returns (per-event ledger) ─────────────────────────────
+//
+// Issues linked to an order say what went OUT to the client's event;
+// returns say what came BACK. The difference is what's still out —
+// chargeable to the client or the delivery handler.
+
+export async function recordBanquetReturn(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await recordBanquetReturnInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function recordBanquetReturnInner(raw: unknown): Promise<{ ok: true; id: string }> {
+  const session = await requireRole(ISSUE_ROLES);
+  const input = BanquetReturnInput.parse(raw);
+
+  const lines = input.lines.map((l) => ({
+    itemId: l.itemId,
+    qty: new Prisma.Decimal(l.quantity),
+  }));
+  for (const l of lines) {
+    if (l.qty.lessThanOrEqualTo(0)) throw new ActionError("Quantity must be > 0");
+  }
+  const itemIds = [...new Set(lines.map((l) => l.itemId))];
+
+  const ret = await db.$transaction(async (tx) => {
+    await lockBanquetItemRows(tx, itemIds);
+
+    // Can't take back more than is still out with this client: per item,
+    // returned-so-far + this return must stay within what was issued to
+    // the order.
+    const [issued, returned, items] = await Promise.all([
+      tx.banquetIssueLine.groupBy({
+        by: ["itemId"],
+        where: { itemId: { in: itemIds }, issue: { orderId: input.orderId } },
+        _sum: { quantity: true },
+      }),
+      tx.banquetReturnLine.groupBy({
+        by: ["itemId"],
+        where: { itemId: { in: itemIds }, return: { orderId: input.orderId } },
+        _sum: { quantity: true },
+      }),
+      tx.banquetItem.findMany({
+        where: { id: { in: itemIds } },
+        select: { id: true, name: true, unit: true },
+      }),
+    ]);
+    const issuedBy = new Map(issued.map((r) => [r.itemId, new Decimal(r._sum.quantity?.toString() ?? "0")]));
+    const returnedBy = new Map(returned.map((r) => [r.itemId, new Decimal(r._sum.quantity?.toString() ?? "0")]));
+    const nameBy = new Map(items.map((i) => [i.id, i]));
+
+    for (const l of lines) {
+      const item = nameBy.get(l.itemId);
+      if (!item) throw new ActionError("Item not found");
+      const out = (issuedBy.get(l.itemId) ?? new Decimal(0)).minus(returnedBy.get(l.itemId) ?? new Decimal(0));
+      if (new Decimal(l.qty.toString()).gt(out)) {
+        throw new ActionError(
+          `Only ${out.toString()} ${item.unit} of ${item.name} is still out with this client — can't record ${l.qty.toString()} back.`,
+        );
+      }
+    }
+
+    const created = await tx.banquetReturn.create({
+      data: {
+        returnedAt: istToUtc(input.returnedAt),
+        recordedById: session.user.id,
+        orderId: input.orderId,
+        notes: input.notes?.trim() || null,
+        lines: { create: lines.map((l) => ({ itemId: l.itemId, quantity: l.qty })) },
+      },
+    });
+    for (const l of lines) {
+      await tx.banquetItem.update({
+        where: { id: l.itemId },
+        data: { currentStock: { increment: l.qty } },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "BANQUET_RETURN_RECORDED",
+        entity: "BanquetReturn",
+        entityId: created.id,
+        payloadHash: sha256Json({ orderId: input.orderId, lines: lines.length }),
+      },
+    });
+    return created;
+  });
+
+  revalidatePath("/banquet/items");
+  revalidatePath("/banquet");
+  revalidatePath(`/deliveries/event-prep/${input.orderId}`);
+  return { ok: true, id: ret.id };
+}
+
+/**
+ * Per-order cutlery ledger: what was issued to the event, what came
+ * back, what's still out — per item.
+ */
+export async function getOrderCutleryLedger(orderId: string) {
+  await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY, Role.FNB_SERVICE, Role.ACCOUNTS]);
+  const [issued, returned] = await Promise.all([
+    db.banquetIssueLine.groupBy({
+      by: ["itemId"],
+      where: { issue: { orderId } },
+      _sum: { quantity: true },
+    }),
+    db.banquetReturnLine.groupBy({
+      by: ["itemId"],
+      where: { return: { orderId } },
+      _sum: { quantity: true },
+    }),
+  ]);
+  const itemIds = [...new Set([...issued.map((r) => r.itemId), ...returned.map((r) => r.itemId)])];
+  if (itemIds.length === 0) return [];
+  const items = await db.banquetItem.findMany({
+    where: { id: { in: itemIds } },
+    select: { id: true, name: true, unit: true },
+  });
+  const returnedBy = new Map(returned.map((r) => [r.itemId, r._sum.quantity?.toString() ?? "0"]));
+  return issued.map((r) => {
+    const item = items.find((i) => i.id === r.itemId);
+    const iss = new Decimal(r._sum.quantity?.toString() ?? "0");
+    const back = new Decimal(returnedBy.get(r.itemId) ?? "0");
+    return {
+      itemId: r.itemId,
+      name: item?.name ?? "?",
+      unit: item?.unit ?? "piece",
+      issued: iss.toString(),
+      returned: back.toString(),
+      outstanding: iss.minus(back).toString(),
+    };
+  });
 }
 
 export interface ListBanquetIssuesOpts {
