@@ -364,9 +364,31 @@ async function approveVendorPOInner(id: string): Promise<{ ok: true }> {
       return;
     }
 
-    // Manager step already done. Admin step needed (we only get here when
-    // adminRequired was true — sub-threshold POs would have been fully
-    // approved in the manager step).
+    // Manager step already done. If the tier no longer demands admin (e.g.
+    // the policy changed while this PO sat half-approved), any approver can
+    // complete it; otherwise only the admin's signature closes it out.
+    if (!adminRequired) {
+      const completed = await tx.vendorPO.updateMany({
+        where: { id, status: VendorPOStatus.PENDING_APPROVAL, managerApprovedAt: { not: null } },
+        data: {
+          status: VendorPOStatus.APPROVED,
+          approvedByUserId: session.user.id,
+          approvedAt: now,
+        },
+      });
+      if (completed.count === 0) {
+        throw new ActionError("Someone just approved this PO — refresh the page.");
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "VENDOR_PO_APPROVED",
+          entity: "VendorPO",
+          entityId: id,
+        },
+      });
+      return;
+    }
     if (role !== Role.ADMIN) {
       throw new ActionError(
         "This PO needs Admin approval (already approved by Manager).",
