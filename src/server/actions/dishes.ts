@@ -139,7 +139,7 @@ export async function listDishes(opts: { query?: string; active?: boolean } = {}
         : {}),
     },
     orderBy: { name: "asc" },
-    take: 300,
+    take: 1000, // full catalogue — a 300 cap silently hid dishes from the order picker
   });
 }
 

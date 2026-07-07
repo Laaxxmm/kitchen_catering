@@ -7,7 +7,7 @@ import { formatIST } from "@/lib/time";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const denied = await gateExport([Role.ADMIN, Role.MANAGER, Role.SALES]);
+  const denied = await gateExport([Role.ADMIN, Role.MANAGER, Role.SALES, Role.ACCOUNTS]);
   if (denied) return denied;
   const orders = await listOrders({});
   const rows = orders.map((o) => [

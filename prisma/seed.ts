@@ -407,6 +407,14 @@ async function main() {
     });
   }
 
+  // Keep the code sequence ahead of the imported codes — otherwise
+  // nextVendorCode() re-mints V-0001 and every vendor create collides.
+  await db.vendorCodeSequence.upsert({
+    where: { year: 0 },
+    create: { year: 0, next: nextCodeN },
+    update: { next: nextCodeN },
+  });
+
   console.log("Seed done.");
 }
 

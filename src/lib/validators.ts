@@ -514,7 +514,7 @@ export type VendorInputT = z.infer<typeof VendorInput>;
 export const VendorPOLineInput = z.object({
   id: z.string().optional(),
   ingredientId: z.string().nullable().optional(),
-  sku: z.string().min(1).max(40),
+  sku: z.string().min(1, "Each line needs an SKU / item name").max(40),
   description: z.string().min(1).max(500),
   unit: z.string().min(1).max(20),
   quantity: decimalString,
@@ -598,6 +598,17 @@ export const PettyCashVoucherInput = z.object({
   paidTo: z.string().min(1).max(200),
   reason: z.string().min(1).max(500),
   paidAt: isoDate.optional(),
+});
+
+/** Edit of an existing voucher — floatId is immutable, everything the
+ *  operator typed is editable. Same field rules as PettyCashVoucherInput;
+ *  paidAt is required because the edit form always sends it prefilled. */
+export const PettyCashVoucherUpdateInput = z.object({
+  amount: decimalString,
+  category: z.string().min(1).max(40),
+  paidTo: z.string().min(1).max(200),
+  reason: z.string().min(1).max(500),
+  paidAt: isoDate,
 });
 
 export const PettyCashTopUpInput = z.object({
