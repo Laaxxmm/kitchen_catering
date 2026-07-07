@@ -58,6 +58,29 @@ export default async function NewOrderPage() {
     return { ok: true, id: r.id, name: input.name, stateCode: input.stateCode };
   }
 
+  // Inline dish creator — clients ask for customised dishes; sales/manager
+  // adds them right here and they land on the order (and the menu).
+  async function quickAddDish(input: {
+    name: string;
+    unitPrice: string;
+    gstRatePct: string;
+    unit: string;
+    category?: string;
+  }): Promise<ActionResultWith<{ id: string }>> {
+    "use server";
+    const { createDish } = await import("@/server/actions/dishes");
+    return await createDish({
+      name: input.name,
+      unitPrice: input.unitPrice,
+      gstRatePct: input.gstRatePct,
+      unit: input.unit,
+      category: input.category ?? null,
+      code: null,
+      description: null,
+      hsnSac: null,
+    });
+  }
+
   return (
     <>
       <PageHeader
@@ -81,6 +104,7 @@ export default async function NewOrderPage() {
         submitLabel="Create draft"
         redirectOnSuccess="/orders/:id"
         onQuickAddCustomer={quickAddCustomer}
+        onQuickAddDish={inHouseOnly ? undefined : quickAddDish}
       />
     </>
   );

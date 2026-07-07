@@ -16,6 +16,7 @@ import type { ActionResultWith } from "@/lib/action-result";
 import { isImmediateChannel } from "@/lib/order-channels";
 import { isNextNavigationError } from "@/lib/next-error";
 import { QuickAddCustomer, type QuickCustomerInput } from "@/components/ik/QuickAddCustomer";
+import { QuickAddDish, type QuickDishInput } from "@/components/ik/QuickAddDish";
 
 interface CustomerOption { id: string; name: string; stateCode: string }
 interface DishOption {
@@ -55,6 +56,9 @@ interface Props {
   onQuickAddCustomer?: (
     input: QuickCustomerInput,
   ) => Promise<ActionResultWith<{ id: string; name: string; stateCode: string }>>;
+  /** Optional inline dish creator — lets sales/manager add a customised
+   *  dish mid-order instead of leaving for the dishes page. */
+  onQuickAddDish?: (input: QuickDishInput) => Promise<ActionResultWith<{ id: string }>>;
 }
 
 interface DraftLine {
@@ -70,13 +74,16 @@ function emptyLine(): DraftLine {
   return { dishId: "", portions: "1", unitPrice: "0", discountPct: "0", gstRatePct: "5", notes: "" };
 }
 
-export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel = "Create draft", redirectOnSuccess, inHouseOnly = false, onQuickAddCustomer }: Props) {
+export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel = "Create draft", redirectOnSuccess, inHouseOnly = false, onQuickAddCustomer, onQuickAddDish }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
   // Local copy of customers so a quick-add can append immediately
   // without a router refresh.
   const [customerOptions, setCustomerOptions] = useState(customers);
+  // Same for dishes — a quick-added customised dish shows up in the
+  // pickers straight away.
+  const [dishList, setDishList] = useState(dishes);
   const [customerId, setCustomerId] = useState(defaults?.customerId ?? customers[0]?.id ?? "");
   const [channel, setChannel] = useState<OrderChannel>(
     (defaults?.channel as OrderChannel) ?? (inHouseOnly ? OrderChannel.ROOM_SERVICE : OrderChannel.BANQUET),
@@ -124,7 +131,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
   function removeLine(idx: number) { setLines((prev) => prev.filter((_, i) => i !== idx)); }
 
   function onDishChange(idx: number, dishId: string) {
-    const dish = dishes.find((d) => d.id === dishId);
+    const dish = dishList.find((d) => d.id === dishId);
     setLine(idx, {
       dishId,
       ...(dish ? { unitPrice: String(dish.unitPrice), gstRatePct: String(dish.gstRatePct) } : {}),
@@ -137,7 +144,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
   // appear in either menu.
   const dishOptions: ComboOption[] = useMemo(() => {
     const wantMenu = menuForChannel(channel);
-    return dishes
+    return dishList
       .filter((d) => d.menu === wantMenu || d.menu === "BOTH")
       .sort((a, b) =>
         (a.category || "").localeCompare(b.category || "") ||
@@ -147,7 +154,22 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
         value: d.id,
         label: d.category ? `${d.name}  ·  ${d.category}` : d.name,
       }));
-  }, [dishes, channel]);
+  }, [dishList, channel]);
+
+  // A freshly quick-added dish drops into the first empty line (or a new
+  // line) with its price + GST prefilled, ready to adjust portions.
+  function onDishCreated(dish: { id: string; name: string; unitPrice: string; gstRatePct: string; category: string | null }) {
+    const option: DishOption = { ...dish, code: null, menu: "BOTH" };
+    setDishList((prev) => [option, ...prev]);
+    setLines((prev) => {
+      const patch = { dishId: dish.id, unitPrice: dish.unitPrice, gstRatePct: dish.gstRatePct };
+      const emptyIdx = prev.findIndex((l) => !l.dishId);
+      if (emptyIdx >= 0) {
+        return prev.map((l, i) => (i === emptyIdx ? { ...l, ...patch } : l));
+      }
+      return [...prev, { ...emptyLine(), ...patch }];
+    });
+  }
 
   const totals = useMemo(() => {
     let subtotal = new Decimal(0);
@@ -411,10 +433,15 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
       </section>
 
       <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Dishes</h3>
           <Button type="button" variant="outline" size="sm" onClick={addLine}>+ Add line</Button>
         </div>
+        {onQuickAddDish && (
+          <div className="flex flex-wrap items-start gap-2">
+            <QuickAddDish onCreate={onQuickAddDish} onCreated={onDishCreated} />
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-[12.5px]">
             <thead className="border-b border-ik-rule text-left text-ik-ink-3">

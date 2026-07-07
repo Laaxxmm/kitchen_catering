@@ -29,7 +29,10 @@ export async function createDish(raw: unknown): Promise<ActionResultWith<{ id: s
 }
 
 async function createDishInner(raw: unknown): Promise<{ ok: true; id: string }> {
-  const session = await requireRole(WRITE_ROLES);
+  // SALES can also CREATE dishes — catering clients routinely ask for a
+  // customised dish mid-order, and sales adds it inline from the order
+  // form. Editing/deactivating the catalogue stays with WRITE_ROLES.
+  const session = await requireRole([...WRITE_ROLES, Role.SALES]);
   const input = DishInput.parse(raw);
 
   const dish = await db.$transaction(async (tx) => {
