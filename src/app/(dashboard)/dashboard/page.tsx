@@ -28,7 +28,7 @@ import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
 import { listHousekeepingIssues } from "@/server/actions/housekeeping";
 import { listMaintenanceActivities } from "@/server/actions/maintenance";
 import { toDecimal, formatINRWhole } from "@/lib/money";
-import { formatIST, istScopeWindow, type EventDateScope } from "@/lib/time";
+import { formatIST, istDayWindow, istScopeWindow, istWeekWindow, type EventDateScope } from "@/lib/time";
 import { EventScopePills } from "@/components/ik/EventScopePills";
 import {
   ChefRequisitionStatus, VendorPOStatus, OrderStatus,
@@ -87,7 +87,27 @@ export default async function DashboardPage({
           ? sp.scope
           : "today";
     const window = istScopeWindow(sp.scope, sp.date);
-    const board = await listChefBoardOrders(window ?? undefined);
+    // Scoped board for the cards + unscoped list for pill counts, so the
+    // chef sees "Tomorrow (2)" at a glance instead of an empty Today with
+    // no hint that work is queued ahead.
+    const [board, allBoard] = await Promise.all([
+      listChefBoardOrders(window ?? undefined),
+      listChefBoardOrders(),
+    ]);
+    const inWindow = (d: Date, w: { from: Date; toExclusive: Date }) =>
+      d.getTime() >= w.from.getTime() && d.getTime() < w.toExclusive.getTime();
+    const todayW = istDayWindow();
+    const tomorrowW = istDayWindow(new Date(), 1);
+    const weekW = istWeekWindow();
+    const pillCounts = {
+      today: allBoard.filter((o) => inWindow(o.eventDate, todayW)).length,
+      tomorrow: allBoard.filter((o) => inWindow(o.eventDate, tomorrowW)).length,
+      week: allBoard.filter((o) => inWindow(o.eventDate, weekW)).length,
+      all: allBoard.length,
+    };
+    const tomorrowNew = allBoard.filter(
+      (o) => o.status === OrderStatus.PENDING_CHEF_APPROVAL && inWindow(o.eventDate, tomorrowW),
+    ).length;
     return (
       <>
         <LauncherGreeting
@@ -98,11 +118,19 @@ export default async function DashboardPage({
         <div className="grid gap-5">
           <MyTasksPanel />
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <EventScopePills basePath="/dashboard" scope={scope} date={sp.date} />
+            <EventScopePills basePath="/dashboard" scope={scope} date={sp.date} counts={pillCounts} />
             <Link href="/dashboard?scope=all" className="text-[12px] text-brand hover:underline">
               All orders →
             </Link>
           </div>
+          {scope === "today" && tomorrowNew > 0 && (
+            <Link
+              href="/dashboard?scope=tomorrow"
+              className="rounded-md border border-amber bg-amber-wash px-3 py-2 text-[12.5px] font-medium text-amber-700 hover:underline"
+            >
+              ⏰ {tomorrowNew} new order{tomorrowNew === 1 ? "" : "s"} for tomorrow waiting for your acceptance — review now →
+            </Link>
+          )}
           {board.length === 0 && scope !== "all" && (
             <p className="text-[12.5px] text-ik-ink-3">
               Nothing {scope === "today" ? "for today" : "in this window"} —{" "}
