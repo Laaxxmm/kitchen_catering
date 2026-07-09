@@ -6,7 +6,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Combobox } from "@/components/ui/combobox";
+import { QuickAddIngredient, type QuickIngredientInput } from "@/components/ik/QuickAddIngredient";
 import { isNextNavigationError } from "@/lib/next-error";
+import type { ActionResultWith } from "@/lib/action-result";
 import { createStandaloneChefRequisition } from "@/server/actions/chef-requisitions";
 
 interface Ingredient { id: string; sku: string; name: string; unit: string }
@@ -20,20 +22,42 @@ function emptyLine(): DraftLine {
  * Chef's order-less stock request. Pick ingredients + quantities; it goes
  * straight to the store to issue, with no order attached.
  */
-export function StandaloneReqForm({ ingredients }: { ingredients: Ingredient[] }) {
+export function StandaloneReqForm({
+  ingredients,
+  onQuickAddIngredient,
+}: {
+  ingredients: Ingredient[];
+  /** Inline ingredient creator — lets the chef add a missing catalogue item without leaving the form. */
+  onQuickAddIngredient?: (input: QuickIngredientInput) => Promise<ActionResultWith<{ id: string }>>;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [notes, setNotes] = useState("");
+  // Local copy so a quick-added ingredient shows up in the picker instantly.
+  const [ingredientList, setIngredientList] = useState<Ingredient[]>(ingredients);
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
 
-  const options = ingredients.map((i) => ({ value: i.id, label: `${i.sku} · ${i.name}` }));
+  const options = ingredientList.map((i) => ({ value: i.id, label: `${i.sku} · ${i.name}` }));
 
   function pick(idx: number, ingredientId: string) {
-    const ing = ingredients.find((i) => i.id === ingredientId);
+    const ing = ingredientList.find((i) => i.id === ingredientId);
     setLines((p) => p.map((x, i) => (i === idx ? { ...x, ingredientId, unit: ing?.unit ?? x.unit } : x)));
   }
   function setLine(idx: number, patch: Partial<DraftLine>) {
     setLines((p) => p.map((x, i) => (i === idx ? { ...x, ...patch } : x)));
+  }
+
+  // A freshly quick-added ingredient (0 on hand) drops into the first line
+  // that has no ingredient yet, or a new line, with its unit prefilled.
+  function onIngredientCreated(ing: { id: string; sku: string; name: string; unit: string }) {
+    setIngredientList((prev) => [ing, ...prev]);
+    setLines((prev) => {
+      const emptyIdx = prev.findIndex((l) => !l.ingredientId);
+      if (emptyIdx >= 0) {
+        return prev.map((l, i) => (i === emptyIdx ? { ...l, ingredientId: ing.id, unit: ing.unit } : l));
+      }
+      return [...prev, { ...emptyLine(), ingredientId: ing.id, unit: ing.unit }];
+    });
   }
 
   function submit() {
@@ -70,6 +94,11 @@ export function StandaloneReqForm({ ingredients }: { ingredients: Ingredient[] }
           <h3 className="font-medium text-[14px] text-ik-ink">Ingredients</h3>
           <Button type="button" size="sm" variant="outline" onClick={() => setLines((p) => [...p, emptyLine()])}>+ Add line</Button>
         </div>
+        {onQuickAddIngredient && (
+          <div className="mb-2 flex flex-wrap items-start gap-2">
+            <QuickAddIngredient onCreate={onQuickAddIngredient} onCreated={onIngredientCreated} />
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-[12.5px]">
             <thead className="border-b border-ik-rule text-left text-ik-ink-3">
