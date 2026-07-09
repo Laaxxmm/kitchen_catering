@@ -17,8 +17,13 @@ export default async function BanquetAdjustPage() {
       <PageHeader
         eyebrow="Banquet · Stock"
         title="Adjust stock"
-        description="Correct on-hand after a count, set an opening balance, or write off damaged stock. For purchased incoming stock, use Record receipt instead."
-        actions={<Link href="/banquet/receipts/new"><Button variant="outline">Record receipt instead</Button></Link>}
+        description="Manual on-hand correction for ONE item (opening fix, write-off, damage). Setting many items? Use Stock count (bulk) — every item in one table, enter quantities row-wise, post once. For purchased incoming stock, use Record receipt instead."
+        actions={
+          <div className="flex gap-2">
+            <Link href="/banquet/stock-count"><Button variant="outline">Stock count (bulk)</Button></Link>
+            <Link href="/banquet/receipts/new"><Button variant="outline">Record receipt instead</Button></Link>
+          </div>
+        }
       />
       <StoreAdjustForm store="banquet" items={items} backHref="/banquet" />
     </>

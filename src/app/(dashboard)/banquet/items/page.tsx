@@ -29,7 +29,12 @@ export default async function BanquetItemsPage() {
         eyebrow="Banquet store"
         title="Items"
         description="F&B disposables catalog. Stock auto-updates from receipts and issues."
-        actions={<Link href="/banquet"><Button variant="outline" size="sm">← Back</Button></Link>}
+        actions={
+          <div className="flex gap-2">
+            <Link href="/banquet/stock-count"><Button variant="outline" size="sm">Stock count (bulk)</Button></Link>
+            <Link href="/banquet"><Button variant="outline" size="sm">← Back</Button></Link>
+          </div>
+        }
       />
       <ItemsTable items={serialised} />
     </>

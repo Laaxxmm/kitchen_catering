@@ -880,6 +880,19 @@ export const BanquetReturnInput = z.object({
   lines: z.array(BanquetIssueLineInput).min(1, "Add at least one item"),
 });
 
+// Bulk stock count — same shape as the kitchen's InventoryAuditPostInput:
+// each line sets an item's on-hand to the physically counted quantity.
+export const BanquetStockCountLineInput = z.object({
+  itemId: z.string().min(1),
+  countedQty: decimalString,
+});
+export type BanquetStockCountLineInputT = z.infer<typeof BanquetStockCountLineInput>;
+
+export const BanquetStockCountInput = z.object({
+  lines: z.array(BanquetStockCountLineInput).min(1, "Count at least one item"),
+  notes: z.string().max(500).nullable().optional(),
+});
+
 // =====================================================================
 // SETTINGS
 // =====================================================================

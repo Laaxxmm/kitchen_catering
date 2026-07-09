@@ -22,6 +22,7 @@ export default async function BanquetLandingPage() {
           <Link href="/banquet/issues/new"><Button>Issue to event</Button></Link>
           <Link href="/banquet/receipts/new"><Button variant="outline">Record receipt</Button></Link>
           <Link href="/banquet/adjust"><Button variant="outline">Adjust stock</Button></Link>
+          <Link href="/banquet/stock-count"><Button variant="outline">Stock count (bulk)</Button></Link>
           <Link href="/banquet/request"><Button variant="outline">Request from store</Button></Link>
         </div>
       }
@@ -30,6 +31,7 @@ export default async function BanquetLandingPage() {
         { label: "Receipts", href: "/banquet/receipts" },
         { label: "Issues", href: "/banquet/issues" },
         { label: "Adjust stock", href: "/banquet/adjust" },
+        { label: "Stock count (bulk)", href: "/banquet/stock-count" },
         { label: "Reports", href: "/banquet/reports" },
       ]}
       stock={stock}

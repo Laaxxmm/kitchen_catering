@@ -15,6 +15,7 @@ import {
   BanquetIssueInput,
   BanquetReceiptInput,
   BanquetReturnInput,
+  BanquetStockCountInput,
 } from "@/lib/validators";
 import {
   ActionError,
@@ -439,6 +440,104 @@ async function recordBanquetReturnInner(raw: unknown): Promise<{ ok: true; id: s
   revalidatePath("/banquet");
   revalidatePath(`/deliveries/event-prep/${input.orderId}`);
   return { ok: true, id: ret.id };
+}
+
+// ─── Bulk stock count ─────────────────────────────────────────────────
+//
+// Row-wise physical count for the whole store, mirroring the kitchen's
+// monthly audit (inventory-audit.ts): every counted line sets the item's
+// on-hand to the physical quantity, only changed lines post, and each
+// change lands in the audit log. Like the kitchen bulk count, this is the
+// formal fully-audited flow, so it includes the STORE_KEEPER regardless of
+// the stock.storeDirectEdit toggle (which keeps gating the single-item
+// adjustStoreStock path).
+const STOCK_COUNT_ROLES = [...WRITE_ROLES, Role.STORE_KEEPER];
+
+export interface BanquetStockCountChange {
+  name: string;
+  before: string;
+  after: string;
+}
+
+export async function postBanquetStockCount(
+  raw: unknown,
+): Promise<ActionResultWith<{ changes: BanquetStockCountChange[] }>> {
+  try {
+    return await postBanquetStockCountInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function postBanquetStockCountInner(
+  raw: unknown,
+): Promise<{ ok: true; changes: BanquetStockCountChange[] }> {
+  const session = await requireRole(STOCK_COUNT_ROLES);
+  const input = BanquetStockCountInput.parse(raw);
+
+  const lines = input.lines.map((l) => ({
+    itemId: l.itemId,
+    counted: new Decimal(l.countedQty),
+  }));
+  for (const l of lines) {
+    if (l.counted.isNaN()) throw new ActionError("Counted quantity must be a number");
+    if (l.counted.lt(0)) throw new ActionError("Counted quantity cannot be negative");
+  }
+
+  const changes = await db.$transaction(async (tx) => {
+    // Lock every counted row up front (stable order — see lockBanquetItemRows)
+    // so concurrent receipts/issues can't interleave with the read-then-set.
+    await lockBanquetItemRows(tx, lines.map((l) => l.itemId));
+
+    const out: BanquetStockCountChange[] = [];
+    for (const l of lines) {
+      const item = await tx.banquetItem.findUnique({
+        where: { id: l.itemId },
+        select: { id: true, name: true, currentStock: true },
+      });
+      if (!item) continue;
+
+      const before = new Decimal(item.currentStock.toString());
+      const after = l.counted;
+      if (after.eq(before)) continue; // unchanged — skip, no audit noise
+
+      await tx.banquetItem.update({
+        where: { id: item.id },
+        data: { currentStock: after.toDecimalPlaces(3).toString() },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "BANQUET_STOCK_COUNT_ADJUSTED",
+          entity: "BanquetItem",
+          entityId: item.id,
+          payloadHash: sha256Json({
+            name: item.name,
+            before: before.toString(),
+            after: after.toString(),
+          }),
+        },
+      });
+      out.push({ name: item.name, before: before.toString(), after: after.toString() });
+    }
+
+    // One summary row for the posting as a whole (count + notes).
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "BANQUET_STOCK_COUNT_POSTED",
+        entity: "BanquetItem",
+        entityId: "stock-count",
+        payloadHash: sha256Json({ changed: out.length, notes: input.notes ?? null }),
+      },
+    });
+
+    return out;
+  });
+
+  revalidatePath("/banquet");
+  revalidatePath("/banquet/items");
+  return { ok: true, changes };
 }
 
 /**
