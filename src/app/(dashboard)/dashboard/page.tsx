@@ -430,11 +430,46 @@ export default async function DashboardPage({
   // getDashboardSummary() below — they don't use it, and it shouldn't be able
   // to blank their dashboard if it hiccups.
   if (isDriver) {
-    const [eventPrep, pickups, myDeliveries] = await Promise.all([
+    // Event-date scope pills, same contract as the chef dashboard — F&B
+    // opens onto today's events with counts showing where the rest of the
+    // load sits (tomorrow / this week / all / a date).
+    const sp = await searchParams;
+    const scope: EventDateScope =
+      sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date)
+        ? "date"
+        : sp.scope === "tomorrow" || sp.scope === "week" || sp.scope === "all"
+          ? sp.scope
+          : "today";
+    const window = istScopeWindow(sp.scope, sp.date);
+    const [allEventPrep, allPickups, allDeliveries] = await Promise.all([
       listEventPrepQueue(),
       listReadyForDispatch(),
       listMyActiveDeliveries(),
     ]);
+    const within = (iso: string | Date, w: { from: Date; toExclusive: Date } | null) => {
+      if (!w) return true;
+      const t = new Date(iso).getTime();
+      return t >= w.from.getTime() && t < w.toExclusive.getTime();
+    };
+    const eventPrep = allEventPrep.filter((o) => within(o.eventDate, window));
+    const pickups = allPickups.filter((o) => within(o.eventDate, window));
+    const myDeliveries = allDeliveries.filter((d) => within(d.scheduledAt, window));
+    const todayW = istDayWindow();
+    const tomorrowW = istDayWindow(new Date(), 1);
+    const weekW = istWeekWindow();
+    const countIn = (w: { from: Date; toExclusive: Date } | null) =>
+      allEventPrep.filter((o) => within(o.eventDate, w)).length +
+      allPickups.filter((o) => within(o.eventDate, w)).length +
+      allDeliveries.filter((d) => within(d.scheduledAt, w)).length;
+    const pillCounts = {
+      today: countIn(todayW),
+      tomorrow: countIn(tomorrowW),
+      week: countIn(weekW),
+      all: countIn(null),
+    };
+    const tomorrowPrep = allEventPrep.filter(
+      (o) => !o.prepReadyAt && within(o.eventDate, tomorrowW),
+    ).length;
     return (
       <>
         <LauncherGreeting
@@ -444,12 +479,35 @@ export default async function DashboardPage({
             <div className="flex flex-wrap gap-2">
               <Link href="/orders/new"><Button>Take order</Button></Link>
               <Link href="/banquet/issues/new"><Button variant="outline">Issue to event</Button></Link>
-              <Link href="/banquet/request"><Button variant="outline">Request from store</Button></Link>
+              <Link href="/banquet/request"><Button variant="outline">Raise requisition</Button></Link>
             </div>
           }
         />
         <div className="grid gap-5">
           <MyTasksPanel />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <EventScopePills basePath="/dashboard" scope={scope} date={sp.date} counts={pillCounts} />
+            <Link href="/dashboard?scope=all" className="text-[12px] text-brand hover:underline">
+              All events →
+            </Link>
+          </div>
+          {scope === "today" && tomorrowPrep > 0 && (
+            <Link
+              href="/dashboard?scope=tomorrow"
+              className="rounded-md border border-amber bg-amber-wash px-3 py-2 text-[12.5px] font-medium text-amber-700 hover:underline"
+            >
+              ⏰ {tomorrowPrep} event{tomorrowPrep === 1 ? "" : "s"} tomorrow still need{tomorrowPrep === 1 ? "s" : ""} cutlery prep — get ahead now →
+            </Link>
+          )}
+          {eventPrep.length + pickups.length + myDeliveries.length === 0 && scope !== "all" && (
+            <p className="text-[12.5px] text-ik-ink-3">
+              Nothing {scope === "today" ? "for today" : "in this window"} —{" "}
+              <Link href="/dashboard?scope=all" className="text-brand hover:underline">
+                see all events
+              </Link>{" "}
+              to check what&apos;s coming up.
+            </p>
+          )}
           <DriverWorkScreen
             eventPrep={eventPrep}
             pickups={pickups.map((o) => ({
