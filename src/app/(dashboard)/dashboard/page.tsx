@@ -23,6 +23,7 @@ import { AccountsBoard } from "@/components/ik/dashboard/AccountsBoard";
 import { listOrders } from "@/server/actions/orders";
 import { listChefRequisitions } from "@/server/actions/chef-requisitions";
 import { listVendorPOs, listVendorBills } from "@/server/actions/procurement";
+import { listBanquetRequisitions } from "@/server/actions/banquet";
 import { listCustomerInvoices } from "@/server/actions/customer-invoices";
 import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
 import { listHousekeepingIssues } from "@/server/actions/housekeeping";
@@ -32,7 +33,7 @@ import { formatIST, istDayWindow, istScopeWindow, istWeekWindow, type EventDateS
 import { EventScopePills } from "@/components/ik/EventScopePills";
 import {
   ChefRequisitionStatus, VendorPOStatus, OrderStatus,
-  CustomerInvoiceStatus, VendorBillStatus,
+  CustomerInvoiceStatus, VendorBillStatus, BanquetRequisitionStatus,
 } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 
@@ -210,10 +211,15 @@ export default async function DashboardPage({
   // requests, grouped in tabs. Issuing is line-level so cards open the
   // fulfilment page.
   if (isStore) {
-    const [chefReqs, pos] = await Promise.all([
+    const [chefReqs, fnbReqs, pos] = await Promise.all([
       listChefRequisitions({
         status: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED],
         activeOrderOnly: true,
+      }),
+      // Open F&B banquet-store requests — surfaced beside the chef requests
+      // so they're not missed inside Banquet → Requisitions.
+      listBanquetRequisitions({
+        status: [BanquetRequisitionStatus.SUBMITTED, BanquetRequisitionStatus.PARTIALLY_ISSUED],
       }),
       // The store's open purchase orders — so they can submit drafts, watch
       // for the manager's approval, then send to the vendor + record the GRN.
@@ -231,7 +237,7 @@ export default async function DashboardPage({
       <>
         <LauncherGreeting
           firstName={firstName}
-          subtitle="Ingredient requests from the kitchen, and the purchase orders you've raised. Open a request to issue line by line."
+          subtitle="Requests from the kitchen and the F&B team, and the purchase orders you've raised. Open a request to issue line by line."
         />
         <div className="grid gap-5">
           <MyTasksPanel />
@@ -242,6 +248,15 @@ export default async function DashboardPage({
               status: r.status,
               orderCode: r.order?.code ?? null,
               customerName: r.order?.customer.name ?? "Kitchen stock request",
+              eventDate: r.order?.eventDate.toISOString() ?? null,
+              lines: r._count.lines,
+            }))}
+            fnbReqs={fnbReqs.map((r) => ({
+              id: r.id,
+              requisitionNo: r.requisitionNo,
+              status: r.status,
+              requestedBy: r.createdBy.name ?? "F&B Service",
+              orderCode: r.order?.code ?? null,
               eventDate: r.order?.eventDate.toISOString() ?? null,
               lines: r._count.lines,
             }))}
