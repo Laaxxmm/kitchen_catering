@@ -213,6 +213,12 @@ export async function listEventPrepQueue() {
       eventPrepReadyAt: true,
       eventPrepReadyBy: { select: { name: true } },
       customer: { select: { name: true } },
+      // Named serving staff the F&B team has lined up for the event —
+      // rendered as chips on the prep card, editable inline.
+      staffAllocations: {
+        select: { id: true, staffName: true, duty: true },
+        orderBy: { createdAt: "asc" },
+      },
     },
     orderBy: { eventDate: "asc" },
     take: 100,
@@ -227,6 +233,7 @@ export async function listEventPrepQueue() {
     customerName: o.customer.name,
     prepReadyAt: o.eventPrepReadyAt ? o.eventPrepReadyAt.toISOString() : null,
     prepReadyBy: o.eventPrepReadyBy?.name ?? null,
+    staff: o.staffAllocations,
   }));
 }
 
@@ -351,6 +358,12 @@ export async function listReadyForDispatch() {
       items: {
         orderBy: { sortOrder: "asc" },
         select: { portions: true, dish: { select: { name: true } } },
+      },
+      // Serving-staff chips on the pickup card — the F&B team allocates
+      // the crew right when the kitchen posts the order ready.
+      staffAllocations: {
+        select: { id: true, staffName: true, duty: true },
+        orderBy: { createdAt: "asc" },
       },
     },
     orderBy: { eventDate: "asc" },

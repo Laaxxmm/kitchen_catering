@@ -7,8 +7,8 @@ import { toast } from "sonner";
 import { DeliveryStatus, OrderChannel } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Countdown } from "@/components/ik/dashboard/Countdown";
-import { formatIST } from "@/lib/time";
+import { StaffAllocation, type AllocatedStaff } from "@/components/ik/StaffAllocation";
+import { EventDateBadge } from "@/components/ik/EventDateBadge";
 import { isNextNavigationError } from "@/lib/next-error";
 import type { ActionResult } from "@/lib/action-result";
 import {
@@ -28,6 +28,7 @@ export interface EventPrepOrder {
   customerName: string;
   prepReadyAt: string | null;
   prepReadyBy: string | null;
+  staff: AllocatedStaff[];
 }
 
 export interface OrderLine {
@@ -45,6 +46,7 @@ export interface PickupOrder {
   deliveryAddress: string;
   customerName: string;
   items: OrderLine[];
+  staff: AllocatedStaff[];
 }
 
 export interface DriverDelivery {
@@ -200,7 +202,6 @@ function EventPrepCard({ order, highlight }: { order: EventPrepOrder; highlight:
         code={order.code}
         channel={order.channel}
         roomNumber={null}
-        timeLabel={formatIST(new Date(order.eventDate), "EEE d MMM HH:mm")}
         target={order.eventDate}
         highlight={highlight}
       />
@@ -209,6 +210,8 @@ function EventPrepCard({ order, highlight }: { order: EventPrepOrder; highlight:
         <span className="text-ik-ink-3"> · {order.headcount} pax</span>
       </div>
       <div className="mt-0.5 text-[12.5px] text-ik-ink-2">{order.deliveryAddress}</div>
+      {/* Serving-staff chips — the F&B crew allocated to run this event. */}
+      <StaffAllocation orderId={order.id} staff={order.staff} canEdit compact />
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         {ready ? (
           <span className="inline-flex items-center gap-1.5 rounded-md bg-positive/10 px-2.5 py-1 text-[12px] font-medium text-positive">
@@ -261,15 +264,16 @@ function CardHeader({
   code,
   channel,
   roomNumber,
-  timeLabel,
   target,
+  timeNote,
   highlight,
 }: {
   code: string;
   channel: OrderChannel;
   roomNumber: string | null;
-  timeLabel: string;
   target: string;
+  /** Small prefix before the time, e.g. "Sched" on delivery cards. */
+  timeNote?: string;
   highlight: boolean;
 }) {
   return (
@@ -286,10 +290,9 @@ function CardHeader({
         </span>
         {roomNumber && <span className="text-[11.5px] font-medium text-ik-ink">Room {roomNumber}</span>}
       </div>
-      <div className="flex flex-col items-end gap-1">
-        <span className="text-[11.5px] text-ik-ink-3">{timeLabel}</span>
-        <Countdown target={target} />
-      </div>
+      {/* Chef-style prominent date block — urgency pill, bold date, time,
+          due-in countdown — so the F&B board reads like the kitchen board. */}
+      <EventDateBadge target={target} timeNote={timeNote} />
     </div>
   );
 }
@@ -321,13 +324,14 @@ function PickupCard({ order, highlight }: { order: PickupOrder; highlight: boole
         code={order.code}
         channel={order.channel}
         roomNumber={order.roomNumber}
-        timeLabel={formatIST(new Date(order.eventDate), "EEE d MMM HH:mm")}
         target={order.eventDate}
         highlight={highlight}
       />
       <div className="mt-1 text-[13px] text-ik-ink"><strong>{order.customerName}</strong></div>
       <div className="mt-0.5 text-[12.5px] text-ik-ink-2">{order.deliveryAddress}</div>
       <OrderItems items={order.items} headcount={order.headcount} />
+      {/* Serving-staff chips — allocate the crew as the order goes out. */}
+      <StaffAllocation orderId={order.id} staff={order.staff} canEdit compact />
       <div className="mt-2.5 flex items-center gap-2">
         <Button size="sm" disabled={pending} onClick={take}>Take delivery</Button>
         <Link href={`/orders/${order.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open</Link>
@@ -368,8 +372,8 @@ function DeliveryCard({ delivery, highlight }: { delivery: DriverDelivery; highl
         code={delivery.orderCode}
         channel={delivery.channel}
         roomNumber={delivery.roomNumber}
-        timeLabel={`Sched ${formatIST(new Date(delivery.scheduledAt), "EEE d MMM HH:mm")}`}
         target={delivery.scheduledAt}
+        timeNote="Sched"
         highlight={highlight}
       />
       <div className="mt-1 text-[13px] text-ik-ink">

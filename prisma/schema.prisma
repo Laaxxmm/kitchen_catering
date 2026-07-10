@@ -442,11 +442,12 @@ model User {
   maintenanceActivitiesRecorded MaintenanceActivity[] @relation("MaintenanceActivityRecordedBy")
 
   // Banquet (F&B store)
-  banquetReceiptsRecorded      BanquetReceipt[]     @relation("BanquetReceiptRecordedBy")
-  banquetIssuesRecorded        BanquetIssue[]       @relation("BanquetIssueRecordedBy")
-  banquetReturnsRecorded       BanquetReturn[]      @relation("BanquetReturnRecordedBy")
-  banquetRequisitionsCreated   BanquetRequisition[] @relation("BanquetRequisitionCreatedBy")
-  banquetRequisitionsFulfilled BanquetRequisition[] @relation("BanquetRequisitionFulfilledBy")
+  banquetReceiptsRecorded      BanquetReceipt[]       @relation("BanquetReceiptRecordedBy")
+  banquetIssuesRecorded        BanquetIssue[]         @relation("BanquetIssueRecordedBy")
+  banquetReturnsRecorded       BanquetReturn[]        @relation("BanquetReturnRecordedBy")
+  banquetRequisitionsCreated   BanquetRequisition[]   @relation("BanquetRequisitionCreatedBy")
+  banquetRequisitionsFulfilled BanquetRequisition[]   @relation("BanquetRequisitionFulfilledBy")
+  staffAllocationsMade         OrderStaffAllocation[] @relation("StaffAllocationBy")
 
   productionItemsHandedOver ProductionJobItem[] @relation("ProductionItemHandedOverBy")
   // Notifications (Phase 5)
@@ -1014,6 +1015,7 @@ model Order {
   banquetIssues       BanquetIssue[]            @relation("BanquetIssueOrder")
   banquetReturns      BanquetReturn[]           @relation("BanquetReturnOrder")
   banquetRequisitions BanquetRequisition[]      @relation("BanquetRequisitionOrder")
+  staffAllocations    OrderStaffAllocation[]
 
   @@index([status])
   @@index([customerId])
@@ -2492,6 +2494,22 @@ model BanquetRequisition {
   @@index([status])
   @@index([orderId])
   @@index([createdById])
+}
+
+// Serving staff allocated to an event order by the F&B team once the
+// kitchen posts it ready. Staff are named free-text (captains/waiters are
+// usually not app users); duty is an optional label like "Buffet counter".
+model OrderStaffAllocation {
+  id            String   @id @default(cuid())
+  orderId       String
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  staffName     String
+  duty          String?
+  allocatedById String
+  allocatedBy   User     @relation("StaffAllocationBy", fields: [allocatedById], references: [id])
+  createdAt     DateTime @default(now())
+
+  @@index([orderId])
 }
 
 model BanquetRequisitionLine {

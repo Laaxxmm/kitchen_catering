@@ -26,6 +26,7 @@ import { formatIST } from "@/lib/time";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 import { HandoverChecklist } from "@/components/ik/HandoverChecklist";
+import { StaffAllocation } from "@/components/ik/StaffAllocation";
 import type { ActionResult } from "@/lib/action-result";
 import { AdminApprovalBlock } from "./_components/AdminApprovalBlock";
 import { ChefApprovalBlock } from "./_components/ChefApprovalBlock";
@@ -98,6 +99,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // Whether the viewer may actually tick items (server re-checks anyway).
   const canHandOver =
     isManager || isChef || role === Role.DELIVERY || role === Role.FNB_SERVICE;
+  // Who may allocate / remove serving staff (server re-checks anyway).
+  const canAllocateStaff =
+    isManager || role === Role.FNB_SERVICE || role === Role.DELIVERY;
   // Accountability timeline: every handed dish, in handover order.
   const handedTimeline = (productionJob?.items ?? [])
     .filter((it) => it.handedOverAt != null)
@@ -515,6 +519,21 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               </div>
               <div><span className="text-ik-ink-3">Place of supply:</span> {order.placeOfSupplyStateCode}</div>
             </div>
+          </section>
+
+          {/* Serving staff — the named F&B crew allocated to run the event.
+              Visible to every role that can open the page; editable by
+              admin / manager / F&B service / delivery. */}
+          <section className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+            <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Serving staff</h3>
+            {order.staffAllocations.length === 0 && !canAllocateStaff && (
+              <p className="text-[12.5px] text-ik-ink-3">No staff allocated yet.</p>
+            )}
+            <StaffAllocation
+              orderId={order.id}
+              staff={order.staffAllocations}
+              canEdit={canAllocateStaff}
+            />
           </section>
 
           <section className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">

@@ -464,6 +464,16 @@ export const DeliveryFailureInput = z.object({
 });
 
 // =====================================================================
+// STAFF ALLOCATION (serving staff on event orders)
+// =====================================================================
+
+export const OrderStaffInput = z.object({
+  orderId: z.string().min(1),
+  staffName: z.string().trim().min(2).max(60),
+  duty: z.string().trim().max(60).nullable().optional(),
+});
+
+// =====================================================================
 // CUSTOMER INVOICE
 // =====================================================================
 

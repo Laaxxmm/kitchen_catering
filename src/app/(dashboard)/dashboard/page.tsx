@@ -520,6 +520,7 @@ export default async function DashboardPage({
               deliveryAddress: o.deliveryAddress,
               customerName: o.customer.name,
               items: (o.items ?? []).map((it) => ({ label: it.dish?.name ?? "—", portions: it.portions.toString() })),
+              staff: o.staffAllocations,
             }))}
             deliveries={myDeliveries.map((d) => ({
               id: d.id,
