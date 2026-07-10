@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -107,13 +108,27 @@ export function StaffAllocation({ orderId, staff, canEdit, compact = false }: Pr
           </span>
         ))}
         {canEdit && !open && (
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="rounded-full border border-dashed border-ik-rule px-2 py-0.5 text-[11.5px] text-ik-ink-2 transition hover:border-brand-200 hover:text-brand"
-          >
-            + Allocate staff
-          </button>
+          staff.length === 0 ? (
+            // No crew yet — that's a pending action, so it reads like one:
+            // a solid labelled button, not a faint dashed chip.
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-brand-300 bg-brand-50 px-3 py-1.5 text-[12.5px] font-medium text-brand-700 transition hover:bg-brand-100"
+            >
+              <Users className="h-3.5 w-3.5" />
+              Allocate staff
+              <span className="font-normal text-brand-600">— none yet</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="rounded-full border border-dashed border-ik-rule px-2 py-0.5 text-[11.5px] text-ik-ink-2 transition hover:border-brand-200 hover:text-brand"
+            >
+              + Add
+            </button>
+          )
         )}
       </div>
 
