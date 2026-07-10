@@ -15,7 +15,9 @@ import {
 import { Decimal } from "decimal.js";
 import { toDecimal } from "@/lib/money";
 
-const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.SALES];
+// ACCOUNTS create/manage customers too — they own receivables and set
+// the standard payment terms (credit tier below treats them like admin).
+const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.SALES, Role.ACCOUNTS];
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.SALES, Role.ACCOUNTS, Role.KITCHEN_HEAD, Role.STORE_KEEPER];
 
 /**
@@ -35,9 +37,10 @@ function checkCreditDurationGate(role: Role, creditDays: number | undefined): st
     }
     return null;
   }
-  // days > 15
-  if (role !== Role.ADMIN) {
-    return "Credit duration >15 days needs admin approval. Ask an admin to create / update this customer.";
+  // days > 15 — admin authority required. ACCOUNTS carries it too: as the
+  // finance desk that owns receivables, they set the customer's credit terms.
+  if (role !== Role.ADMIN && role !== Role.ACCOUNTS) {
+    return "Credit duration >15 days needs admin or accounts approval.";
   }
   return null;
 }

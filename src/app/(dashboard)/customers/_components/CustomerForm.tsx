@@ -229,7 +229,7 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
           <p className="text-[11.5px] text-ik-ink-3">
             <span className="font-medium">0</span> = cash / immediate ·{" "}
             <span className="font-medium">1–15</span> needs manager approval ·{" "}
-            <span className="font-medium">&gt;15</span> needs admin approval.
+            <span className="font-medium">&gt;15</span> needs admin or accounts.
             The save will fail if your role can&apos;t approve the duration
             you enter.
           </p>
