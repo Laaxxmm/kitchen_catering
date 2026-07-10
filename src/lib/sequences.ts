@@ -28,6 +28,7 @@ async function nextSequenceValue(
     | "QuoteNumberSequence"
     | "CustomerInvoiceNumberSequence"
     | "ChefRequisitionNumberSequence"
+    | "BanquetRequisitionNumberSequence"
     | "DeliveryNumberSequence"
     | "ProductionJobNumberSequence"
     | "VendorPONumberSequence"
@@ -68,6 +69,12 @@ export async function nextChefRequisitionNumber(tx: Tx): Promise<string> {
   const fy = getFyForDate(new Date());
   const n = await nextSequenceValue(tx, "ChefRequisitionNumberSequence", fy.storageYear);
   return `CR-${fy.label}-${String(n).padStart(4, "0")}`;
+}
+
+export async function nextBanquetRequisitionNumber(tx: Tx): Promise<string> {
+  const fy = getFyForDate(new Date());
+  const n = await nextSequenceValue(tx, "BanquetRequisitionNumberSequence", fy.storageYear);
+  return `BRQ-${fy.label}-${String(n).padStart(4, "0")}`;
 }
 
 export async function nextDeliveryNumber(tx: Tx): Promise<string> {

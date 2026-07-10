@@ -23,11 +23,13 @@ export default async function BanquetLandingPage() {
           <Link href="/banquet/receipts/new"><Button variant="outline">Record receipt</Button></Link>
           <Link href="/banquet/adjust"><Button variant="outline">Adjust stock</Button></Link>
           <Link href="/banquet/stock-count"><Button variant="outline">Stock count (bulk)</Button></Link>
-          <Link href="/banquet/request"><Button variant="outline">Request from store</Button></Link>
+          <Link href="/banquet/requisitions"><Button variant="outline">Requisitions</Button></Link>
+          <Link href="/banquet/request"><Button variant="outline">Raise requisition</Button></Link>
         </div>
       }
       tabs={[
         { label: "Items", href: "/banquet/items", active: true },
+        { label: "Requisitions", href: "/banquet/requisitions" },
         { label: "Receipts", href: "/banquet/receipts" },
         { label: "Issues", href: "/banquet/issues" },
         { label: "Adjust stock", href: "/banquet/adjust" },

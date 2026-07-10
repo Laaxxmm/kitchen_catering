@@ -10,7 +10,13 @@ export const dynamic = "force-dynamic";
 
 export default async function BanquetItemsPage() {
   // The whole F&B Service team manages the banquet catalogue.
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
+  const session = await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
+  // Editing / deactivating / deleting the catalogue stays with WRITE_ROLES.
+  // The store keeper may only CREATE a new item (they add the SKU they're
+  // receiving), mirroring the server-side gate on upsertBanquetItem.
+  const WRITE_ROLES: Role[] = [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY];
+  const canManage = WRITE_ROLES.includes(session.user.role);
+  const canCreate = canManage || session.user.role === Role.STORE_KEEPER;
   const items = await listBanquetItems({ activeOnly: false });
   const serialised = items.map((i) => ({
     id: i.id,
@@ -36,7 +42,7 @@ export default async function BanquetItemsPage() {
           </div>
         }
       />
-      <ItemsTable items={serialised} />
+      <ItemsTable items={serialised} canManage={canManage} canCreate={canCreate} />
     </>
   );
 }

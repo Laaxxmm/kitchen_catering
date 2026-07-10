@@ -32,7 +32,16 @@ interface Item {
   active: boolean;
 }
 
-export function ItemsTable({ items, canManage = true }: { items: Item[]; canManage?: boolean }) {
+export function ItemsTable({
+  items,
+  canManage = true,
+  canCreate = canManage,
+}: {
+  items: Item[];
+  canManage?: boolean;
+  /** Store keeper can add a new item but not edit/deactivate/delete. */
+  canCreate?: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState<Partial<Item> | null>(null);
@@ -145,7 +154,7 @@ export function ItemsTable({ items, canManage = true }: { items: Item[]; canMana
 
   return (
     <div className="grid gap-4">
-      {!canManage ? null : editing ? (
+      {!canCreate ? null : editing ? (
         <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
           <div className="text-[12px] font-medium text-ik-ink-2">
             {editing.id ? "Edit item" : "Add item"}

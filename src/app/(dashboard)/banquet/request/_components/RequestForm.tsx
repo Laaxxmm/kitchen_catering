@@ -8,22 +8,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { isNextNavigationError } from "@/lib/next-error";
-import { requestGoodsFromStore } from "@/server/actions/banquet";
+import { createBanquetRequisition } from "@/server/actions/banquet";
 
 interface Item { id: string; name: string; unit: string; currentStock: string }
+interface Event { id: string; code: string; customerName: string }
 interface Line { itemId: string; qty: string }
 
 /**
- * F&B Service → store keeper "please procure this" form. Pick banquet items +
- * quantities and a needed-by date; the store keeper gets it as a high-priority
- * task + notification and raises the PO.
+ * F&B service → banquet store item-line requisition. Pick banquet items +
+ * quantities (optionally tied to an event) and raise the requisition; the
+ * store keeper then fulfils it line by line. Mirrors the chef standalone
+ * requisition form.
  */
-export function RequestForm({ items }: { items: Item[] }) {
+export function RequestForm({ items, events }: { items: Item[]; events: Event[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [lines, setLines] = useState<Line[]>([{ itemId: "", qty: "" }]);
-  const [neededBy, setNeededBy] = useState("");
-  const [note, setNote] = useState("");
+  const [orderId, setOrderId] = useState("");
+  const [notes, setNotes] = useState("");
 
   function addLine() { setLines((l) => [...l, { itemId: "", qty: "" }]); }
   function removeLine(i: number) { setLines((l) => l.filter((_, idx) => idx !== i)); }
@@ -35,23 +37,22 @@ export function RequestForm({ items }: { items: Item[] }) {
     const clean = lines.filter((l) => l.itemId && l.qty.trim() && Number(l.qty) > 0);
     if (clean.length === 0) return toast.error("Pick at least one item with a quantity");
 
-    // Compose a clean, itemised summary for the store keeper's task.
-    const summary = clean
-      .map((l) => {
-        const it = items.find((x) => x.id === l.itemId);
-        return `${l.qty.trim()} ${it?.unit ?? ""} × ${it?.name ?? "item"}`.trim();
-      })
-      .join("; ");
-    const noteParts = [neededBy ? `Needed by ${neededBy}` : null, note.trim() || null].filter(Boolean);
-
     startTransition(async () => {
       try {
-        await requestGoodsFromStore({ summary, note: noteParts.join(" · ") || undefined });
-        toast.success("Request sent to the store keeper");
-        router.push("/banquet");
+        const res = await createBanquetRequisition({
+          orderId: orderId || null,
+          notes: notes.trim() || null,
+          lines: clean.map((l) => ({ itemId: l.itemId, requestedQty: l.qty.trim() })),
+        });
+        if (res.ok === false) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success(`Requisition ${res.requisitionNo} raised`);
+        router.push(`/banquet/requisitions/${res.id}`);
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
-        toast.error(err instanceof Error ? err.message : "Could not send the request");
+        toast.error(err instanceof Error ? err.message : "Could not raise the requisition");
       }
     });
   }
@@ -93,24 +94,31 @@ export function RequestForm({ items }: { items: Item[] }) {
             );
           })}
         </div>
-        <p className="text-[11px] text-ik-ink-3">
-          Need something not in the catalogue? Add it in the note below.
-        </p>
       </section>
 
       <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4 sm:grid-cols-2">
         <div className="grid gap-1.5">
-          <Label htmlFor="neededBy">Needed by</Label>
-          <input id="neededBy" type="date" value={neededBy} onChange={(e) => setNeededBy(e.target.value)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]" />
+          <Label htmlFor="order">Event / order (optional)</Label>
+          <select
+            id="order"
+            value={orderId}
+            onChange={(e) => setOrderId(e.target.value)}
+            className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
+          >
+            <option value="">— No order —</option>
+            {events.map((e) => (
+              <option key={e.id} value={e.id}>{e.code} · {e.customerName}</option>
+            ))}
+          </select>
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="note">Note (optional)</Label>
-          <Textarea id="note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Preferred supplier, anything not in the list, etc." />
+          <Textarea id="note" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="When you need these, anything special, etc." />
         </div>
       </section>
 
       <div className="flex gap-2">
-        <Button disabled={pending} onClick={submit}>{pending ? "Sending…" : "Send request to store"}</Button>
+        <Button disabled={pending} onClick={submit}>{pending ? "Raising…" : "Raise requisition"}</Button>
         <Button variant="outline" onClick={() => router.back()}>Cancel</Button>
       </div>
     </div>

@@ -1,25 +1,38 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { OrderChannel, Prisma, Role, TaskPriority, TaskStatus } from "@prisma/client";
+import {
+  BanquetRequisitionLineStatus,
+  BanquetRequisitionStatus,
+  OrderChannel,
+  Prisma,
+  Role,
+  TaskPriority,
+  TaskStatus,
+} from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
-import { requireRole } from "@/server/rbac";
+import { requireRole, requireSession } from "@/server/rbac";
 import { istToUtc } from "@/lib/time";
 import { sha256Json } from "@/lib/audit";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import { notifyRoles } from "@/server/actions/notifications";
 import { deferAfterResponse } from "@/server/defer";
+import { nextBanquetRequisitionNumber } from "@/lib/sequences";
 import {
   BanquetItemInput,
   BanquetIssueInput,
   BanquetReceiptInput,
+  BanquetRequisitionAwaitingInput,
+  BanquetRequisitionInput,
+  BanquetRequisitionIssueInput,
   BanquetReturnInput,
   BanquetStockCountInput,
 } from "@/lib/validators";
 import {
   ActionError,
   actionFailure,
+  type ActionResult,
   type ActionResultWith,
 } from "@/server/action-result";
 
@@ -65,7 +78,11 @@ const READ_ROLES: Role[] = [...WRITE_ROLES, Role.STORE_KEEPER];
 // ─── Items ────────────────────────────────────────────────────────────
 
 export async function upsertBanquetItem(raw: unknown, id?: string) {
-  const session = await requireRole(WRITE_ROLES);
+  // Store keeper may CREATE a new banquet item (they load/correct stock and
+  // often add the SKU they're receiving), but editing the catalogue stays
+  // with WRITE_ROLES — mirrors the kitchen pattern where SALES can add a dish
+  // but not edit the catalogue. Gate dynamically on create-vs-update.
+  const session = await requireRole(id ? WRITE_ROLES : [...WRITE_ROLES, Role.STORE_KEEPER]);
   const input = BanquetItemInput.parse(raw);
 
   const row = await db.$transaction(async (tx) => {
@@ -290,59 +307,87 @@ async function recordBanquetIssueInner(raw: unknown): Promise<{ ok: true; id: st
     if (l.qty.lessThanOrEqualTo(0)) throw new ActionError("Quantity must be > 0");
   }
 
-  const itemIds = [...new Set(lines.map((l) => l.itemId))];
-
   const issue = await db.$transaction(async (tx) => {
-    // Check stock availability under the row lock — a pre-check outside the
-    // txn could pass for two concurrent issues that together overdraw.
-    await lockBanquetItemRows(tx, itemIds);
-    const items = await tx.banquetItem.findMany({
-      where: { id: { in: itemIds } },
-      select: { id: true, name: true, currentStock: true, unit: true, active: true },
+    // Lock BEFORE the availability check — a pre-check outside the lock could
+    // pass for two concurrent issues that together overdraw.
+    await lockBanquetItemRows(tx, lines.map((l) => l.itemId));
+    return writeBanquetIssueLocked(tx, {
+      issuedAt: istToUtc(input.issuedAt),
+      recordedById: session.user.id,
+      purpose: input.purpose.trim(),
+      orderId: input.orderId ?? null,
+      notes: input.notes?.trim() || null,
+      lines,
     });
-    const byId = new Map(items.map((i) => [i.id, i]));
-    for (const l of lines) {
-      const it = byId.get(l.itemId);
-      if (!it) throw new ActionError("Item not found");
-      if (!it.active) throw new ActionError(`Item ${it.name} is inactive`);
-      if (new Decimal(it.currentStock.toString()).lt(new Decimal(l.qty.toString()))) {
-        throw new ActionError(
-          `Not enough ${it.name} in stock (have ${it.currentStock.toString()} ${it.unit})`
-        );
-      }
-    }
-
-    const created = await tx.banquetIssue.create({
-      data: {
-        issuedAt: istToUtc(input.issuedAt),
-        recordedById: session.user.id,
-        purpose: input.purpose.trim(),
-        orderId: input.orderId ?? null,
-        notes: input.notes?.trim() || null,
-        lines: { create: lines.map((l) => ({ itemId: l.itemId, quantity: l.qty })) },
-      },
-    });
-    for (const l of lines) {
-      await tx.banquetItem.update({
-        where: { id: l.itemId },
-        data: { currentStock: { decrement: l.qty } },
-      });
-    }
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "BANQUET_ISSUE_CREATED",
-        entity: "BanquetIssue",
-        entityId: created.id,
-      },
-    });
-    return created;
   });
 
   revalidatePath("/banquet/issues");
   revalidatePath("/banquet/items");
   revalidatePath("/banquet");
   return { ok: true, id: issue.id };
+}
+
+/**
+ * Write a real BanquetIssue (stock OUT) inside an existing transaction whose
+ * item rows the caller has ALREADY locked via lockBanquetItemRows. Checks
+ * availability, creates the issue + lines, decrements currentStock and audits.
+ * Shared by recordBanquetIssue (manual issue) and issueBanquetRequisitionLine
+ * (requisition fulfilment) so the cutlery ledger + returns behave identically
+ * however the stock left the store.
+ */
+async function writeBanquetIssueLocked(
+  tx: Prisma.TransactionClient,
+  input: {
+    issuedAt: Date;
+    recordedById: string;
+    purpose: string;
+    orderId: string | null;
+    notes: string | null;
+    lines: { itemId: string; qty: Prisma.Decimal }[];
+  },
+) {
+  const itemIds = [...new Set(input.lines.map((l) => l.itemId))];
+  const items = await tx.banquetItem.findMany({
+    where: { id: { in: itemIds } },
+    select: { id: true, name: true, currentStock: true, unit: true, active: true },
+  });
+  const byId = new Map(items.map((i) => [i.id, i]));
+  for (const l of input.lines) {
+    const it = byId.get(l.itemId);
+    if (!it) throw new ActionError("Item not found");
+    if (!it.active) throw new ActionError(`Item ${it.name} is inactive`);
+    if (new Decimal(it.currentStock.toString()).lt(new Decimal(l.qty.toString()))) {
+      throw new ActionError(
+        `Not enough ${it.name} in stock (have ${it.currentStock.toString()} ${it.unit})`,
+      );
+    }
+  }
+
+  const created = await tx.banquetIssue.create({
+    data: {
+      issuedAt: input.issuedAt,
+      recordedById: input.recordedById,
+      purpose: input.purpose,
+      orderId: input.orderId,
+      notes: input.notes,
+      lines: { create: input.lines.map((l) => ({ itemId: l.itemId, quantity: l.qty })) },
+    },
+  });
+  for (const l of input.lines) {
+    await tx.banquetItem.update({
+      where: { id: l.itemId },
+      data: { currentStock: { decrement: l.qty } },
+    });
+  }
+  await tx.auditLog.create({
+    data: {
+      userId: input.recordedById,
+      action: "BANQUET_ISSUE_CREATED",
+      entity: "BanquetIssue",
+      entityId: created.id,
+    },
+  });
+  return created;
 }
 
 // ─── Cutlery returns (per-event ledger) ─────────────────────────────
@@ -716,18 +761,273 @@ export async function listBanquetEvents() {
   }));
 }
 
-// ─── Request goods from the store ────────────────────────────────────────
-// The F&B Service team doesn't buy from vendors themselves — when they need
-// something the banquet store doesn't stock, they ask the STORE KEEPER to
-// raise the PO (and GRN on receipt). This routes that ask as a tracked task
-// assigned to the store keeper, plus a notification with a "raise a PO" link.
-export async function requestGoodsFromStore(input: { summary: string; note?: string }) {
-  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
-  const summary = input.summary?.trim();
-  if (!summary || summary.length < 3) throw new Error("Describe what you need (min 3 characters).");
+// ─── Banquet requisitions (F&B → store, line-by-line fulfilment) ─────────
+//
+// Replaces the old free-text requestGoodsFromStore Task. F&B service raises a
+// BanquetRequisition against banquet-store stock; the store keeper fulfils it
+// line by line — issue full / partial, or flag a shortfall for a purchase
+// order. Mirrors the chef ingredient-requisition flow (chef-requisitions.ts)
+// but against BanquetItem stock instead of Ingredient.
 
-  // Route to an active store keeper; fall back to a manager/admin if the site
-  // hasn't set one up, so the request is never dropped.
+// F&B raises the requisition; the store keeper (also in ISSUE_ROLES) fulfils.
+const REQUISITION_ROLES = ISSUE_ROLES;
+
+const REQ_LINE_CLOSED: BanquetRequisitionLineStatus[] = [
+  BanquetRequisitionLineStatus.ISSUED,
+  BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
+  BanquetRequisitionLineStatus.CANCELLED,
+];
+
+/**
+ * Recompute a requisition's rolled-up status from its lines and stamp who
+ * last touched it. All lines closed (issued / awaiting-PO / cancelled) →
+ * FULLY_ISSUED + closedAt; any progress (issued / part / awaiting) but work
+ * still open → PARTIALLY_ISSUED; otherwise SUBMITTED.
+ */
+async function recomputeBanquetReqStatus(
+  tx: Prisma.TransactionClient,
+  reqId: string,
+  fulfilledById: string,
+): Promise<BanquetRequisitionStatus> {
+  const lines = await tx.banquetRequisitionLine.findMany({
+    where: { requisitionId: reqId },
+    select: { status: true },
+  });
+  const allClosed = lines.every((l) => REQ_LINE_CLOSED.includes(l.status));
+  const anyProgress = lines.some(
+    (l) =>
+      l.status === BanquetRequisitionLineStatus.ISSUED ||
+      l.status === BanquetRequisitionLineStatus.PARTIALLY_ISSUED ||
+      l.status === BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
+  );
+  const status = allClosed
+    ? BanquetRequisitionStatus.FULLY_ISSUED
+    : anyProgress
+      ? BanquetRequisitionStatus.PARTIALLY_ISSUED
+      : BanquetRequisitionStatus.SUBMITTED;
+  await tx.banquetRequisition.update({
+    where: { id: reqId },
+    data: {
+      status,
+      lastFulfilledById: fulfilledById,
+      closedAt: allClosed ? new Date() : null,
+    },
+  });
+  return status;
+}
+
+/**
+ * F&B service raises a banquet requisition. Creates it SUBMITTED with PENDING
+ * lines and notifies the store team to issue it.
+ */
+export async function createBanquetRequisition(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string; requisitionNo: string }>> {
+  try {
+    return await createBanquetRequisitionInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function createBanquetRequisitionInner(
+  raw: unknown,
+): Promise<{ ok: true; id: string; requisitionNo: string }> {
+  const session = await requireRole(REQUISITION_ROLES);
+  const input = BanquetRequisitionInput.parse(raw);
+
+  const result = await db.$transaction(async (tx) => {
+    const requisitionNo = await nextBanquetRequisitionNumber(tx);
+    const created = await tx.banquetRequisition.create({
+      data: {
+        requisitionNo,
+        orderId: input.orderId ?? null,
+        status: BanquetRequisitionStatus.SUBMITTED,
+        submittedAt: new Date(),
+        notes: input.notes ?? null,
+        createdById: session.user.id,
+        lines: {
+          create: input.lines.map((l) => ({
+            itemId: l.itemId,
+            requestedQty: new Prisma.Decimal(l.requestedQty),
+            status: BanquetRequisitionLineStatus.PENDING,
+          })),
+        },
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "BANQUET_REQUISITION_CREATED",
+        entity: "BanquetRequisition",
+        entityId: created.id,
+        payloadHash: sha256Json({ orderId: input.orderId ?? null, lines: input.lines.length }),
+      },
+    });
+    return created;
+  });
+
+  deferAfterResponse("banquet-req:notify", () =>
+    notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+      kind: "GENERIC",
+      title: `F&B stock request ${result.requisitionNo}`,
+      body: `${input.lines.length} item${input.lines.length === 1 ? "" : "s"} to issue from the banquet store.`,
+      link: `/banquet/requisitions/${result.id}`,
+      dedupeKey: `banquet-req:${result.id}`,
+    }),
+  );
+
+  revalidatePath("/banquet/requisitions");
+  revalidatePath("/banquet");
+  return { ok: true, id: result.id, requisitionNo: result.requisitionNo };
+}
+
+/**
+ * Issue stock for one requisition line (full or partial). Decrements
+ * BanquetItem.currentStock through the shared locked-issue writer (so a real
+ * BanquetIssue row lands for the cutlery ledger + returns), bumps the line's
+ * issuedQty/status and rolls the parent requisition status forward.
+ */
+export async function issueBanquetRequisitionLine(raw: unknown): Promise<ActionResult> {
+  try {
+    return await issueBanquetRequisitionLineInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function issueBanquetRequisitionLineInner(raw: unknown): Promise<{ ok: true }> {
+  const session = await requireRole(REQUISITION_ROLES);
+  const input = BanquetRequisitionIssueInput.parse(raw);
+
+  const reqId = await db.$transaction(async (tx) => {
+    // Serialise concurrent issuers of the same line: lock the line row before
+    // reading, so the loser waits and then sees the winner's committed state.
+    await tx.$executeRaw`SELECT 1 FROM "BanquetRequisitionLine" WHERE "id" = ${input.requisitionLineId} FOR UPDATE`;
+    const line = await tx.banquetRequisitionLine.findUnique({
+      where: { id: input.requisitionLineId },
+      include: {
+        requisition: {
+          select: {
+            id: true,
+            status: true,
+            orderId: true,
+            requisitionNo: true,
+            createdBy: { select: { name: true } },
+          },
+        },
+        item: { select: { id: true, name: true, unit: true } },
+      },
+    });
+    if (!line) throw new ActionError("Requisition line not found");
+    if (line.status === BanquetRequisitionLineStatus.CANCELLED) {
+      throw new ActionError("Line is cancelled");
+    }
+    if (line.status === BanquetRequisitionLineStatus.ISSUED) {
+      throw new ActionError("Line is already fully issued");
+    }
+    if (
+      line.requisition.status !== BanquetRequisitionStatus.SUBMITTED &&
+      line.requisition.status !== BanquetRequisitionStatus.PARTIALLY_ISSUED
+    ) {
+      throw new ActionError(
+        `Cannot issue against a ${line.requisition.status.toLowerCase()} requisition`,
+      );
+    }
+
+    // Lock the parent (status recompute) then the item (stock decrement).
+    await tx.$executeRaw`SELECT 1 FROM "BanquetRequisition" WHERE "id" = ${line.requisition.id} FOR UPDATE`;
+    await lockBanquetItemRows(tx, [line.itemId]);
+    // Re-read stock AFTER the lock — a value read before it can be stale.
+    const item = await tx.banquetItem.findUnique({
+      where: { id: line.itemId },
+      select: { currentStock: true, unit: true },
+    });
+    if (!item) throw new ActionError("Item not found");
+
+    const issueQty = new Decimal(input.issueQty);
+    if (issueQty.lte(0)) throw new ActionError("Issue quantity must be greater than 0");
+    const remaining = new Decimal(line.requestedQty.toString()).minus(
+      new Decimal(line.issuedQty.toString()),
+    );
+    if (remaining.lte(0)) throw new ActionError("Line is already fully issued");
+    if (issueQty.gt(remaining)) {
+      throw new ActionError(
+        `Only ${remaining.toString()} ${item.unit} still requested on this line — can't issue ${issueQty.toString()}.`,
+      );
+    }
+    const stock = new Decimal(item.currentStock.toString());
+    if (issueQty.gt(stock)) {
+      throw new ActionError(
+        `Only ${stock.toString()} ${item.unit} in stock — issue that or raise a PO for the rest.`,
+      );
+    }
+
+    // Real stock movement through the shared locked writer (item is locked).
+    await writeBanquetIssueLocked(tx, {
+      issuedAt: new Date(),
+      recordedById: session.user.id,
+      purpose: `Requisition ${line.requisition.requisitionNo} · ${line.requisition.createdBy?.name ?? "F&B"}`,
+      orderId: line.requisition.orderId,
+      notes: null,
+      lines: [{ itemId: line.itemId, qty: new Prisma.Decimal(issueQty.toString()) }],
+    });
+
+    const newIssued = new Decimal(line.issuedQty.toString()).plus(issueQty);
+    const fully = newIssued.gte(new Decimal(line.requestedQty.toString()));
+    await tx.banquetRequisitionLine.update({
+      where: { id: line.id },
+      data: {
+        issuedQty: newIssued.toDecimalPlaces(3).toString(),
+        status: fully
+          ? BanquetRequisitionLineStatus.ISSUED
+          : BanquetRequisitionLineStatus.PARTIALLY_ISSUED,
+      },
+    });
+
+    await recomputeBanquetReqStatus(tx, line.requisition.id, session.user.id);
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "BANQUET_REQUISITION_LINE_ISSUED",
+        entity: "BanquetRequisitionLine",
+        entityId: line.id,
+        payloadHash: sha256Json({ qty: issueQty.toString() }),
+      },
+    });
+    return line.requisition.id;
+  });
+
+  revalidatePath("/banquet/requisitions");
+  revalidatePath(`/banquet/requisitions/${reqId}`);
+  revalidatePath("/banquet/items");
+  revalidatePath("/banquet");
+  return { ok: true };
+}
+
+/**
+ * Flag a short requisition line for procurement. The banquet store doesn't buy
+ * from vendors itself, and banquet items aren't Ingredients (so they can't
+ * pre-fill the ingredient-driven PO form), so — mirroring the old
+ * requestGoodsFromStore — this flips the line to AWAITING_PROCUREMENT and
+ * routes a HIGH task carrying the item + shortfall to the store keeper (or a
+ * manager/admin) to raise the actual PO. Parent status is recomputed.
+ */
+export async function markBanquetLineAwaitingProcurement(raw: unknown): Promise<ActionResult> {
+  try {
+    return await markBanquetLineAwaitingProcurementInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ ok: true }> {
+  const session = await requireRole(REQUISITION_ROLES);
+  const input = BanquetRequisitionAwaitingInput.parse(raw);
+
+  // Route the "raise a PO" to-do to an active store keeper; fall back to a
+  // manager/admin so the request is never dropped.
   const storeKeeper = await db.user.findFirst({
     where: { active: true, role: Role.STORE_KEEPER },
     orderBy: { createdAt: "asc" },
@@ -741,51 +1041,203 @@ export async function requestGoodsFromStore(input: { summary: string; note?: str
         select: { id: true },
       });
   const assigneeId = storeKeeper?.id ?? fallback?.id;
-  if (!assigneeId) throw new Error("No store keeper or manager is set up to receive the request.");
 
-  const task = await db.$transaction(async (tx) => {
-    const t = await tx.task.create({
-      data: {
-        title: `Procure for F&B: ${summary.slice(0, 80)}`,
-        description: [
-          `Requested by ${session.user.name ?? "F&B Service"}.`,
-          input.note?.trim() ? input.note.trim() : null,
-          "Raise a purchase order for these goods (and record the GRN when they arrive).",
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
-        priority: TaskPriority.HIGH,
-        status: TaskStatus.ASSIGNED,
-        assignedToId: assigneeId,
-        assignedById: session.user.id,
-        // No explicit due date on a supply request — default to 2 days out so
-        // it surfaces with a sensible target the store keeper can adjust.
-        targetDate: new Date(Date.now() + 2 * 24 * 3600 * 1000),
+  const result = await db.$transaction(async (tx) => {
+    const line = await tx.banquetRequisitionLine.findUnique({
+      where: { id: input.requisitionLineId },
+      include: {
+        requisition: { select: { id: true, status: true, requisitionNo: true } },
+        item: { select: { name: true, unit: true } },
       },
+    });
+    if (!line) throw new ActionError("Requisition line not found");
+    if (
+      line.status !== BanquetRequisitionLineStatus.PENDING &&
+      line.status !== BanquetRequisitionLineStatus.PARTIALLY_ISSUED
+    ) {
+      throw new ActionError("Only pending or part-issued lines can be sent to procurement");
+    }
+    if (
+      line.requisition.status !== BanquetRequisitionStatus.SUBMITTED &&
+      line.requisition.status !== BanquetRequisitionStatus.PARTIALLY_ISSUED
+    ) {
+      throw new ActionError(
+        `Cannot change a ${line.requisition.status.toLowerCase()} requisition`,
+      );
+    }
+    const shortfall = new Decimal(line.requestedQty.toString()).minus(
+      new Decimal(line.issuedQty.toString()),
+    );
+    if (shortfall.lte(0)) throw new ActionError("No shortfall to procure");
+
+    await tx.banquetRequisitionLine.update({
+      where: { id: line.id },
+      data: {
+        status: BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
+        notes: input.reason ?? line.notes,
+      },
+    });
+
+    let taskId: string | null = null;
+    if (assigneeId) {
+      const shortfallLabel = `${shortfall.toString()} ${line.item.unit} × ${line.item.name}`;
+      const task = await tx.task.create({
+        data: {
+          title: `Raise PO for ${line.item.name} shortfall (${line.requisition.requisitionNo})`,
+          description: [
+            `Banquet requisition ${line.requisition.requisitionNo} is short: ${shortfallLabel}.`,
+            input.reason?.trim() ? `Reason: ${input.reason.trim()}` : null,
+            "Raise a purchase order for the shortfall (and record the GRN when goods arrive).",
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+          priority: TaskPriority.HIGH,
+          status: TaskStatus.ASSIGNED,
+          assignedToId: assigneeId,
+          assignedById: session.user.id,
+          targetDate: new Date(Date.now() + 2 * 24 * 3600 * 1000),
+        },
+      });
+      taskId = task.id;
+    }
+
+    await recomputeBanquetReqStatus(tx, line.requisition.id, session.user.id);
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "BANQUET_LINE_AWAITING_PROCUREMENT",
+        entity: "BanquetRequisitionLine",
+        entityId: line.id,
+        payloadHash: sha256Json({ shortfall: shortfall.toString(), reason: input.reason ?? null }),
+      },
+    });
+    return { reqId: line.requisition.id, requisitionNo: line.requisition.requisitionNo, itemName: line.item.name, taskId };
+  });
+
+  deferAfterResponse("banquet-line-procure:notify", () =>
+    notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+      kind: "TASK_ASSIGNED",
+      title: `PO needed for ${result.requisitionNo}`,
+      body: `${result.itemName} is short — raise a purchase order for the shortfall.`,
+      link: "/procurement/purchase-orders/new",
+      dedupeKey: `banquet-line-procure:${input.requisitionLineId}`,
+    }),
+  );
+
+  revalidatePath("/banquet/requisitions");
+  revalidatePath(`/banquet/requisitions/${result.reqId}`);
+  revalidatePath("/tasks");
+  return { ok: true };
+}
+
+/**
+ * Cancel a non-terminal requisition (ADMIN / MANAGER, or the F&B user who
+ * raised it). Cancels every still-open line and closes the header.
+ */
+export async function cancelBanquetRequisition(id: string, reason: string): Promise<ActionResult> {
+  try {
+    return await cancelBanquetRequisitionInner(id, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function cancelBanquetRequisitionInner(id: string, reason: string): Promise<{ ok: true }> {
+  const session = await requireSession();
+  if (!reason?.trim()) throw new ActionError("A cancellation reason is required");
+
+  await db.$transaction(async (tx) => {
+    const req = await tx.banquetRequisition.findUnique({
+      where: { id },
+      select: { status: true, createdById: true },
+    });
+    if (!req) throw new ActionError("Requisition not found");
+    const canCancel =
+      session.user.role === Role.ADMIN ||
+      session.user.role === Role.MANAGER ||
+      req.createdById === session.user.id;
+    if (!canCancel) {
+      throw new ActionError("You can only cancel requisitions you raised.");
+    }
+    if (
+      req.status === BanquetRequisitionStatus.FULLY_ISSUED ||
+      req.status === BanquetRequisitionStatus.CANCELLED
+    ) {
+      throw new ActionError(`Cannot cancel a ${req.status.toLowerCase()} requisition`);
+    }
+
+    await tx.banquetRequisitionLine.updateMany({
+      where: {
+        requisitionId: id,
+        status: {
+          in: [
+            BanquetRequisitionLineStatus.PENDING,
+            BanquetRequisitionLineStatus.PARTIALLY_ISSUED,
+            BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
+          ],
+        },
+      },
+      data: { status: BanquetRequisitionLineStatus.CANCELLED },
+    });
+    await tx.banquetRequisition.update({
+      where: { id },
+      data: { status: BanquetRequisitionStatus.CANCELLED, closedAt: new Date() },
     });
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
-        action: "FNB_STORE_REQUEST_RAISED",
-        entity: "Task",
-        entityId: t.id,
-        payloadHash: sha256Json({ summary }),
+        action: "BANQUET_REQUISITION_CANCELLED",
+        entity: "BanquetRequisition",
+        entityId: id,
+        payloadHash: sha256Json({ reason: reason.trim() }),
       },
     });
-    return t;
   });
 
-  deferAfterResponse("fnb-store-request:notify", () =>
-    notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
-      kind: "TASK_ASSIGNED",
-      title: "F&B needs goods procured",
-      body: `${summary}. Raise a purchase order (and GRN on receipt).`,
-      link: "/procurement/purchase-orders/new",
-      dedupeKey: `fnb-store-request:${task.id}`,
-    }),
-  );
+  revalidatePath("/banquet/requisitions");
+  revalidatePath(`/banquet/requisitions/${id}`);
+  return { ok: true };
+}
 
-  revalidatePath("/banquet");
-  revalidatePath("/tasks");
-  return { id: task.id };
+export async function listBanquetRequisitions(
+  opts: { status?: BanquetRequisitionStatus[] } = {},
+) {
+  await requireRole(READ_ROLES);
+  return db.banquetRequisition.findMany({
+    where: opts.status ? { status: { in: opts.status } } : {},
+    include: {
+      order: { select: { id: true, code: true, customer: { select: { name: true } }, eventDate: true } },
+      createdBy: { select: { name: true } },
+      _count: { select: { lines: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+}
+
+export async function getBanquetRequisition(id: string) {
+  await requireRole(READ_ROLES);
+  return db.banquetRequisition.findUnique({
+    where: { id },
+    include: {
+      order: {
+        select: {
+          id: true,
+          code: true,
+          status: true,
+          eventDate: true,
+          customer: { select: { id: true, name: true } },
+        },
+      },
+      createdBy: { select: { name: true } },
+      lastFulfilledBy: { select: { name: true } },
+      lines: {
+        include: {
+          item: { select: { name: true, sku: true, unit: true, currentStock: true } },
+        },
+        orderBy: { item: { name: "asc" } },
+      },
+    },
+  });
 }

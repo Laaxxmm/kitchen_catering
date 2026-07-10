@@ -880,6 +880,33 @@ export const BanquetReturnInput = z.object({
   lines: z.array(BanquetIssueLineInput).min(1, "Add at least one item"),
 });
 
+// F&B service raises a Banquet Requisition against banquet-store stock;
+// the store keeper fulfils it line by line. Mirrors ChefRequisition* but
+// against BanquetItem instead of Ingredient. At least one line required.
+const BanquetRequisitionLineInput = z.object({
+  itemId: z.string().min(1),
+  requestedQty: decimalString,
+});
+
+export const BanquetRequisitionInput = z.object({
+  orderId: z.string().nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  lines: z.array(BanquetRequisitionLineInput).min(1, "Add at least one item"),
+});
+export type BanquetRequisitionInputT = z.infer<typeof BanquetRequisitionInput>;
+
+// Store keeper issues one requisition line (full or partial).
+export const BanquetRequisitionIssueInput = z.object({
+  requisitionLineId: z.string().min(1),
+  issueQty: decimalString,
+});
+
+// Store keeper flags a short line for a purchase order.
+export const BanquetRequisitionAwaitingInput = z.object({
+  requisitionLineId: z.string().min(1),
+  reason: z.string().max(500).nullable().optional(),
+});
+
 // Bulk stock count — same shape as the kitchen's InventoryAuditPostInput:
 // each line sets an item's on-hand to the physically counted quantity.
 export const BanquetStockCountLineInput = z.object({

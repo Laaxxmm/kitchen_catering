@@ -184,6 +184,24 @@ enum ChefRequisitionLineStatus {
   CANCELLED
 }
 
+// F&B service raises a Banquet Requisition; the store keeper fulfils it
+// line by line (issue full / partial / raise PO on shortfall), mirroring
+// the chef ingredient-requisition flow but against BanquetItem stock.
+enum BanquetRequisitionStatus {
+  SUBMITTED
+  PARTIALLY_ISSUED
+  FULLY_ISSUED
+  CANCELLED
+}
+
+enum BanquetRequisitionLineStatus {
+  PENDING
+  ISSUED
+  PARTIALLY_ISSUED
+  AWAITING_PROCUREMENT
+  CANCELLED
+}
+
 // ---------- Delivery ----------
 
 enum DeliveryStatus {
@@ -424,9 +442,11 @@ model User {
   maintenanceActivitiesRecorded MaintenanceActivity[] @relation("MaintenanceActivityRecordedBy")
 
   // Banquet (F&B store)
-  banquetReceiptsRecorded BanquetReceipt[] @relation("BanquetReceiptRecordedBy")
-  banquetIssuesRecorded   BanquetIssue[]   @relation("BanquetIssueRecordedBy")
-  banquetReturnsRecorded  BanquetReturn[]  @relation("BanquetReturnRecordedBy")
+  banquetReceiptsRecorded      BanquetReceipt[]     @relation("BanquetReceiptRecordedBy")
+  banquetIssuesRecorded        BanquetIssue[]       @relation("BanquetIssueRecordedBy")
+  banquetReturnsRecorded       BanquetReturn[]      @relation("BanquetReturnRecordedBy")
+  banquetRequisitionsCreated   BanquetRequisition[] @relation("BanquetRequisitionCreatedBy")
+  banquetRequisitionsFulfilled BanquetRequisition[] @relation("BanquetRequisitionFulfilledBy")
 
   productionItemsHandedOver ProductionJobItem[] @relation("ProductionItemHandedOverBy")
   // Notifications (Phase 5)
@@ -979,20 +999,21 @@ model Order {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  items            OrderItem[]
-  budgetLines      OrderBudgetLine[]
-  overheadAllocs   OrderOverheadAllocation[]
-  ingredientIssues IngredientIssue[]
-  quote            Quote?                    @relation("QuoteConvertedOrder")
-  productionJobs   ProductionJob[]
-  deliveries       Delivery[]
-  invoices         CustomerInvoice[]
-  prs              PurchaseRequisition[]
-  vendorPos        VendorPO[]                @relation("VendorPOToOrder")
-  timeEntries      TimeEntry[]               @relation("TimeEntryToOrder")
-  chefRequisitions ChefRequisition[]
-  banquetIssues    BanquetIssue[]            @relation("BanquetIssueOrder")
-  banquetReturns   BanquetReturn[]           @relation("BanquetReturnOrder")
+  items               OrderItem[]
+  budgetLines         OrderBudgetLine[]
+  overheadAllocs      OrderOverheadAllocation[]
+  ingredientIssues    IngredientIssue[]
+  quote               Quote?                    @relation("QuoteConvertedOrder")
+  productionJobs      ProductionJob[]
+  deliveries          Delivery[]
+  invoices            CustomerInvoice[]
+  prs                 PurchaseRequisition[]
+  vendorPos           VendorPO[]                @relation("VendorPOToOrder")
+  timeEntries         TimeEntry[]               @relation("TimeEntryToOrder")
+  chefRequisitions    ChefRequisition[]
+  banquetIssues       BanquetIssue[]            @relation("BanquetIssueOrder")
+  banquetReturns      BanquetReturn[]           @relation("BanquetReturnOrder")
+  banquetRequisitions BanquetRequisition[]      @relation("BanquetRequisitionOrder")
 
   @@index([status])
   @@index([customerId])
@@ -1966,6 +1987,11 @@ model ChefRequisitionNumberSequence {
   next Int @default(1)
 }
 
+model BanquetRequisitionNumberSequence {
+  year Int @id
+  next Int @default(1)
+}
+
 // =====================================================================
 // TASK ASSIGNMENT
 // =====================================================================
@@ -2339,9 +2365,10 @@ model BanquetItem {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  receiptLines BanquetReceiptLine[]
-  issueLines   BanquetIssueLine[]
-  returnLines  BanquetReturnLine[]
+  receiptLines     BanquetReceiptLine[]
+  issueLines       BanquetIssueLine[]
+  returnLines      BanquetReturnLine[]
+  requisitionLines BanquetRequisitionLine[]
 
   @@unique([name])
   @@index([active])
@@ -2440,6 +2467,47 @@ model BanquetReturnLine {
 
   @@index([returnId])
   @@index([itemId])
+}
+
+// F&B service asks the banquet store for cutlery/disposables; the store
+// issues what's in stock (full or partial) and raises a PO for the rest.
+model BanquetRequisition {
+  id                String                   @id @default(cuid())
+  requisitionNo     String                   @unique // BRQ-26-27-0001
+  orderId           String?
+  order             Order?                   @relation("BanquetRequisitionOrder", fields: [orderId], references: [id], onDelete: SetNull)
+  status            BanquetRequisitionStatus @default(SUBMITTED)
+  notes             String?
+  createdById       String
+  createdBy         User                     @relation("BanquetRequisitionCreatedBy", fields: [createdById], references: [id])
+  submittedAt       DateTime                 @default(now())
+  lastFulfilledById String?
+  lastFulfilledBy   User?                    @relation("BanquetRequisitionFulfilledBy", fields: [lastFulfilledById], references: [id])
+  closedAt          DateTime?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  lines BanquetRequisitionLine[]
+
+  @@index([status])
+  @@index([orderId])
+  @@index([createdById])
+}
+
+model BanquetRequisitionLine {
+  id            String                       @id @default(cuid())
+  requisitionId String
+  requisition   BanquetRequisition           @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
+  itemId        String
+  item          BanquetItem                  @relation(fields: [itemId], references: [id])
+  requestedQty  Decimal                      @db.Decimal(14, 3)
+  issuedQty     Decimal                      @default(0) @db.Decimal(14, 3)
+  status        BanquetRequisitionLineStatus @default(PENDING)
+  notes         String?
+
+  @@index([requisitionId])
+  @@index([itemId])
+  @@index([status])
 }
 
 // =====================================================================
