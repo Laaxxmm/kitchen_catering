@@ -16,7 +16,7 @@ import { requireRole, requireSession } from "@/server/rbac";
 import { istToUtc } from "@/lib/time";
 import { sha256Json } from "@/lib/audit";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
-import { notifyRoles } from "@/server/actions/notifications";
+import { createNotification, notifyRoles } from "@/server/actions/notifications";
 import { deferAfterResponse } from "@/server/defer";
 import { nextBanquetRequisitionNumber } from "@/lib/sequences";
 import {
@@ -900,7 +900,7 @@ async function issueBanquetRequisitionLineInner(raw: unknown): Promise<{ ok: tru
   const session = await requireRole(REQUISITION_ROLES);
   const input = BanquetRequisitionIssueInput.parse(raw);
 
-  const reqId = await db.$transaction(async (tx) => {
+  const issued = await db.$transaction(async (tx) => {
     // Serialise concurrent issuers of the same line: lock the line row before
     // reading, so the loser waits and then sees the winner's committed state.
     await tx.$executeRaw`SELECT 1 FROM "BanquetRequisitionLine" WHERE "id" = ${input.requisitionLineId} FOR UPDATE`;
@@ -913,6 +913,7 @@ async function issueBanquetRequisitionLineInner(raw: unknown): Promise<{ ok: tru
             status: true,
             orderId: true,
             requisitionNo: true,
+            createdById: true,
             createdBy: { select: { name: true } },
           },
         },
@@ -996,11 +997,44 @@ async function issueBanquetRequisitionLineInner(raw: unknown): Promise<{ ok: tru
         payloadHash: sha256Json({ qty: issueQty.toString() }),
       },
     });
-    return line.requisition.id;
+    return {
+      reqId: line.requisition.id,
+      requisitionNo: line.requisition.requisitionNo,
+      createdById: line.requisition.createdById,
+      itemName: line.item.name,
+      unit: item.unit,
+      qty: issueQty.toString(),
+      issuedSoFar: newIssued.toString(),
+      requested: new Decimal(line.requestedQty.toString()).toString(),
+      lineFullyIssued: fully,
+    };
   });
 
+  // Tell the requester the store acted — mirrors how the chef hears back.
+  // Skip self-notifications (F&B roles can issue their own requisitions).
+  if (issued.createdById !== session.user.id) {
+    const fresh = await db.banquetRequisition.findUnique({
+      where: { id: issued.reqId },
+      select: { status: true },
+    });
+    const reqDone = fresh?.status === BanquetRequisitionStatus.FULLY_ISSUED;
+    deferAfterResponse("banquet-line-issued:notify", () =>
+      createNotification({
+        userId: issued.createdById,
+        kind: "GENERIC",
+        title: reqDone
+          ? `${issued.requisitionNo} fully issued — collect from the banquet store`
+          : `Store issued ${issued.qty} ${issued.unit} ${issued.itemName}`,
+        body: reqDone
+          ? undefined
+          : `${issued.requisitionNo}: ${issued.issuedSoFar} of ${issued.requested} ${issued.unit} issued so far.`,
+        link: `/banquet/requisitions/${issued.reqId}`,
+      }),
+    );
+  }
+
   revalidatePath("/banquet/requisitions");
-  revalidatePath(`/banquet/requisitions/${reqId}`);
+  revalidatePath(`/banquet/requisitions/${issued.reqId}`);
   revalidatePath("/banquet/items");
   revalidatePath("/banquet");
   return { ok: true };
@@ -1046,7 +1080,7 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
     const line = await tx.banquetRequisitionLine.findUnique({
       where: { id: input.requisitionLineId },
       include: {
-        requisition: { select: { id: true, status: true, requisitionNo: true } },
+        requisition: { select: { id: true, status: true, requisitionNo: true, createdById: true } },
         item: { select: { name: true, unit: true } },
       },
     });
@@ -1112,7 +1146,15 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
         payloadHash: sha256Json({ shortfall: shortfall.toString(), reason: input.reason ?? null }),
       },
     });
-    return { reqId: line.requisition.id, requisitionNo: line.requisition.requisitionNo, itemName: line.item.name, taskId };
+    return {
+      reqId: line.requisition.id,
+      requisitionNo: line.requisition.requisitionNo,
+      createdById: line.requisition.createdById,
+      itemName: line.item.name,
+      shortfall: shortfall.toString(),
+      unit: line.item.unit,
+      taskId,
+    };
   });
 
   deferAfterResponse("banquet-line-procure:notify", () =>
@@ -1124,6 +1166,19 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
       dedupeKey: `banquet-line-procure:${input.requisitionLineId}`,
     }),
   );
+  // The requester should hear the store's answer, not just management.
+  if (result.createdById !== session.user.id) {
+    deferAfterResponse("banquet-line-procure:notify-requester", () =>
+      createNotification({
+        userId: result.createdById,
+        kind: "GENERIC",
+        title: `${result.itemName} is being procured (${result.requisitionNo})`,
+        body: `The store is short ${result.shortfall} ${result.unit} — a purchase has been raised; you'll get it once goods arrive.`,
+        link: `/banquet/requisitions/${result.reqId}`,
+        dedupeKey: `banquet-line-procure-req:${input.requisitionLineId}`,
+      }),
+    );
+  }
 
   revalidatePath("/banquet/requisitions");
   revalidatePath(`/banquet/requisitions/${result.reqId}`);
