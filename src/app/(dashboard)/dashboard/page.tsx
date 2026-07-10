@@ -294,6 +294,13 @@ export default async function DashboardPage({
         <LauncherGreeting
           firstName={firstName}
           subtitle="Money to collect and money to pay, in two tabs. Mark anything paid right here."
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Link href="/customers/new"><Button>Add customer</Button></Link>
+              <Link href="/customers"><Button variant="outline">Customers</Button></Link>
+              <Link href="/invoices"><Button variant="outline">Invoices</Button></Link>
+            </div>
+          }
         />
         <div className="grid gap-5">
           <MyTasksPanel />
