@@ -10,8 +10,12 @@ export const dynamic = "force-dynamic";
 export default async function BanquetLandingPage() {
   // The F&B Service team (role DELIVERY, FNB_SERVICE its retired alias) runs
   // the banquet store end to end — catalogue, receipts, issues, adjustments.
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
+  const session = await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
   const stock = await getStoreStock("banquet");
+  // "Raise requisition" is for the F&B team asking the store for stock — the
+  // store keeper IS the store, so they fulfil requests (Requisitions) rather
+  // than raise them against themselves. Hide it for the store keeper.
+  const canRaiseRequisition = session.user.role !== Role.STORE_KEEPER;
 
   return (
     <StoreLanding
@@ -24,7 +28,9 @@ export default async function BanquetLandingPage() {
           <Link href="/banquet/adjust"><Button variant="outline">Adjust stock</Button></Link>
           <Link href="/banquet/stock-count"><Button variant="outline">Stock count (bulk)</Button></Link>
           <Link href="/banquet/requisitions"><Button variant="outline">Requisitions</Button></Link>
-          <Link href="/banquet/request"><Button variant="outline">Raise requisition</Button></Link>
+          {canRaiseRequisition && (
+            <Link href="/banquet/request"><Button variant="outline">Raise requisition</Button></Link>
+          )}
         </div>
       }
       tabs={[
