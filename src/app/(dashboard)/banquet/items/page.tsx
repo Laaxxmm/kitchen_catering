@@ -8,7 +8,12 @@ import { ItemsTable } from "./_components/ItemsTable";
 
 export const dynamic = "force-dynamic";
 
-export default async function BanquetItemsPage() {
+export default async function BanquetItemsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ new?: string }>;
+}) {
+  const sp = await searchParams;
   // The whole F&B Service team manages the banquet catalogue.
   const session = await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
   // Editing / deactivating / deleting the catalogue stays with WRITE_ROLES.
@@ -42,7 +47,7 @@ export default async function BanquetItemsPage() {
           </div>
         }
       />
-      <ItemsTable items={serialised} canManage={canManage} canCreate={canCreate} />
+      <ItemsTable items={serialised} canManage={canManage} canCreate={canCreate} startOpen={sp.new === "1" && canCreate} />
     </>
   );
 }

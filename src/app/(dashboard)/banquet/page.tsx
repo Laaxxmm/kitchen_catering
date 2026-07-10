@@ -22,11 +22,12 @@ export default async function BanquetLandingPage() {
       title="Banquet store"
       description="F&B disposables — cutlery, cups, trays, foil, takeaway boxes. What's low is up top."
       primary={
+        // Lean header — the daily actions only. Adjust stock, Stock count
+        // and every list live in the tabs below, so they're not repeated here.
         <div className="flex flex-wrap gap-2">
           <Link href="/banquet/issues/new"><Button>Issue to event</Button></Link>
           <Link href="/banquet/receipts/new"><Button variant="outline">Record receipt</Button></Link>
-          <Link href="/banquet/adjust"><Button variant="outline">Adjust stock</Button></Link>
-          <Link href="/banquet/stock-count"><Button variant="outline">Stock count (bulk)</Button></Link>
+          <Link href="/banquet/items?new=1"><Button variant="outline">New item</Button></Link>
           <Link href="/banquet/requisitions"><Button variant="outline">Requisitions</Button></Link>
           {canRaiseRequisition && (
             <Link href="/banquet/request"><Button variant="outline">Raise requisition</Button></Link>

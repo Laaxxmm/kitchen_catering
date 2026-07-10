@@ -36,15 +36,20 @@ export function ItemsTable({
   items,
   canManage = true,
   canCreate = canManage,
+  startOpen = false,
 }: {
   items: Item[];
   canManage?: boolean;
   /** Store keeper can add a new item but not edit/deactivate/delete. */
   canCreate?: boolean;
+  /** Open the create form immediately (from the "New item" header link). */
+  startOpen?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [editing, setEditing] = useState<Partial<Item> | null>(null);
+  const [editing, setEditing] = useState<Partial<Item> | null>(
+    startOpen ? { id: undefined } : null,
+  );
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
   const [category, setCategory] = useState("");
