@@ -22,6 +22,8 @@ interface Line {
 interface Props {
   orderId: string;
   currentHeadcount: number;
+  /** IST "yyyy-MM-ddTHH:mm" backing the datetime-local input. */
+  currentEventDate: string;
   /** Package-priced channel (banquet / buffet / ODC / packet) — contract
    *  value is the lump-sum package total, not the line sum. */
   packageChannel: boolean;
@@ -44,6 +46,7 @@ function lineTotal(portions: number, unitPrice: string, discountPct: string, gst
 export function ReviseOrderForm({
   orderId,
   currentHeadcount,
+  currentEventDate,
   packageChannel,
   currentContractValue,
   lines,
@@ -56,6 +59,8 @@ export function ReviseOrderForm({
     () => Object.fromEntries(lines.map((l) => [l.id, l.portions])),
   );
   const [packageTotal, setPackageTotal] = useState(currentContractValue);
+  const [eventDate, setEventDate] = useState(currentEventDate);
+  const dateChanged = eventDate !== currentEventDate;
   const [note, setNote] = useState("");
 
   // Current vs new contract value. Package channels carry the typed lump
@@ -91,6 +96,7 @@ export function ReviseOrderForm({
     if (items.every((it) => it.portions === 0)) {
       return toast.error("At least one dish must keep portions — cancel the order instead of zeroing everything");
     }
+    if (dateChanged && !eventDate) return toast.error("Pick the new event date & time");
     if (!note.trim()) return toast.error("A revision note is required — say why the quantities changed");
     if (packageChannel && (!packageTotal.trim() || Number.isNaN(Number(packageTotal)))) {
       return toast.error("Enter the revised package total");
@@ -101,6 +107,7 @@ export function ReviseOrderForm({
           headcount: pax,
           items,
           ...(packageChannel ? { packageTotal: packageTotal.trim() } : {}),
+          ...(dateChanged ? { eventDate } : {}),
           revisionNote: note.trim(),
         });
         if (res && res.ok === false) {
@@ -208,6 +215,27 @@ export function ReviseOrderForm({
           </div>
         </section>
       )}
+
+      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+        <h3 className="mb-2 text-[14px] font-medium text-ik-ink">Event date &amp; time</h3>
+        <p className="mb-2 text-[12px] text-ik-ink-3">
+          Change only if the client rescheduled — the kitchen and F&amp;B replan around this.
+        </p>
+        <div className="flex flex-wrap items-center gap-2 text-[13px]">
+          <input
+            type="datetime-local"
+            value={eventDate}
+            onChange={(e) => setEventDate(e.target.value)}
+            className="h-9 rounded border border-ik-rule bg-ik-card px-2 font-mono"
+            aria-label="Event date and time"
+          />
+          {dateChanged && (
+            <span className="rounded-full bg-amber-wash px-2 py-0.5 text-[11.5px] font-medium text-amber-700">
+              rescheduled
+            </span>
+          )}
+        </div>
+      </section>
 
       <section className="rounded-md border border-ik-rule bg-ik-card p-4">
         <h3 className="mb-2 text-[14px] font-medium text-ik-ink">Revision note (required)</h3>

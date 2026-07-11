@@ -49,6 +49,7 @@ export default async function ReviseOrderPage({ params }: { params: Promise<{ id
         <ReviseOrderForm
           orderId={order.id}
           currentHeadcount={order.headcount ?? 1}
+          currentEventDate={formatIST(order.eventDate, "yyyy-MM-dd'T'HH:mm")}
           packageChannel={isPackagePricedChannel(order.channel)}
           currentContractValue={order.contractValue.toString()}
           lines={order.items.map((it) => ({

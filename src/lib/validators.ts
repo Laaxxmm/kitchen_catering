@@ -365,6 +365,9 @@ export const OrderReviseInput = z.object({
   // Honoured only for package-priced channels (banquet / buffet / ODC /
   // packet) — ignored otherwise, same as OrderCreateInput.
   packageTotal: decimalString.nullable().optional(),
+  // Reschedule: IST "yyyy-MM-ddTHH:mm". Only applied when it differs from
+  // the order's current event date; must be in the future when it does.
+  eventDate: z.string().trim().min(1).nullable().optional(),
   revisionNote: z.string().trim().min(1, "A revision note is required").max(2000),
 });
 export type OrderReviseInputT = z.infer<typeof OrderReviseInput>;

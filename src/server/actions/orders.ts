@@ -545,6 +545,20 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
         .toDecimalPlaces(2);
     }
 
+    // Reschedule: only when the submitted date differs from the current one.
+    // A new date must be in the future — but an UNCHANGED date is left alone
+    // even if the event is already underway (same-day pax cuts are normal).
+    let newEventDate: Date | null = null;
+    if (input.eventDate) {
+      const candidate = istToUtc(input.eventDate);
+      if (candidate.getTime() !== order.eventDate.getTime()) {
+        if (candidate.getTime() <= Date.now()) {
+          throw new ActionError("The new event date must be in the future.");
+        }
+        newEventDate = candidate;
+      }
+    }
+
     // Status guard in the WHERE clause: if the order moved (e.g. went out
     // for delivery) between our read and this write, match zero rows and
     // roll the whole revision back.
@@ -553,6 +567,7 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
       data: {
         headcount: input.headcount,
         contractValue: contractValue.toString(),
+        ...(newEventDate ? { eventDate: newEventDate } : {}),
       },
     });
     if (updated.count === 0) {
@@ -569,15 +584,23 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
         entity: "Order",
         entityId: id,
         payloadHash: sha256Json({
-          before: { headcount: order.headcount, contractValue: order.contractValue.toString() },
-          after: { headcount: input.headcount, contractValue: contractValue.toString() },
+          before: {
+            headcount: order.headcount,
+            contractValue: order.contractValue.toString(),
+            eventDate: order.eventDate.toISOString(),
+          },
+          after: {
+            headcount: input.headcount,
+            contractValue: contractValue.toString(),
+            eventDate: (newEventDate ?? order.eventDate).toISOString(),
+          },
           removedLines: removals.length,
           note: input.revisionNote,
         }),
       },
     });
 
-    return { code: order.code, oldPax: order.headcount };
+    return { code: order.code, oldPax: order.headcount, newEventDate };
   });
 
   revalidatePath(`/orders/${id}`);
@@ -586,7 +609,15 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
   revalidatePath("/kitchen");
 
   deferAfterResponse("order-revise:notify", () =>
-    notifyOrderRevised(id, revised.code, revised.oldPax, input.headcount, input.revisionNote),
+    notifyOrderRevised(
+      id,
+      revised.code,
+      revised.oldPax,
+      input.headcount,
+      revised.newEventDate
+        ? `Rescheduled to ${formatIST(revised.newEventDate, "EEE d MMM yyyy HH:mm")}. ${input.revisionNote}`
+        : input.revisionNote,
+    ),
   );
   return { ok: true };
 }
