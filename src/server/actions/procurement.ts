@@ -3,8 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { Decimal } from "decimal.js";
 import {
+  BanquetRequisitionLineStatus,
   GRNStatus,
   PaymentMethod,
+  Prisma,
   ProcurementType,
   Role,
   VendorBillStatus,
@@ -26,18 +28,14 @@ import {
   VendorPOCreateInput,
   type VendorBillLineInputT,
 } from "@/lib/validators";
-import {
-  nextGRNNumber,
-  nextVendorBillNumber,
-  nextVendorPONumber,
-} from "@/lib/sequences";
+import { nextGRNNumber, nextVendorBillNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { newMovingAverage } from "@/lib/inventory-cost";
 import { toDecimal } from "@/lib/money";
-import { indefineStateCode } from "@/lib/org";
-import { summarise } from "@/lib/gst";
 import { getSettingOr } from "@/lib/settings";
-import { notifyRoles } from "@/server/actions/notifications";
+import { createNotification, notifyRoles } from "@/server/actions/notifications";
+import { createVendorPOTx } from "@/server/procurement-core";
+import { lockBanquetItemRows, recomputeBanquetReqStatus } from "@/server/banquet-core";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
 // Supplier-bill handling (create + 3-way match) is a finance-desk job, not
@@ -114,75 +112,12 @@ async function createVendorPOInner(raw: unknown): Promise<{ ok: true; id: string
   const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER]);
   const input = VendorPOCreateInput.parse(raw);
 
-  const supplierState = indefineStateCode();
-  const summary = summarise({
-    lines: input.lines.map((l) => ({
-      quantity: l.quantity,
-      unitPrice: l.unitPrice,
-      discountPct: "0",
-      gstRatePct: l.gstRatePct ?? "0",
-    })),
-    supplierStateCode: supplierState,
-    placeOfSupplyStateCode: input.placeOfSupplyStateCode,
-  });
-  // Every PO runs the tiered approval engine: born DRAFT, then on submit it
-  // routes to Manager (< ₹5k) or Admin (≥ ₹5k) for sign-off. The store keeper
-  // raises it for a kitchen shortfall or low-stock reorder; management approves.
-  const tier = "tiered";
-
-  const po = await db.$transaction(async (tx) => {
-    const poNo = await nextVendorPONumber(tx);
-    const created = await tx.vendorPO.create({
-      data: {
-        poNo,
-        vendorId: input.vendorId,
-        orderId: input.orderId ?? null,
-        procurementType: (input.procurementType as ProcurementType) ?? ProcurementType.STANDARD,
-        status: VendorPOStatus.DRAFT,
-        issueDate: new Date(),
-        expectedDate: input.expectedDate ? new Date(input.expectedDate) : null,
-        placeOfSupplyStateCode: input.placeOfSupplyStateCode,
-        subtotal: summary.subtotal.toString(),
-        taxTotal: summary.taxTotal.toString(),
-        grandTotal: summary.grandTotal.toString(),
-        approvalTier: tier,
-        notes: input.notes ?? null,
-        lines: {
-          create: input.lines.map((l, idx) => {
-            const q = toDecimal(l.quantity);
-            const u = toDecimal(l.unitPrice);
-            const g = toDecimal(l.gstRatePct ?? "0").div(100);
-            const sub = q.times(u);
-            const tax = sub.times(g);
-            return {
-              sortOrder: idx,
-              ingredientId: l.ingredientId ?? null,
-              sku: l.sku,
-              description: l.description,
-              unit: l.unit,
-              quantity: l.quantity,
-              unitPrice: l.unitPrice,
-              gstRatePct: l.gstRatePct ?? "0",
-              lineSubtotal: sub.toDecimalPlaces(2).toString(),
-              lineTax: tax.toDecimalPlaces(2).toString(),
-              lineTotal: sub.plus(tax).toDecimalPlaces(2).toString(),
-            };
-          }),
-        },
-      },
-    });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "VENDOR_PO_CREATED",
-        entity: "VendorPO",
-        entityId: created.id,
-        payloadHash: sha256Json({ poNo, vendorId: input.vendorId, total: summary.grandTotal.toString(), tier }),
-      },
-    });
-
-    return created;
-  });
+  // Creation core is shared with the banquet "raise PO for shortfall" flow
+  // (src/server/procurement-core.ts) — it validates ingredient/banquet-item
+  // exclusivity, computes GST totals and audits VENDOR_PO_CREATED.
+  const po = await db.$transaction(async (tx) =>
+    createVendorPOTx(tx, session.user.id, input),
+  );
 
   revalidatePath("/procurement/purchase-orders");
   return { ok: true, id: po.id, poNo: po.poNo };
@@ -527,6 +462,9 @@ export async function cancelVendorPO(id: string, reason: string): Promise<Action
  *   2. Create GRN + GRNLines
  *   3. For each accepted line tied to an Ingredient: create IngredientReceipt
  *      and update Ingredient.onHandQty + avgUnitCost via moving-average
+ *   3b. For each accepted line tied to a BanquetItem: create a BanquetReceipt,
+ *      bump BanquetItem.currentStock, and flip any linked banquet requisition
+ *      lines (AWAITING_PROCUREMENT → PENDING) so the store can issue them
  *   4. Update VendorPOLine.receivedQty
  *   5. Recompute GRN status (ACCEPTED / PARTIALLY_ACCEPTED)
  *   6. Recompute PO status (RECEIVED / PARTIALLY_RECEIVED)
@@ -548,10 +486,25 @@ async function createGRNInner(raw: unknown): Promise<{ ok: true; id: string; grn
   const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.STORE_KEEPER]);
   const input = GRNCreateInput.parse(raw);
 
+  // Requisition lines flipped back to PENDING by this GRN — collected inside
+  // the tx, used for the deferred notifications + page revalidation after it.
+  const banquetFlips: Array<{
+    reqId: string;
+    requisitionNo: string;
+    createdById: string;
+    itemName: string;
+  }> = [];
+  // True when any accepted line bumped banquet stock (with or without a
+  // linked requisition line) — the banquet pages need revalidating then.
+  let banquetPosted = false;
+
   const result = await db.$transaction(async (tx) => {
     const po = await tx.vendorPO.findUnique({
       where: { id: input.poId },
-      include: { lines: { include: { ingredient: true } } },
+      include: {
+        lines: { include: { ingredient: true } },
+        vendor: { select: { name: true } },
+      },
     });
     if (!po) throw new ActionError("PO not found");
     const ok =
@@ -628,6 +581,85 @@ async function createGRNInner(raw: unknown): Promise<{ ok: true; id: string; grn
         });
       }
 
+      // Banquet-store goods (PO raised off an F&B requisition shortfall):
+      // post a real BanquetReceipt, bump the item's stock, and flip the
+      // linked requisition lines back to PENDING so the store issues them.
+      if (accepted.gt(0) && poLine.banquetItemId) {
+        banquetPosted = true;
+        // Same row-lock discipline as every other banquet stock movement —
+        // a concurrent issue/receipt must not race the increment.
+        await lockBanquetItemRows(tx, [poLine.banquetItemId]);
+        const receipt = await tx.banquetReceipt.create({
+          data: {
+            receivedAt: new Date(),
+            recordedById: session.user.id,
+            sourceNote: `Auto-posted from GRN ${grnNo} (${po.poNo})`,
+            sourceContact: po.vendor?.name ?? null,
+            lines: {
+              create: [
+                {
+                  itemId: poLine.banquetItemId,
+                  quantity: accepted.toString(),
+                  costPerUnit: poLine.unitPrice.toString(),
+                },
+              ],
+            },
+          },
+        });
+        await tx.banquetItem.update({
+          where: { id: poLine.banquetItemId },
+          data: { currentStock: { increment: new Prisma.Decimal(accepted.toString()) } },
+        });
+
+        // Requisition lines waiting on this exact PO line: goods are in, so
+        // they're issuable again. Parent statuses are recomputed per req.
+        const linked = await tx.banquetRequisitionLine.findMany({
+          where: {
+            vendorPOLineId: poLine.id,
+            status: BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
+          },
+          select: {
+            id: true,
+            requisitionId: true,
+            requisition: { select: { requisitionNo: true, createdById: true } },
+            item: { select: { name: true } },
+          },
+        });
+        if (linked.length > 0) {
+          await tx.banquetRequisitionLine.updateMany({
+            where: { id: { in: linked.map((l) => l.id) } },
+            data: { status: BanquetRequisitionLineStatus.PENDING },
+          });
+          for (const reqId of new Set(linked.map((l) => l.requisitionId))) {
+            await recomputeBanquetReqStatus(tx, reqId, session.user.id);
+          }
+          banquetFlips.push(
+            ...linked.map((l) => ({
+              reqId: l.requisitionId,
+              requisitionNo: l.requisition.requisitionNo,
+              createdById: l.requisition.createdById,
+              itemName: l.item.name,
+            })),
+          );
+        }
+
+        await tx.auditLog.create({
+          data: {
+            userId: session.user.id,
+            action: "BANQUET_STOCK_FROM_GRN",
+            entity: "BanquetReceipt",
+            entityId: receipt.id,
+            payloadHash: sha256Json({
+              grnNo,
+              poLineId: poLine.id,
+              itemId: poLine.banquetItemId,
+              qty: accepted.toString(),
+              reqLinesFlipped: linked.length,
+            }),
+          },
+        });
+      }
+
       // Update PO line receivedQty
       await tx.vendorPOLine.update({
         where: { id: poLine.id },
@@ -660,6 +692,60 @@ async function createGRNInner(raw: unknown): Promise<{ ok: true; id: string; grn
 
     return { id: grn.id, grnNo };
   });
+
+  // Banquet stock arrived and requisition lines re-opened — tell the store
+  // counter and the F&B requester. Deferred: fan-out must never block (or
+  // undo) the committed GRN.
+  if (banquetFlips.length > 0) {
+    const grnNo = result.grnNo;
+    const grnId = result.id;
+    const actorId = session.user.id;
+    deferAfterResponse("grn-banquet:notify", async () => {
+      // Group per requisition so multi-line GRNs send one ping per BRQ.
+      const byReq = new Map<
+        string,
+        { requisitionNo: string; createdById: string; items: string[] }
+      >();
+      for (const f of banquetFlips) {
+        const entry = byReq.get(f.reqId) ?? {
+          requisitionNo: f.requisitionNo,
+          createdById: f.createdById,
+          items: [],
+        };
+        entry.items.push(f.itemName);
+        byReq.set(f.reqId, entry);
+      }
+      for (const [reqId, f] of byReq) {
+        await notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+          kind: "GENERIC",
+          title: `Goods for ${f.requisitionNo} arrived — open to issue`,
+          body: `${f.items.join(", ")} received via GRN ${grnNo}.`,
+          link: `/banquet/requisitions/${reqId}`,
+          dedupeKey: `grn-banquet:${grnId}:${reqId}`,
+        });
+        // The requester hears it directly too (skip self-notification).
+        if (f.createdById !== actorId) {
+          await createNotification({
+            userId: f.createdById,
+            kind: "GENERIC",
+            title: `Your ${f.items.join(", ")} has arrived — the store can issue it now`,
+            body: `${f.requisitionNo}: received via GRN ${grnNo}.`,
+            link: `/banquet/requisitions/${reqId}`,
+            dedupeKey: `grn-banquet-req:${grnId}:${reqId}`,
+          });
+        }
+      }
+    });
+    for (const reqId of new Set(banquetFlips.map((f) => f.reqId))) {
+      revalidatePath(`/banquet/requisitions/${reqId}`);
+    }
+    revalidatePath("/banquet/requisitions");
+  }
+  if (banquetPosted) {
+    revalidatePath("/banquet");
+    revalidatePath("/banquet/items");
+    revalidatePath("/dashboard");
+  }
 
   revalidatePath("/procurement/grns");
   revalidatePath(`/procurement/purchase-orders/${input.poId}`);

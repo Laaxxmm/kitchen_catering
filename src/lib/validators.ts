@@ -555,6 +555,10 @@ export type VendorInputT = z.infer<typeof VendorInput>;
 export const VendorPOLineInput = z.object({
   id: z.string().optional(),
   ingredientId: z.string().nullable().optional(),
+  // PO raised for a banquet-store shortfall — GRN acceptance auto-posts a
+  // BanquetReceipt against this item. Mutually exclusive with ingredientId
+  // (enforced in createVendorPOTx).
+  banquetItemId: z.string().nullable().optional(),
   sku: z.string().min(1, "Each line needs an SKU / item name").max(40),
   description: z.string().min(1).max(500),
   unit: z.string().min(1).max(20),
@@ -914,9 +918,14 @@ export const BanquetRequisitionIssueInput = z.object({
   issueQty: decimalString,
 });
 
-// Store keeper flags a short line for a purchase order.
+// Store keeper raises a real vendor PO for a short line. The vendor is
+// required — the whole point is a trackable PO, not a to-do — and the
+// estimated unit price is optional (defaults to "0"; management corrects
+// it at approval time if needed).
 export const BanquetRequisitionAwaitingInput = z.object({
   requisitionLineId: z.string().min(1),
+  vendorId: z.string().min(1, "Pick the vendor to raise the PO on"),
+  unitPrice: decimalString.optional(),
   reason: z.string().max(500).nullable().optional(),
 });
 

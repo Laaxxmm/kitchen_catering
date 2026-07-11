@@ -11,8 +11,9 @@ import {
   issueBanquetRequisitionLine,
   markBanquetLineAwaitingProcurement,
 } from "@/server/actions/banquet";
+import { listVendors } from "@/server/actions/vendors";
 import { formatIST } from "@/lib/time";
-import { LineFulfilControls } from "./_components/LineFulfilControls";
+import { LineFulfilControls, type VendorOption } from "./_components/LineFulfilControls";
 
 export const dynamic = "force-dynamic";
 
@@ -29,13 +30,27 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
     (requisition.status === BanquetRequisitionStatus.SUBMITTED ||
       requisition.status === BanquetRequisitionStatus.PARTIALLY_ISSUED);
 
+  // Vendor picker for "Raise PO for shortfall" — only fetched when the
+  // viewer can actually fulfil lines.
+  const vendors: VendorOption[] = canFulfil
+    ? (await listVendors({ active: true })).map((v) => ({
+        id: v.id,
+        code: v.code,
+        name: v.name,
+      }))
+    : [];
+
   async function doIssue(lineId: string, qty: string) {
     "use server";
     return await issueBanquetRequisitionLine({ requisitionLineId: lineId, issueQty: qty });
   }
-  async function doSendToProcurement(lineId: string, reason: string) {
+  async function doRaisePO(lineId: string, vendorId: string, unitPrice: string) {
     "use server";
-    return await markBanquetLineAwaitingProcurement({ requisitionLineId: lineId, reason });
+    return await markBanquetLineAwaitingProcurement({
+      requisitionLineId: lineId,
+      vendorId,
+      unitPrice: unitPrice || "0",
+    });
   }
 
   return (
@@ -100,12 +115,19 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
                   <TableCell>
                     <LineFulfilControls
                       lineId={l.id}
+                      itemName={l.item.name}
                       requestedQty={requested}
                       issuedQty={issued}
                       inStock={l.item.currentStock.toString()}
                       status={l.status}
+                      vendors={vendors}
+                      poLink={
+                        l.vendorPOLine
+                          ? { poId: l.vendorPOLine.poId, poNo: l.vendorPOLine.po.poNo }
+                          : null
+                      }
                       onIssue={doIssue}
-                      onSendToProcurement={doSendToProcurement}
+                      onRaisePO={doRaisePO}
                     />
                   </TableCell>
                 )}

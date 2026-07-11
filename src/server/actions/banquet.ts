@@ -7,18 +7,19 @@ import {
   OrderChannel,
   Prisma,
   Role,
-  TaskPriority,
-  TaskStatus,
 } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { requireRole, requireSession } from "@/server/rbac";
 import { istToUtc } from "@/lib/time";
 import { sha256Json } from "@/lib/audit";
+import { indefineStateCode } from "@/lib/org";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import { createNotification, notifyRoles } from "@/server/actions/notifications";
 import { deferAfterResponse } from "@/server/defer";
 import { nextBanquetRequisitionNumber } from "@/lib/sequences";
+import { lockBanquetItemRows, recomputeBanquetReqStatus } from "@/server/banquet-core";
+import { createVendorPOTx } from "@/server/procurement-core";
 import {
   BanquetItemInput,
   BanquetIssueInput,
@@ -36,19 +37,9 @@ import {
   type ActionResultWith,
 } from "@/server/action-result";
 
-/**
- * Row-lock banquet items for the rest of the transaction. Every stock
- * movement (receipt / issue) reads or updates currentStock — without the
- * lock two concurrent movements read the same snapshot and one update is
- * silently lost (stock can even go negative past the availability check).
- * FOR UPDATE serialises them; ids are locked in a stable order so
- * concurrent multi-line movements can't deadlock.
- */
-async function lockBanquetItemRows(tx: Prisma.TransactionClient, ids: string[]) {
-  for (const id of [...new Set(ids)].sort()) {
-    await tx.$executeRaw`SELECT 1 FROM "BanquetItem" WHERE "id" = ${id} FOR UPDATE`;
-  }
-}
+// lockBanquetItemRows + recomputeBanquetReqStatus live in
+// src/server/banquet-core.ts — shared with procurement.ts, whose GRN posting
+// bumps banquet stock and re-opens requisition lines.
 
 // Banquet store — service-side disposables (cups, trays, tissue, foil,
 // takeaway boxes …). Same shape as housekeeping but the issues link to
@@ -772,50 +763,6 @@ export async function listBanquetEvents() {
 // F&B raises the requisition; the store keeper (also in ISSUE_ROLES) fulfils.
 const REQUISITION_ROLES = ISSUE_ROLES;
 
-const REQ_LINE_CLOSED: BanquetRequisitionLineStatus[] = [
-  BanquetRequisitionLineStatus.ISSUED,
-  BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
-  BanquetRequisitionLineStatus.CANCELLED,
-];
-
-/**
- * Recompute a requisition's rolled-up status from its lines and stamp who
- * last touched it. All lines closed (issued / awaiting-PO / cancelled) →
- * FULLY_ISSUED + closedAt; any progress (issued / part / awaiting) but work
- * still open → PARTIALLY_ISSUED; otherwise SUBMITTED.
- */
-async function recomputeBanquetReqStatus(
-  tx: Prisma.TransactionClient,
-  reqId: string,
-  fulfilledById: string,
-): Promise<BanquetRequisitionStatus> {
-  const lines = await tx.banquetRequisitionLine.findMany({
-    where: { requisitionId: reqId },
-    select: { status: true },
-  });
-  const allClosed = lines.every((l) => REQ_LINE_CLOSED.includes(l.status));
-  const anyProgress = lines.some(
-    (l) =>
-      l.status === BanquetRequisitionLineStatus.ISSUED ||
-      l.status === BanquetRequisitionLineStatus.PARTIALLY_ISSUED ||
-      l.status === BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
-  );
-  const status = allClosed
-    ? BanquetRequisitionStatus.FULLY_ISSUED
-    : anyProgress
-      ? BanquetRequisitionStatus.PARTIALLY_ISSUED
-      : BanquetRequisitionStatus.SUBMITTED;
-  await tx.banquetRequisition.update({
-    where: { id: reqId },
-    data: {
-      status,
-      lastFulfilledById: fulfilledById,
-      closedAt: allClosed ? new Date() : null,
-    },
-  });
-  return status;
-}
-
 /**
  * F&B service raises a banquet requisition. Creates it SUBMITTED with PENDING
  * lines and notifies the store team to issue it.
@@ -1041,12 +988,14 @@ async function issueBanquetRequisitionLineInner(raw: unknown): Promise<{ ok: tru
 }
 
 /**
- * Flag a short requisition line for procurement. The banquet store doesn't buy
- * from vendors itself, and banquet items aren't Ingredients (so they can't
- * pre-fill the ingredient-driven PO form), so — mirroring the old
- * requestGoodsFromStore — this flips the line to AWAITING_PROCUREMENT and
- * routes a HIGH task carrying the item + shortfall to the store keeper (or a
- * manager/admin) to raise the actual PO. Parent status is recomputed.
+ * Raise a real vendor PO for a short requisition line. Atomically (one tx):
+ * creates a DRAFT VendorPO for the shortfall (one line linked to the
+ * BanquetItem via banquetItemId), flips the requisition line to
+ * AWAITING_PROCUREMENT with vendorPOLineId pointing at the new PO line, and
+ * recomputes the parent status. The PO then rides the normal procurement
+ * lifecycle (submit → tiered approval → send → GRN); GRN acceptance posts a
+ * BanquetReceipt, bumps banquet stock and flips the line back to PENDING so
+ * the store can issue it (see createGRN in procurement.ts).
  */
 export async function markBanquetLineAwaitingProcurement(raw: unknown): Promise<ActionResult> {
   try {
@@ -1060,28 +1009,12 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
   const session = await requireRole(REQUISITION_ROLES);
   const input = BanquetRequisitionAwaitingInput.parse(raw);
 
-  // Route the "raise a PO" to-do to an active store keeper; fall back to a
-  // manager/admin so the request is never dropped.
-  const storeKeeper = await db.user.findFirst({
-    where: { active: true, role: Role.STORE_KEEPER },
-    orderBy: { createdAt: "asc" },
-    select: { id: true },
-  });
-  const fallback = storeKeeper
-    ? null
-    : await db.user.findFirst({
-        where: { active: true, role: { in: [Role.MANAGER, Role.ADMIN] } },
-        orderBy: { createdAt: "asc" },
-        select: { id: true },
-      });
-  const assigneeId = storeKeeper?.id ?? fallback?.id;
-
   const result = await db.$transaction(async (tx) => {
     const line = await tx.banquetRequisitionLine.findUnique({
       where: { id: input.requisitionLineId },
       include: {
         requisition: { select: { id: true, status: true, requisitionNo: true, createdById: true } },
-        item: { select: { name: true, unit: true } },
+        item: { select: { id: true, name: true, sku: true, unit: true } },
       },
     });
     if (!line) throw new ActionError("Requisition line not found");
@@ -1104,36 +1037,38 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
     );
     if (shortfall.lte(0)) throw new ActionError("No shortfall to procure");
 
+    // Real DRAFT PO for the shortfall, same tx — the shared creation core
+    // computes totals, audits VENDOR_PO_CREATED and returns the line ids.
+    // The caller's gate (REQUISITION_ROLES) governs this banquet-initiated
+    // PO; it then rides the normal submit → approve lifecycle.
+    const po = await createVendorPOTx(tx, session.user.id, {
+      vendorId: input.vendorId,
+      procurementType: "STANDARD",
+      placeOfSupplyStateCode: indefineStateCode(),
+      notes: `For banquet requisition ${line.requisition.requisitionNo} — ${line.item.name} shortfall`,
+      lines: [
+        {
+          banquetItemId: line.item.id,
+          sku: line.item.sku ?? "",
+          description: line.item.name,
+          unit: line.item.unit,
+          quantity: shortfall.toString(),
+          unitPrice: input.unitPrice ?? "0",
+          gstRatePct: "0",
+        },
+      ],
+    });
+    const poLine = po.lines[0];
+    if (!poLine) throw new ActionError("PO was created without lines — aborting");
+
     await tx.banquetRequisitionLine.update({
       where: { id: line.id },
       data: {
         status: BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
         notes: input.reason ?? line.notes,
+        vendorPOLineId: poLine.id,
       },
     });
-
-    let taskId: string | null = null;
-    if (assigneeId) {
-      const shortfallLabel = `${shortfall.toString()} ${line.item.unit} × ${line.item.name}`;
-      const task = await tx.task.create({
-        data: {
-          title: `Raise PO for ${line.item.name} shortfall (${line.requisition.requisitionNo})`,
-          description: [
-            `Banquet requisition ${line.requisition.requisitionNo} is short: ${shortfallLabel}.`,
-            input.reason?.trim() ? `Reason: ${input.reason.trim()}` : null,
-            "Raise a purchase order for the shortfall (and record the GRN when goods arrive).",
-          ]
-            .filter(Boolean)
-            .join("\n\n"),
-          priority: TaskPriority.HIGH,
-          status: TaskStatus.ASSIGNED,
-          assignedToId: assigneeId,
-          assignedById: session.user.id,
-          targetDate: new Date(Date.now() + 2 * 24 * 3600 * 1000),
-        },
-      });
-      taskId = task.id;
-    }
 
     await recomputeBanquetReqStatus(tx, line.requisition.id, session.user.id);
 
@@ -1143,7 +1078,13 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
         action: "BANQUET_LINE_AWAITING_PROCUREMENT",
         entity: "BanquetRequisitionLine",
         entityId: line.id,
-        payloadHash: sha256Json({ shortfall: shortfall.toString(), reason: input.reason ?? null }),
+        payloadHash: sha256Json({
+          shortfall: shortfall.toString(),
+          reason: input.reason ?? null,
+          vendorId: input.vendorId,
+          poId: po.id,
+          poLineId: poLine.id,
+        }),
       },
     });
     return {
@@ -1153,17 +1094,21 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
       itemName: line.item.name,
       shortfall: shortfall.toString(),
       unit: line.item.unit,
-      taskId,
+      poId: po.id,
+      poNo: po.poNo,
     };
   });
 
+  // Store/management get the PO link so they can submit + approve it.
+  // dedupeKey is per-PO: the same line can legitimately go through
+  // procurement more than once (GRN re-opens it, store issues, still short).
   deferAfterResponse("banquet-line-procure:notify", () =>
     notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
-      kind: "TASK_ASSIGNED",
-      title: `PO needed for ${result.requisitionNo}`,
-      body: `${result.itemName} is short — raise a purchase order for the shortfall.`,
-      link: "/procurement/purchase-orders/new",
-      dedupeKey: `banquet-line-procure:${input.requisitionLineId}`,
+      kind: "GENERIC",
+      title: `PO ${result.poNo} raised for ${result.requisitionNo}`,
+      body: `${result.shortfall} ${result.unit} ${result.itemName} — submit it for approval, then record the GRN when goods arrive.`,
+      link: `/procurement/purchase-orders/${result.poId}`,
+      dedupeKey: `banquet-line-procure:${result.poId}`,
     }),
   );
   // The requester should hear the store's answer, not just management.
@@ -1173,16 +1118,16 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
         userId: result.createdById,
         kind: "GENERIC",
         title: `${result.itemName} is being procured (${result.requisitionNo})`,
-        body: `The store is short ${result.shortfall} ${result.unit} — a purchase has been raised; you'll get it once goods arrive.`,
+        body: `The store is short ${result.shortfall} ${result.unit} — purchase order ${result.poNo} has been raised; you'll get it once goods arrive.`,
         link: `/banquet/requisitions/${result.reqId}`,
-        dedupeKey: `banquet-line-procure-req:${input.requisitionLineId}`,
+        dedupeKey: `banquet-line-procure-req:${result.poId}`,
       }),
     );
   }
 
   revalidatePath("/banquet/requisitions");
   revalidatePath(`/banquet/requisitions/${result.reqId}`);
-  revalidatePath("/tasks");
+  revalidatePath("/procurement/purchase-orders");
   return { ok: true };
 }
 
@@ -1290,6 +1235,10 @@ export async function getBanquetRequisition(id: string) {
       lines: {
         include: {
           item: { select: { name: true, sku: true, unit: true, currentStock: true } },
+          // The PO buying this line's shortfall — the fulfil page links to it.
+          vendorPOLine: {
+            select: { id: true, poId: true, po: { select: { poNo: true } } },
+          },
         },
         orderBy: { item: { name: "asc" } },
       },

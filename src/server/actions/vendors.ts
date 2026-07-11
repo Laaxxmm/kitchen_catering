@@ -14,7 +14,18 @@ import {
 } from "@/server/action-result";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.ACCOUNTS];
-const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.ACCOUNTS, Role.KITCHEN_HEAD];
+// DELIVERY / FNB_SERVICE read vendors for the banquet requisition fulfil
+// page's vendor picker ("Raise PO for shortfall") — they run the banquet
+// store counter alongside the store keeper. Read-only; writes stay above.
+const READ_ROLES = [
+  Role.ADMIN,
+  Role.MANAGER,
+  Role.STORE_KEEPER,
+  Role.ACCOUNTS,
+  Role.KITCHEN_HEAD,
+  Role.DELIVERY,
+  Role.FNB_SERVICE,
+];
 
 function dataFromInput(input: VendorInputT) {
   return {

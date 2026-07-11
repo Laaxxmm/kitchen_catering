@@ -1409,27 +1409,34 @@ model VendorPO {
 }
 
 model VendorPOLine {
-  id           String      @id @default(cuid())
-  poId         String
-  po           VendorPO    @relation(fields: [poId], references: [id], onDelete: Cascade)
-  sortOrder    Int
+  id            String       @id @default(cuid())
+  poId          String
+  po            VendorPO     @relation(fields: [poId], references: [id], onDelete: Cascade)
+  sortOrder     Int
   // Either link to an Ingredient or stand alone as free text (e.g. one-off purchase)
-  ingredientId String?
-  ingredient   Ingredient? @relation("VendorPOLineToIngredient", fields: [ingredientId], references: [id])
-  sku          String
-  description  String
-  unit         String
-  quantity     Decimal     @db.Decimal(14, 3)
-  unitPrice    Decimal     @db.Decimal(12, 2)
-  gstRatePct   Decimal     @default(0) @db.Decimal(5, 2)
-  lineSubtotal Decimal     @db.Decimal(14, 2)
-  lineTax      Decimal     @db.Decimal(14, 2)
-  lineTotal    Decimal     @db.Decimal(14, 2)
-  receivedQty  Decimal     @default(0) @db.Decimal(14, 3)
+  ingredientId  String?
+  ingredient    Ingredient?  @relation("VendorPOLineToIngredient", fields: [ingredientId], references: [id])
+  // Or link to a BanquetItem: POs raised for F&B requisition shortfalls.
+  // GRN acceptance auto-posts a BanquetReceipt and bumps the item's stock.
+  banquetItemId String?
+  banquetItem   BanquetItem? @relation("VendorPOLineToBanquetItem", fields: [banquetItemId], references: [id])
+  sku           String
+  description   String
+  unit          String
+  quantity      Decimal      @db.Decimal(14, 3)
+  unitPrice     Decimal      @db.Decimal(12, 2)
+  gstRatePct    Decimal      @default(0) @db.Decimal(5, 2)
+  lineSubtotal  Decimal      @db.Decimal(14, 2)
+  lineTax       Decimal      @db.Decimal(14, 2)
+  lineTotal     Decimal      @db.Decimal(14, 2)
+  receivedQty   Decimal      @default(0) @db.Decimal(14, 3)
 
-  grnLines GRNLine[] @relation("GRNLineToPOLine")
+  grnLines        GRNLine[]                @relation("GRNLineToPOLine")
+  // Requisition lines whose shortfall this PO line is buying.
+  banquetReqLines BanquetRequisitionLine[]
 
   @@index([poId, sortOrder])
+  @@index([banquetItemId])
 }
 
 model GRN {
@@ -2371,6 +2378,7 @@ model BanquetItem {
   issueLines       BanquetIssueLine[]
   returnLines      BanquetReturnLine[]
   requisitionLines BanquetRequisitionLine[]
+  vendorPOLines    VendorPOLine[]           @relation("VendorPOLineToBanquetItem")
 
   @@unique([name])
   @@index([active])
@@ -2513,15 +2521,19 @@ model OrderStaffAllocation {
 }
 
 model BanquetRequisitionLine {
-  id            String                       @id @default(cuid())
-  requisitionId String
-  requisition   BanquetRequisition           @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
-  itemId        String
-  item          BanquetItem                  @relation(fields: [itemId], references: [id])
-  requestedQty  Decimal                      @db.Decimal(14, 3)
-  issuedQty     Decimal                      @default(0) @db.Decimal(14, 3)
-  status        BanquetRequisitionLineStatus @default(PENDING)
-  notes         String?
+  id             String                       @id @default(cuid())
+  requisitionId  String
+  requisition    BanquetRequisition           @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
+  itemId         String
+  item           BanquetItem                  @relation(fields: [itemId], references: [id])
+  requestedQty   Decimal                      @db.Decimal(14, 3)
+  issuedQty      Decimal                      @default(0) @db.Decimal(14, 3)
+  status         BanquetRequisitionLineStatus @default(PENDING)
+  notes          String?
+  // The PO line buying this line's shortfall (set by 'Raise PO'); GRN
+  // acceptance flips the line back to PENDING so the store issues it.
+  vendorPOLineId String?
+  vendorPOLine   VendorPOLine?                @relation(fields: [vendorPOLineId], references: [id])
 
   @@index([requisitionId])
   @@index([itemId])
