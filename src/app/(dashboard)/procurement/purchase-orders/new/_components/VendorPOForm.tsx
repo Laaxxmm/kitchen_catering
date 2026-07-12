@@ -124,7 +124,25 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!vendorId) return toast.error("Pick a vendor");
-    const payload = lines.filter((l) => l.description && Number(l.quantity) > 0);
+    // Rows that are entirely empty are ignored; a row with content but a
+    // missing/zero quantity is an error, not a silent drop.
+    const touched = lines.filter((l) => l.description.trim() || l.sku.trim() || l.quantity.trim() || l.unitPrice.trim());
+    for (const l of touched) {
+      if (!l.description.trim()) return toast.error("A line is missing its description");
+      const q = Number(l.quantity);
+      if (!l.quantity.trim() || Number.isNaN(q) || q <= 0) {
+        return toast.error(`"${l.description.trim()}": enter a quantity above 0`);
+      }
+      if (l.unitPrice.trim() && Number.isNaN(Number(l.unitPrice))) {
+        return toast.error(`"${l.description.trim()}": the unit price isn't a number`);
+      }
+    }
+    const payload = touched.map((l) => ({
+      ...l,
+      quantity: l.quantity.trim(),
+      unitPrice: l.unitPrice.trim() || "0",
+      gstRatePct: (l.gstRatePct ?? "").trim() || "0",
+    }));
     if (payload.length === 0) return toast.error("Add at least one line");
     startTransition(async () => {
       try {

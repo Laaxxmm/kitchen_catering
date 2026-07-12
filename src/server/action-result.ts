@@ -41,6 +41,15 @@ export function actionFailure(err: unknown): { ok: false; error: string } {
   ) {
     return { ok: false, error: err.message };
   }
+  // decimal.js throws DecimalError (name only — not an Error subclass we
+  // control) when a blank/garbage string reaches the money math. Translate
+  // instead of leaking "[DecimalError] Invalid argument".
+  if (err instanceof Error && err.name === "DecimalError") {
+    return {
+      ok: false,
+      error: "One of the number fields isn't a valid number — check quantities, prices and GST %.",
+    };
+  }
   if (err instanceof ZodError) {
     const first = err.issues[0];
     return {

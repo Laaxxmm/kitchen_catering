@@ -28,6 +28,14 @@ export async function createVendorPOTx(
         "A PO line can link to an ingredient or a banquet item — not both.",
       );
     }
+    // decimalString lets "" through (it's a legitimate "not provided"
+    // elsewhere) — here a blank number would crash the money math.
+    if (!l.quantity.trim()) {
+      throw new ActionError(`Line "${l.description}": enter the quantity.`);
+    }
+    if (!l.unitPrice.trim()) {
+      throw new ActionError(`Line "${l.description}": enter the unit price (0 is fine).`);
+    }
   }
 
   const supplierState = indefineStateCode();
@@ -36,7 +44,7 @@ export async function createVendorPOTx(
       quantity: l.quantity,
       unitPrice: l.unitPrice,
       discountPct: "0",
-      gstRatePct: l.gstRatePct ?? "0",
+      gstRatePct: l.gstRatePct?.trim() || "0",
     })),
     supplierStateCode: supplierState,
     placeOfSupplyStateCode: input.placeOfSupplyStateCode,
@@ -66,7 +74,7 @@ export async function createVendorPOTx(
         create: input.lines.map((l, idx) => {
           const q = toDecimal(l.quantity);
           const u = toDecimal(l.unitPrice);
-          const g = toDecimal(l.gstRatePct ?? "0").div(100);
+          const g = toDecimal(l.gstRatePct?.trim() || "0").div(100);
           const sub = q.times(u);
           const tax = sub.times(g);
           return {
@@ -78,7 +86,7 @@ export async function createVendorPOTx(
             unit: l.unit,
             quantity: l.quantity,
             unitPrice: l.unitPrice,
-            gstRatePct: l.gstRatePct ?? "0",
+            gstRatePct: l.gstRatePct?.trim() || "0",
             lineSubtotal: sub.toDecimalPlaces(2).toString(),
             lineTax: tax.toDecimalPlaces(2).toString(),
             lineTotal: sub.plus(tax).toDecimalPlaces(2).toString(),

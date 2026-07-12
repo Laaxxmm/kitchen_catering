@@ -32,7 +32,11 @@ import {
  */
 export const decimalString = z
   .union([z.string(), z.number()])
-  .transform((v) => String(v));
+  .transform((v) => String(v).trim())
+  // "" is allowed (some callers treat it as "not provided"); anything else
+  // must be a plain number — garbage here used to surface as a raw
+  // [DecimalError] crash deep in the money math.
+  .refine((s) => s === "" || /^-?\d*\.?\d+$/.test(s), "Enter a valid number");
 
 /** 2-digit Indian GST state code, e.g. "29" for Karnataka. */
 export const stateCode = z.string().regex(/^[0-9]{2}$/, "stateCode must be 2 digits");
