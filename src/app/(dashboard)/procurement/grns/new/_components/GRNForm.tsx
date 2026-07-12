@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { isNextNavigationError } from "@/lib/next-error";
-import type { ActionResult } from "@/lib/action-result";
+import type { ActionResultWith } from "@/lib/action-result";
 
 interface POLine {
   id: string;
@@ -21,7 +21,7 @@ interface POLine {
 interface Props {
   poId: string;
   lines: POLine[];
-  onSubmit: (input: { poId: string; notes: string | null; lines: Array<{ poLineId: string; acceptedQty: string; rejectedQty: string; reason: string | null }> }) => Promise<ActionResult | void>;
+  onSubmit: (input: { poId: string; notes: string | null; lines: Array<{ poLineId: string; acceptedQty: string; rejectedQty: string; reason: string | null }> }) => Promise<ActionResultWith<{ id: string; grnNo: string; warnings?: string[] }>>;
 }
 
 interface DraftRow { acceptedQty: string; rejectedQty: string; reason: string }
@@ -52,10 +52,17 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
     startTransition(async () => {
       try {
         const res = await onSubmit({ poId, notes: notes || null, lines: payload });
-        if (res && !res.ok) {
+        if (!res.ok) {
           toast.error(res.error);
           return;
         }
+        // Unit-mismatch warnings: stock was NOT auto-posted for those
+        // lines — keep them on screen long enough to actually read.
+        for (const w of res.warnings ?? []) {
+          toast.warning(w, { duration: 12000 });
+        }
+        toast.success(`GRN ${res.grnNo} posted`);
+        router.push(`/procurement/grns/${res.id}`);
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");

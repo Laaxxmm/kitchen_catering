@@ -1,4 +1,4 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { Decimal } from "decimal.js";
 import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
@@ -20,11 +20,13 @@ export default async function NewGRNPage({
   const po = await getVendorPO(poId);
   if (!po) notFound();
 
+  // Returns the full result (id + optional unit-mismatch warnings) instead
+  // of redirecting server-side — the form toasts the warnings first, then
+  // navigates to the created GRN. A redirect() here would throw past the
+  // client and the warnings would never be seen.
   async function create(input: { poId: string; notes: string | null; lines: Array<{ poLineId: string; acceptedQty: string; rejectedQty: string; reason: string | null }> }) {
     "use server";
-    const r = await createGRN(input);
-    if (!r.ok) return r;
-    redirect(`/procurement/grns/${r.id}`);
+    return await createGRN(input);
   }
 
   return (

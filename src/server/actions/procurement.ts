@@ -26,8 +26,11 @@ import {
   VendorBillCreateInput,
   VendorBillUpdateInput,
   VendorPOCreateInput,
+  VendorPOLinesUpdateInput,
   type VendorBillLineInputT,
 } from "@/lib/validators";
+import { summarise } from "@/lib/gst";
+import { indefineStateCode } from "@/lib/org";
 import { nextGRNNumber, nextVendorBillNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { newMovingAverage } from "@/lib/inventory-cost";
@@ -121,6 +124,134 @@ async function createVendorPOInner(raw: unknown): Promise<{ ok: true; id: string
 
   revalidatePath("/procurement/purchase-orders");
   return { ok: true, id: po.id, poNo: po.poNo };
+}
+
+/**
+ * Edit the lines of a DRAFT PO in place — unit, quantity, price, GST and
+ * description. The shortfall flow auto-creates POs with the catalogue unit
+ * (e.g. "pkt") and its per-pkt cost, but the store keeper actually buys in
+ * pieces — without this edit the total comes out wrong and can only be
+ * fixed by cancelling and retyping the whole PO.
+ *
+ * Lines are UPDATED in place, never deleted/recreated:
+ * BanquetRequisitionLine.vendorPOLineId and GRNLine reference these ids.
+ * ingredientId / banquetItemId / sku / sortOrder are untouched. Line adds
+ * and removes are out of scope. Per-line amounts are recomputed exactly
+ * like createVendorPOTx; header totals via the same summarise() call.
+ */
+export async function updateVendorPOLines(raw: unknown): Promise<ActionResult> {
+  try {
+    return await updateVendorPOLinesInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function updateVendorPOLinesInner(raw: unknown): Promise<{ ok: true }> {
+  // Same gate as createVendorPO — whoever can raise a PO can fix its draft.
+  const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER]);
+  const input = VendorPOLinesUpdateInput.parse(raw);
+
+  await db.$transaction(async (tx) => {
+    const po = await tx.vendorPO.findUnique({
+      where: { id: input.poId },
+      select: {
+        id: true,
+        status: true,
+        poNo: true,
+        grandTotal: true,
+        placeOfSupplyStateCode: true,
+        lines: { select: { id: true } },
+      },
+    });
+    if (!po) throw new ActionError("PO not found");
+    // Once submitted the totals are what approval signed off on — editing
+    // them would sidestep the tiered approval. (The schema has no REJECTED
+    // state; a rejected PO is CANCELLED, so DRAFT is the only editable one.)
+    if (po.status !== VendorPOStatus.DRAFT) {
+      throw new ActionError(`Only draft POs can be edited — this one is ${po.status}.`);
+    }
+    const poLineIds = new Set(po.lines.map((l) => l.id));
+    for (const l of input.lines) {
+      if (!poLineIds.has(l.id)) {
+        throw new ActionError("One of the edited lines doesn't belong to this PO — refresh the page.");
+      }
+    }
+
+    // Per-line amounts: identical math to createVendorPOTx.
+    for (const l of input.lines) {
+      const q = toDecimal(l.quantity);
+      const u = toDecimal(l.unitPrice);
+      const g = toDecimal(l.gstRatePct).div(100);
+      const sub = q.times(u);
+      const tax = sub.times(g);
+      await tx.vendorPOLine.update({
+        where: { id: l.id },
+        data: {
+          description: l.description,
+          unit: l.unit,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          gstRatePct: l.gstRatePct,
+          lineSubtotal: sub.toDecimalPlaces(2).toString(),
+          lineTax: tax.toDecimalPlaces(2).toString(),
+          lineTotal: sub.plus(tax).toDecimalPlaces(2).toString(),
+        },
+      });
+    }
+
+    // Header totals over ALL lines (edited + untouched), via the same
+    // summarise() the creation core uses — so an edited PO's totals are
+    // byte-for-byte what a fresh PO with these lines would carry.
+    const linesNow = await tx.vendorPOLine.findMany({
+      where: { poId: po.id },
+      select: { quantity: true, unitPrice: true, gstRatePct: true },
+    });
+    const summary = summarise({
+      lines: linesNow.map((l) => ({
+        quantity: l.quantity.toString(),
+        unitPrice: l.unitPrice.toString(),
+        discountPct: "0",
+        gstRatePct: l.gstRatePct.toString(),
+      })),
+      supplierStateCode: indefineStateCode(),
+      placeOfSupplyStateCode: po.placeOfSupplyStateCode,
+    });
+
+    // Status guard: a submit racing this edit loses cleanly — zero rows
+    // match and the whole tx (including the line updates above) rolls back.
+    const updated = await tx.vendorPO.updateMany({
+      where: { id: po.id, status: VendorPOStatus.DRAFT },
+      data: {
+        subtotal: summary.subtotal.toString(),
+        taxTotal: summary.taxTotal.toString(),
+        grandTotal: summary.grandTotal.toString(),
+      },
+    });
+    if (updated.count === 0) {
+      throw new ActionError("This PO just changed status — refresh the page.");
+    }
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "VENDOR_PO_LINES_UPDATED",
+        entity: "VendorPO",
+        entityId: po.id,
+        payloadHash: sha256Json({
+          poNo: po.poNo,
+          linesEdited: input.lines.length,
+          grandTotalBefore: po.grandTotal.toString(),
+          grandTotalAfter: summary.grandTotal.toString(),
+        }),
+      },
+    });
+  });
+
+  revalidatePath(`/procurement/purchase-orders/${input.poId}`);
+  revalidatePath("/procurement/purchase-orders");
+  revalidatePath("/dashboard");
+  return { ok: true };
 }
 
 export async function submitVendorPO(id: string): Promise<ActionResult> {
@@ -469,10 +600,18 @@ export async function cancelVendorPO(id: string, reason: string): Promise<Action
  *   5. Recompute GRN status (ACCEPTED / PARTIALLY_ACCEPTED)
  *   6. Recompute PO status (RECEIVED / PARTIALLY_RECEIVED)
  *   7. Write AuditLog
+ *
+ * Unit-mismatch guard: steps 3/3b assume the PO line's unit equals the
+ * catalogue unit. Since PO lines are editable on drafts (the store often
+ * buys "piece" where the catalogue tracks "pkt"), a mismatched line's
+ * accepted qty would corrupt stock and moving-average cost. Such lines
+ * SKIP the auto-posting; the receipt is still recorded on the GRN/PO and
+ * a warning is returned (and notified) so the store corrects stock by
+ * hand via stock count / receipt.
  */
 export async function createGRN(
   raw: unknown,
-): Promise<ActionResultWith<{ id: string; grnNo: string }>> {
+): Promise<ActionResultWith<{ id: string; grnNo: string; warnings?: string[] }>> {
   try {
     return await createGRNInner(raw);
   } catch (err) {
@@ -480,7 +619,14 @@ export async function createGRN(
   }
 }
 
-async function createGRNInner(raw: unknown): Promise<{ ok: true; id: string; grnNo: string }> {
+/** lower(trim(unit)) — "Pkt " and "pkt" are the same unit, "pkt" vs "piece" is not. */
+function unitsMatch(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+async function createGRNInner(
+  raw: unknown,
+): Promise<{ ok: true; id: string; grnNo: string; warnings?: string[] }> {
   // The store keeper records the goods receipt when the vendor delivers
   // against their PO. Manager / admin / accounts can too.
   const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.STORE_KEEPER]);
@@ -497,12 +643,21 @@ async function createGRNInner(raw: unknown): Promise<{ ok: true; id: string; grn
   // True when any accepted line bumped banquet stock (with or without a
   // linked requisition line) — the banquet pages need revalidating then.
   let banquetPosted = false;
+  // Unit-mismatch warnings: stock was NOT auto-posted for these lines.
+  // Surfaced in the action's return (UI toasts them) and deferred-notified
+  // to the store so the manual correction doesn't get forgotten.
+  const warnings: string[] = [];
 
   const result = await db.$transaction(async (tx) => {
     const po = await tx.vendorPO.findUnique({
       where: { id: input.poId },
       include: {
-        lines: { include: { ingredient: true } },
+        lines: {
+          include: {
+            ingredient: true,
+            banquetItem: { select: { name: true, unit: true } },
+          },
+        },
         vendor: { select: { name: true } },
       },
     });
@@ -553,7 +708,15 @@ async function createGRNInner(raw: unknown): Promise<{ ok: true; id: string; grn
       });
 
       // Post inventory only if accepted > 0 AND the PO line links to an Ingredient.
-      if (accepted.gt(0) && poLine.ingredientId && poLine.ingredient) {
+      if (accepted.gt(0) && poLine.ingredientId && poLine.ingredient &&
+          !unitsMatch(poLine.unit, poLine.ingredient.unit)) {
+        // PO bought in a different unit than the catalogue tracks — the
+        // accepted qty/price would corrupt onHandQty and moving-average
+        // cost. Record the receipt on the GRN but leave stock alone.
+        warnings.push(
+          `GRN ${grnNo}: ${poLine.ingredient.name} received in ${poLine.unit.trim()} but the catalogue tracks ${poLine.ingredient.unit.trim()} — stock NOT auto-updated; correct it via stock count / receipt and then issue.`,
+        );
+      } else if (accepted.gt(0) && poLine.ingredientId && poLine.ingredient) {
         const ing = poLine.ingredient;
         const { qty: newQty, avgUnitCost: newAvg } = newMovingAverage({
           onHandQty: ing.onHandQty,
@@ -584,7 +747,27 @@ async function createGRNInner(raw: unknown): Promise<{ ok: true; id: string; grn
       // Banquet-store goods (PO raised off an F&B requisition shortfall):
       // post a real BanquetReceipt, bump the item's stock, and flip the
       // linked requisition lines back to PENDING so the store issues them.
-      if (accepted.gt(0) && poLine.banquetItemId) {
+      if (accepted.gt(0) && poLine.banquetItemId && poLine.banquetItem &&
+          !unitsMatch(poLine.unit, poLine.banquetItem.unit)) {
+        // Same unit-mismatch guard as the ingredient branch: no receipt, no
+        // stock bump — and deliberately NO requisition-line flip. If stock
+        // wasn't posted the store can't issue, so linked lines stay
+        // AWAITING_PROCUREMENT until the manual correction is done.
+        const stuck = await tx.banquetRequisitionLine.findMany({
+          where: {
+            vendorPOLineId: poLine.id,
+            status: BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
+          },
+          select: { requisition: { select: { requisitionNo: true } } },
+        });
+        const stuckNos = [...new Set(stuck.map((s) => s.requisition.requisitionNo))];
+        warnings.push(
+          `GRN ${grnNo}: ${poLine.banquetItem.name} received in ${poLine.unit.trim()} but the catalogue tracks ${poLine.banquetItem.unit.trim()} — stock NOT auto-updated; correct it via stock count / receipt and then issue.` +
+            (stuckNos.length > 0
+              ? ` Requisition ${stuckNos.join(", ")} stays awaiting procurement until then.`
+              : ""),
+        );
+      } else if (accepted.gt(0) && poLine.banquetItemId) {
         banquetPosted = true;
         // Same row-lock discipline as every other banquet stock movement —
         // a concurrent issue/receipt must not race the increment.
@@ -747,10 +930,27 @@ async function createGRNInner(raw: unknown): Promise<{ ok: true; id: string; grn
     revalidatePath("/dashboard");
   }
 
+  // Unit mismatches: stock was NOT auto-posted for some lines. Tell the
+  // store team so the manual stock correction actually happens — the toast
+  // the receiving user sees dies with their browser tab.
+  if (warnings.length > 0) {
+    const grnId = result.id;
+    const grnWarnings = [...warnings];
+    deferAfterResponse("grn-unit-mismatch:notify", () =>
+      notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+        kind: "GENERIC",
+        title: `GRN ${result.grnNo}: unit mismatch — stock not auto-updated`,
+        body: grnWarnings.join(" "),
+        link: `/procurement/grns/${grnId}`,
+        dedupeKey: `grn-unit-mismatch:${grnId}`,
+      }),
+    );
+  }
+
   revalidatePath("/procurement/grns");
   revalidatePath(`/procurement/purchase-orders/${input.poId}`);
   revalidatePath("/inventory/ingredients");
-  return { ok: true, ...result };
+  return { ok: true, ...result, ...(warnings.length > 0 ? { warnings } : {}) };
 }
 
 // =====================================================================
@@ -1204,7 +1404,12 @@ export async function getVendorPO(id: string) {
       vendor: true,
       order: { select: { id: true, code: true } },
       lines: {
-        include: { ingredient: { select: { name: true, sku: true, unit: true } } },
+        include: {
+          ingredient: { select: { name: true, sku: true, unit: true } },
+          // Catalogue unit for banquet-linked lines — the draft line editor
+          // hints "catalogue tracks <unit>" when the PO unit differs.
+          banquetItem: { select: { name: true, unit: true } },
+        },
         orderBy: { sortOrder: "asc" },
       },
       grns: { select: { id: true, grnNo: true, status: true, receivedAt: true } },

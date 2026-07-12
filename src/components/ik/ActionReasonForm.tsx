@@ -24,6 +24,10 @@ interface Props {
   required?: boolean;
   tone?: keyof typeof TONES;
   buttonVariant?: "default" | "outline";
+  /** Short explanatory line under the heading (e.g. what the action tells others). */
+  description?: string;
+  /** On success, navigate here (after the toast) instead of refreshing in place. */
+  redirectTo?: string;
 }
 
 /**
@@ -42,6 +46,8 @@ export function ActionReasonForm({
   required = true,
   tone = "danger",
   buttonVariant = "outline",
+  description,
+  redirectTo,
 }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -64,7 +70,11 @@ export function ActionReasonForm({
         }
         toast.success(successMessage);
         setValue("");
-        router.refresh();
+        if (redirectTo) {
+          router.push(redirectTo);
+        } else {
+          router.refresh();
+        }
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Something went wrong");
@@ -75,6 +85,7 @@ export function ActionReasonForm({
   return (
     <form onSubmit={submit} className={`rounded-md border p-4 text-[13px] ${palette.box}`}>
       <h3 className={`mb-2 font-medium ${palette.heading}`}>{heading}</h3>
+      {description && <p className="mb-2 text-[12px] text-ik-ink-2">{description}</p>}
       <textarea
         rows={2}
         placeholder={placeholder}

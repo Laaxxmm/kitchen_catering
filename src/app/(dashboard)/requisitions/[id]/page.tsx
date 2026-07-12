@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { auth } from "@/server/auth";
 import {
+  cancelChefRequisition,
   getChefRequisition,
   issueChefRequisitionLine,
   sendChefRequisitionLineToProcurement,
@@ -15,6 +16,7 @@ import {
 import { formatIST } from "@/lib/time";
 import { LineFulfilControls } from "./_components/LineFulfilControls";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
+import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 
 export const dynamic = "force-dynamic";
 
@@ -39,8 +41,21 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
     "use server";
     return await sendChefRequisitionLineToProcurement({ lineId, reason });
   }
+  async function doCancel(reason: string) {
+    "use server";
+    return await cancelChefRequisition(id, reason || undefined);
+  }
 
   const canSubmit = isChef && requisition.status === ChefRequisitionStatus.DRAFT;
+  // Cancel is creator-only and only while the store hasn't acted: DRAFT or
+  // SUBMITTED, nothing issued, no purchase running. Mirrors the server
+  // guards in cancelChefRequisition — computed here just to hide the form.
+  const canCancel =
+    session?.user?.id === requisition.createdById &&
+    (requisition.status === ChefRequisitionStatus.DRAFT ||
+      requisition.status === ChefRequisitionStatus.SUBMITTED) &&
+    !requisition.lines.some((l) => Number(l.issuedQty.toString()) > 0) &&
+    !requisition.lines.some((l) => l.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT);
   const canFulfil =
     isStore &&
     (requisition.status === ChefRequisitionStatus.SUBMITTED ||
@@ -139,6 +154,21 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
           ))}
         </TableBody>
       </Table>
+
+      {canCancel && (
+        <div className="mt-6 max-w-sm">
+          <ActionReasonForm
+            action={doCancel}
+            heading="Cancel requisition"
+            description="This tells the store to disregard the request."
+            submitLabel="Cancel requisition"
+            successMessage="Requisition cancelled — the store has been told to disregard it"
+            placeholder="Reason (optional)"
+            required={false}
+            redirectTo="/requisitions"
+          />
+        </div>
+      )}
     </>
   );
 }

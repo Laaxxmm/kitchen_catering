@@ -11,6 +11,7 @@ import { db } from "@/server/db";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import {
   requireRole,
+  requireSession,
   REQUISITION_CREATE_ROLES,
   REQUISITION_FULFIL_ROLES,
 } from "@/server/rbac";
@@ -592,6 +593,110 @@ export async function sendChefRequisitionLineToProcurement(raw: unknown): Promis
   } catch (err) {
     return actionFailure(err);
   }
+}
+
+// =====================================================================
+// CANCEL
+// =====================================================================
+
+/**
+ * The chef who raised a requisition can withdraw their own mistake before
+ * the store acts on it. Creator-only (not a role gate — another chef's
+ * requisition is not yours to kill), and only while nothing irreversible
+ * has happened: no stock issued, no purchase running.
+ */
+export async function cancelChefRequisition(id: string, reason?: string): Promise<ActionResult> {
+  try {
+    return await cancelChefRequisitionInner(id, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function cancelChefRequisitionInner(id: string, reason?: string): Promise<{ ok: true }> {
+  const session = await requireSession();
+
+  const result = await db.$transaction(async (tx) => {
+    const req = await tx.chefRequisition.findUnique({
+      where: { id },
+      select: {
+        status: true,
+        createdById: true,
+        requisitionNo: true,
+        lines: { select: { issuedQty: true, status: true } },
+      },
+    });
+    if (!req) throw new ActionError("Requisition not found");
+    if (req.createdById !== session.user.id) {
+      throw new ActionError("Only the chef who raised this requisition can cancel it.");
+    }
+    if (
+      req.status !== ChefRequisitionStatus.DRAFT &&
+      req.status !== ChefRequisitionStatus.SUBMITTED
+    ) {
+      throw new ActionError(
+        `Only draft or submitted requisitions can be cancelled — this one is ${req.status}.`,
+      );
+    }
+    if (req.lines.some((l) => toDecimal(l.issuedQty).gt(0))) {
+      throw new ActionError(
+        "Stock has already been issued against this — ask the store to reconcile instead.",
+      );
+    }
+    if (req.lines.some((l) => l.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT)) {
+      throw new ActionError("A purchase is already running for a line — ask the store.");
+    }
+
+    // Status guard: a store keeper issuing (or the chef double-clicking)
+    // while this cancel is in flight loses the race with a clear message.
+    const updated = await tx.chefRequisition.updateMany({
+      where: {
+        id,
+        status: { in: [ChefRequisitionStatus.DRAFT, ChefRequisitionStatus.SUBMITTED] },
+      },
+      data: { status: ChefRequisitionStatus.CANCELLED, closedAt: new Date() },
+    });
+    if (updated.count === 0) {
+      throw new ActionError("This requisition just changed — refresh the page.");
+    }
+    await tx.chefRequisitionLine.updateMany({
+      where: {
+        requisitionId: id,
+        status: {
+          notIn: [ChefRequisitionLineStatus.ISSUED, ChefRequisitionLineStatus.CANCELLED],
+        },
+      },
+      data: { status: ChefRequisitionLineStatus.CANCELLED },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "CHEF_REQUISITION_CANCELLED",
+        entity: "ChefRequisition",
+        entityId: id,
+        payloadHash: sha256Json({ reason: reason?.trim() || null }),
+      },
+    });
+    return { requisitionNo: req.requisitionNo };
+  });
+
+  // Tell the store immediately so nobody is mid-pick on a dead request.
+  const cancelledBy = session.user.name ?? "the chef";
+  deferAfterResponse("chef-req-cancel:notify", () =>
+    notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+      kind: "GENERIC",
+      title: `${result.requisitionNo} cancelled by ${cancelledBy}`,
+      body: `${reason?.trim() || "No reason given"} — disregard this request; nothing needs issuing.`,
+      link: `/requisitions/${id}`,
+      dedupeKey: `chef-req-cancel:${id}`,
+    }),
+  );
+
+  revalidatePath("/requisitions");
+  revalidatePath(`/requisitions/${id}`);
+  revalidatePath("/queue/issuing");
+  revalidatePath("/dashboard");
+  return { ok: true };
 }
 
 // =====================================================================

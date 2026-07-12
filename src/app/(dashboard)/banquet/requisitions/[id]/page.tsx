@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { auth } from "@/server/auth";
 import {
+  cancelBanquetRequisition,
   getBanquetRequisition,
   issueBanquetRequisitionLine,
   markBanquetLineAwaitingProcurement,
@@ -14,6 +15,7 @@ import {
 import { listVendors } from "@/server/actions/vendors";
 import { formatIST } from "@/lib/time";
 import { LineFulfilControls, type VendorOption } from "./_components/LineFulfilControls";
+import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +31,14 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
     ISSUE_ROLES.includes(role) &&
     (requisition.status === BanquetRequisitionStatus.SUBMITTED ||
       requisition.status === BanquetRequisitionStatus.PARTIALLY_ISSUED);
+  // The F&B user who raised it can withdraw their own mistake — but only
+  // while the requisition is still open and no stock has been issued.
+  // Mirrors the server guards in cancelBanquetRequisition.
+  const canCancel =
+    session?.user?.id === requisition.createdById &&
+    requisition.status !== BanquetRequisitionStatus.FULLY_ISSUED &&
+    requisition.status !== BanquetRequisitionStatus.CANCELLED &&
+    !requisition.lines.some((l) => Number(l.issuedQty.toString()) > 0);
 
   // Vendor picker for "Raise PO for shortfall" — only fetched when the
   // viewer can actually fulfil lines.
@@ -51,6 +61,10 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
       vendorId,
       unitPrice: unitPrice || "0",
     });
+  }
+  async function doCancel(reason: string) {
+    "use server";
+    return await cancelBanquetRequisition(id, reason);
   }
 
   return (
@@ -136,6 +150,20 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
           })}
         </TableBody>
       </Table>
+
+      {canCancel && (
+        <div className="mt-6 max-w-sm">
+          <ActionReasonForm
+            action={doCancel}
+            heading="Cancel requisition"
+            description="This tells the store to disregard the request."
+            submitLabel="Cancel requisition"
+            successMessage="Requisition cancelled — the store has been told to disregard it"
+            placeholder="Reason"
+            redirectTo="/banquet/requisitions"
+          />
+        </div>
+      )}
     </>
   );
 }

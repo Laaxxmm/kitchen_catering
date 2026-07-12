@@ -1147,10 +1147,15 @@ async function cancelBanquetRequisitionInner(id: string, reason: string): Promis
   const session = await requireSession();
   if (!reason?.trim()) throw new ActionError("A cancellation reason is required");
 
-  await db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     const req = await tx.banquetRequisition.findUnique({
       where: { id },
-      select: { status: true, createdById: true },
+      select: {
+        status: true,
+        createdById: true,
+        requisitionNo: true,
+        lines: { select: { issuedQty: true } },
+      },
     });
     if (!req) throw new ActionError("Requisition not found");
     const canCancel =
@@ -1165,6 +1170,14 @@ async function cancelBanquetRequisitionInner(id: string, reason: string): Promis
       req.status === BanquetRequisitionStatus.CANCELLED
     ) {
       throw new ActionError(`Cannot cancel a ${req.status.toLowerCase()} requisition`);
+    }
+    // Issued-stock guard: cancelling a requisition that already consumed
+    // stock would orphan the issue — the movement is real and needs a
+    // return/reconciliation, not a cancel.
+    if (req.lines.some((l) => new Decimal(l.issuedQty.toString()).gt(0))) {
+      throw new ActionError(
+        "Stock has already been issued against this — ask the store to reconcile instead.",
+      );
     }
 
     await tx.banquetRequisitionLine.updateMany({
@@ -1193,7 +1206,20 @@ async function cancelBanquetRequisitionInner(id: string, reason: string): Promis
         payloadHash: sha256Json({ reason: reason.trim() }),
       },
     });
+    return { requisitionNo: req.requisitionNo };
   });
+
+  // Tell the store immediately so nobody is mid-pick on a dead request.
+  const cancelledBy = session.user.name ?? "the requester";
+  deferAfterResponse("banquet-req-cancel:notify", () =>
+    notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+      kind: "GENERIC",
+      title: `${result.requisitionNo} cancelled by ${cancelledBy}`,
+      body: `${reason.trim()} — disregard this request; nothing needs issuing.`,
+      link: `/banquet/requisitions/${id}`,
+      dedupeKey: `banquet-req-cancel:${id}`,
+    }),
+  );
 
   revalidatePath("/banquet/requisitions");
   revalidatePath(`/banquet/requisitions/${id}`);

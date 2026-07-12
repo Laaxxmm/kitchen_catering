@@ -579,6 +579,39 @@ export const VendorPOCreateInput = z.object({
 });
 export type VendorPOCreateInputT = z.infer<typeof VendorPOCreateInput>;
 
+/**
+ * Edit-in-place of existing DRAFT PO lines (the shortfall flow creates POs
+ * with the catalogue unit/price; the store buys in different units). Each
+ * entry targets an EXISTING VendorPOLine by id — no adds/removes, so
+ * downstream references (BanquetRequisitionLine.vendorPOLineId, GRNLine)
+ * stay intact. ingredientId/banquetItemId/sku are deliberately absent:
+ * the links and SKU are immutable here.
+ */
+export const VendorPOLineEditInput = z.object({
+  id: z.string().min(1),
+  description: z.string().trim().min(1).max(500),
+  unit: z.string().trim().min(1).max(20),
+  quantity: decimalString.refine(
+    (v) => Number.isFinite(Number(v)) && Number(v) > 0,
+    "Quantity must be greater than zero",
+  ),
+  unitPrice: decimalString.refine(
+    (v) => Number.isFinite(Number(v)) && Number(v) >= 0,
+    "Unit price cannot be negative",
+  ),
+  gstRatePct: decimalString.refine(
+    (v) => Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= 100,
+    "GST % must be between 0 and 100",
+  ),
+});
+export type VendorPOLineEditInputT = z.infer<typeof VendorPOLineEditInput>;
+
+export const VendorPOLinesUpdateInput = z.object({
+  poId: z.string().min(1),
+  lines: z.array(VendorPOLineEditInput).min(1),
+});
+export type VendorPOLinesUpdateInputT = z.infer<typeof VendorPOLinesUpdateInput>;
+
 export const GRNLineInput = z.object({
   poLineId: z.string(),
   acceptedQty: decimalString,

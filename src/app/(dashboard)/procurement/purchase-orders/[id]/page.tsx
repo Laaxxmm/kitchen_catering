@@ -12,11 +12,13 @@ import {
   getVendorPO,
   sendVendorPO,
   submitVendorPO,
+  updateVendorPOLines,
 } from "@/server/actions/procurement";
 import { formatINR } from "@/lib/money";
 import { Decimal } from "decimal.js";
 import { formatIST } from "@/lib/time";
 import { NotifyVendorBlock } from "./_components/NotifyVendorBlock";
+import { EditPOLines } from "./_components/EditPOLines";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 
@@ -35,6 +37,12 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
   const canApprove =
     po.status === VendorPOStatus.PENDING_APPROVAL &&
     (role === Role.ADMIN || (role === Role.MANAGER && !managerStepDone));
+  // Draft line editing shares the createVendorPO gate — whoever can raise a
+  // PO can fix its draft before it goes for approval. (No REJECTED state in
+  // the schema; DRAFT is the only editable status.)
+  const canEditLines =
+    po.status === VendorPOStatus.DRAFT &&
+    (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
   const canSend = po.status === VendorPOStatus.APPROVED && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
   const canReceive = (po.status === VendorPOStatus.APPROVED || po.status === VendorPOStatus.SENT || po.status === VendorPOStatus.PARTIALLY_RECEIVED) && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
   // Supplier bills are finance-only — store keepers never record them.
@@ -48,6 +56,19 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
   async function doCancel(reason: string) {
     "use server";
     return await cancelVendorPO(id, reason);
+  }
+  async function doUpdateLines(
+    lines: Array<{
+      id: string;
+      description: string;
+      unit: string;
+      quantity: string;
+      unitPrice: string;
+      gstRatePct: string;
+    }>,
+  ) {
+    "use server";
+    return await updateVendorPOLines({ poId: id, lines });
   }
 
   return (
@@ -118,6 +139,24 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
 
       <div className="grid gap-6 md:grid-cols-3">
         <section className="md:col-span-2 grid gap-4">
+          {/* Draft POs get an editable line table (the shortfall flow
+              pre-fills catalogue unit + price — often not what the store
+              actually buys); every other status shows the read-only view. */}
+          {canEditLines ? (
+            <EditPOLines
+              action={doUpdateLines}
+              lines={po.lines.map((l) => ({
+                id: l.id,
+                sku: l.sku,
+                description: l.description,
+                unit: l.unit,
+                quantity: l.quantity.toString(),
+                unitPrice: l.unitPrice.toString(),
+                gstRatePct: l.gstRatePct.toString(),
+                catalogueUnit: l.ingredient?.unit ?? l.banquetItem?.unit ?? null,
+              }))}
+            />
+          ) : (
           <div className="rounded-md border border-ik-rule bg-ik-card p-4">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Lines</h3>
             <Table>
@@ -179,6 +218,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
               );
             })()}
           </div>
+          )}
 
           {po.grns.length > 0 && (
             <div className="rounded-md border border-ik-rule bg-ik-card p-4">
