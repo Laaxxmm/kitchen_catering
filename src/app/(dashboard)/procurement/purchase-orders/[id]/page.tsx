@@ -9,6 +9,7 @@ import { auth } from "@/server/auth";
 import {
   approveVendorPO,
   cancelVendorPO,
+  recallVendorPOToDraft,
   getVendorPO,
   sendVendorPO,
   submitVendorPO,
@@ -44,6 +45,21 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
     po.status === VendorPOStatus.DRAFT &&
     (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
   const canSend = po.status === VendorPOStatus.APPROVED && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
+  // Recall a submitted PO to draft to fix a wrong unit/price before it goes
+  // to the vendor — whoever can raise a PO can recall it.
+  const canRecall =
+    po.status === VendorPOStatus.PENDING_APPROVAL &&
+    (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
+  // Store keeper may cancel a PO that hasn't left the building (draft /
+  // awaiting approval); managers/admins can cancel any non-terminal PO.
+  const canCancel =
+    po.status !== VendorPOStatus.CANCELLED &&
+    po.status !== VendorPOStatus.RECEIVED &&
+    po.status !== VendorPOStatus.CLOSED &&
+    (role === Role.ADMIN ||
+      role === Role.MANAGER ||
+      (role === Role.STORE_KEEPER &&
+        (po.status === VendorPOStatus.DRAFT || po.status === VendorPOStatus.PENDING_APPROVAL)));
   const canReceive = (po.status === VendorPOStatus.APPROVED || po.status === VendorPOStatus.SENT || po.status === VendorPOStatus.PARTIALLY_RECEIVED) && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
   // Supplier bills are finance-only — store keepers never record them.
   const canRecordBill = role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS;
@@ -56,6 +72,10 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
   async function doCancel(reason: string) {
     "use server";
     return await cancelVendorPO(id, reason);
+  }
+  async function doRecall() {
+    "use server";
+    return await recallVendorPOToDraft(id);
   }
   async function doUpdateLines(
     lines: Array<{
@@ -82,6 +102,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
             <Link href="/procurement/purchase-orders"><Button variant="outline">Back</Button></Link>
             {canSubmit && <ActionResultButton action={doSubmit} successMessage="PO submitted for approval">Submit</ActionResultButton>}
             {canApprove && <ActionResultButton action={doApprove} successMessage="PO approved">Approve</ActionResultButton>}
+            {canRecall && <ActionResultButton action={doRecall} variant="outline" successMessage="PO pulled back to draft — edit the lines, then submit again">Recall to draft</ActionResultButton>}
             {canSend && <ActionResultButton action={doMarkSent} variant="outline" successMessage="PO marked sent">Mark sent</ActionResultButton>}
             {canReceive && <Link href={`/procurement/grns/new?poId=${po.id}`}><Button>Receive (GRN)</Button></Link>}
           </div>
@@ -250,11 +271,16 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
             {po.vendor.gstin && <div className="font-mono text-[12px] text-ik-ink-2">{po.vendor.gstin}</div>}
             <div className="text-ik-ink-3">State {po.vendor.stateCode}</div>
           </div>
-          {(role === Role.ADMIN || role === Role.MANAGER) && po.status !== VendorPOStatus.CANCELLED && (
+          {canCancel && (
             <ActionReasonForm
               action={doCancel}
               heading="Cancel PO"
-              submitLabel="Cancel"
+              description={
+                po.status === VendorPOStatus.PENDING_APPROVAL
+                  ? "Withdraws the PO. To fix a wrong unit or price instead, use 'Recall to draft' and edit the lines."
+                  : "Cancels this purchase order."
+              }
+              submitLabel="Cancel PO"
               successMessage="PO cancelled"
             />
           )}

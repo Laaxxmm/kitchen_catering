@@ -559,13 +559,57 @@ export async function sendVendorPO(id: string): Promise<ActionResult> {
 
 export async function cancelVendorPO(id: string, reason: string): Promise<ActionResult> {
   try {
-    const session = await requireRole(APPROVE_ROLES);
+    // The store keeper (who raises POs) may cancel one that hasn't left the
+    // building yet — DRAFT or PENDING_APPROVAL. Once it's approved/sent/
+    // received, only a manager/admin can cancel (goods and bills are in play).
+    const session = await requireRole(WRITE_ROLES);
     if (!reason.trim()) throw new ActionError("Reason required");
-    await db.$transaction(async (tx) => {
+    const affectedReqs = await db.$transaction(async (tx) => {
+      const po = await tx.vendorPO.findUnique({
+        where: { id },
+        select: { status: true, lines: { select: { id: true } } },
+      });
+      if (!po) throw new ActionError("Purchase order not found");
+      if (po.status === VendorPOStatus.CANCELLED) throw new ActionError("This PO is already cancelled.");
+      if (po.status === VendorPOStatus.CLOSED || po.status === VendorPOStatus.RECEIVED) {
+        throw new ActionError("This PO is already received/closed — it can't be cancelled.");
+      }
+      const storeKeeperOnly = session.user.role === Role.STORE_KEEPER;
+      if (
+        storeKeeperOnly &&
+        po.status !== VendorPOStatus.DRAFT &&
+        po.status !== VendorPOStatus.PENDING_APPROVAL
+      ) {
+        throw new ActionError(
+          "This PO has already gone to the vendor — ask a manager/admin to cancel it.",
+        );
+      }
+
       await tx.vendorPO.update({
         where: { id },
         data: { status: VendorPOStatus.CANCELLED, closedAt: new Date(), notes: reason },
       });
+
+      // Un-strand any banquet requisition lines this PO was buying: flip them
+      // back to PENDING so the store can raise a fresh PO (else they'd sit
+      // AWAITING_PROCUREMENT pointing at a dead PO line).
+      const lineIds = po.lines.map((l) => l.id);
+      const reqLines = lineIds.length
+        ? await tx.banquetRequisitionLine.findMany({
+            where: { vendorPOLineId: { in: lineIds }, status: BanquetRequisitionLineStatus.AWAITING_PROCUREMENT },
+            select: { id: true, requisitionId: true },
+          })
+        : [];
+      if (reqLines.length) {
+        await tx.banquetRequisitionLine.updateMany({
+          where: { id: { in: reqLines.map((l) => l.id) } },
+          data: { status: BanquetRequisitionLineStatus.PENDING, vendorPOLineId: null },
+        });
+        for (const reqId of new Set(reqLines.map((l) => l.requisitionId))) {
+          await recomputeBanquetReqStatus(tx, reqId, session.user.id);
+        }
+      }
+
       await tx.auditLog.create({
         data: {
           userId: session.user.id,
@@ -575,8 +619,57 @@ export async function cancelVendorPO(id: string, reason: string): Promise<Action
           payloadHash: sha256Json({ reason }),
         },
       });
+      return [...new Set(reqLines.map((l) => l.requisitionId))];
     });
     revalidatePath(`/procurement/purchase-orders/${id}`);
+    revalidatePath("/procurement/purchase-orders");
+    revalidatePath("/dashboard");
+    for (const reqId of affectedReqs) revalidatePath(`/banquet/requisitions/${reqId}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+/**
+ * Recall a PENDING_APPROVAL PO back to DRAFT so it can be edited before it
+ * goes to the vendor. Whoever can raise a PO can recall it — the store keeper
+ * uses this to fix a wrong unit/price they only spotted after submitting.
+ * Approval stamps are cleared so it re-enters the queue cleanly on resubmit.
+ */
+export async function recallVendorPOToDraft(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(WRITE_ROLES);
+    await db.$transaction(async (tx) => {
+      const updated = await tx.vendorPO.updateMany({
+        where: { id, status: VendorPOStatus.PENDING_APPROVAL },
+        data: {
+          status: VendorPOStatus.DRAFT,
+          managerApprovedById: null,
+          managerApprovedAt: null,
+          adminApprovedById: null,
+          adminApprovedAt: null,
+          approvedByUserId: null,
+          approvedAt: null,
+        },
+      });
+      if (updated.count === 0) {
+        const po = await tx.vendorPO.findUnique({ where: { id }, select: { status: true } });
+        throw new ActionError(
+          `Only a PO awaiting approval can be recalled — this one is ${po?.status.toLowerCase() ?? "gone"}.`,
+        );
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "VENDOR_PO_RECALLED_TO_DRAFT",
+          entity: "VendorPO",
+          entityId: id,
+        },
+      });
+    });
+    revalidatePath(`/procurement/purchase-orders/${id}`);
+    revalidatePath("/procurement/purchase-orders");
     return { ok: true };
   } catch (err) {
     return actionFailure(err);
