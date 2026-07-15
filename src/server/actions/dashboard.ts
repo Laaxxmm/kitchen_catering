@@ -327,16 +327,25 @@ export async function getDashboardSummary() {
     billsPendingPayment: number;
   } | null = null;
   if (hasRole(session, [Role.ADMIN, Role.MANAGER])) {
-    const [poRows, grnRows, billRows] = await Promise.all([
+    const [poRows, grnRows, billRows, poNeedingMe] = await Promise.all([
       db.vendorPO.groupBy({ by: ["status"], _count: { _all: true } }),
       db.gRN.groupBy({ by: ["status"], _count: { _all: true } }),
       db.vendorBill.groupBy({ by: ["status"], _count: { _all: true } }),
+      // Only the POs this viewer must approve: admins the ≥5k ones the
+      // manager already signed off (still PENDING_APPROVAL), managers the
+      // first-step rest. Keeps the banner count matching the board.
+      db.vendorPO.count({
+        where: {
+          status: VendorPOStatus.PENDING_APPROVAL,
+          managerApprovedAt: session.user.role === Role.ADMIN ? { not: null } : null,
+        },
+      }),
     ]);
     const po = Object.fromEntries(poRows.map((r) => [r.status, r._count._all]));
     const grn = Object.fromEntries(grnRows.map((r) => [r.status, r._count._all]));
     const bill = Object.fromEntries(billRows.map((r) => [r.status, r._count._all]));
     procurement = {
-      poPendingApproval: po[VendorPOStatus.PENDING_APPROVAL] ?? 0,
+      poPendingApproval: poNeedingMe,
       poSentNotReceived:
         (po[VendorPOStatus.APPROVED] ?? 0) +
         (po[VendorPOStatus.SENT] ?? 0) +

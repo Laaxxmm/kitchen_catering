@@ -637,13 +637,21 @@ export default async function DashboardPage({
               eventDate: o.eventDate.toISOString(),
               note: o.chefSuggestionNotes ?? null,
             }))}
-            purchaseOrders={approvals[2].map((po) => ({
-              id: po.id,
-              poNo: po.poNo,
-              vendor: po.vendor.name,
-              grandTotal: po.grandTotal.toString(),
-              awaitingAdmin: po.managerApprovedAt != null,
-            }))}
+            purchaseOrders={approvals[2]
+              // Admin only signs off spend that actually needs them (≥ the
+              // ₹5k tier — those wait as PENDING_APPROVAL after the manager's
+              // first approval). The manager handles the first step on all the
+              // rest. So each role sees only its own queue, not the other's.
+              .filter((po) =>
+                role === "ADMIN" ? po.managerApprovedAt != null : po.managerApprovedAt == null,
+              )
+              .map((po) => ({
+                id: po.id,
+                poNo: po.poNo,
+                vendor: po.vendor.name,
+                grandTotal: po.grandTotal.toString(),
+                awaitingAdmin: po.managerApprovedAt != null,
+              }))}
             viewerIsAdmin={role === "ADMIN"}
           />
         )}
