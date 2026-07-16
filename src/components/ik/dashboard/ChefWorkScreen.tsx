@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { OrderChannel, OrderStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { CappedList } from "@/components/ik/dashboard/CappedList";
 import { EventDateBadge, eventPriority } from "@/components/ik/EventDateBadge";
 import { formatIST } from "@/lib/time";
 import { isNextNavigationError } from "@/lib/next-error";
@@ -167,11 +168,9 @@ export function ChefWorkScreen({ orders }: Props) {
           Nothing in <strong>{activeTab.label}</strong> right now.
         </div>
       ) : (
-        <ul className="grid gap-2.5">
-          {activeOrders.map((o, i) => (
-            <ChefOrderCard key={o.id} order={o} highlight={i === 0} />
-          ))}
-        </ul>
+        <CappedList items={activeOrders} limit={6} className="grid gap-2.5" keyOf={(o) => o.id}>
+          {(o, i) => <ChefOrderCard order={o} highlight={i === 0} />}
+        </CappedList>
       )}
     </section>
   );

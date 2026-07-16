@@ -8,6 +8,7 @@ import { OrderChannel } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { WorkTabs } from "@/components/ik/dashboard/WorkTabs";
+import { CappedList } from "@/components/ik/dashboard/CappedList";
 import { formatIST } from "@/lib/time";
 import { formatINR } from "@/lib/money";
 import { isNextNavigationError } from "@/lib/next-error";
@@ -74,6 +75,11 @@ export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseO
     { key: "po", label: "Purchase orders", hint: "Sign off spend", count: purchaseOrders.length },
   ];
 
+  // Soonest event first (the kitchen waits on these); POs keep their order.
+  const eventTime = (d: string) => new Date(d).getTime();
+  const ordersSorted = [...ordersToApprove].sort((a, b) => eventTime(a.eventDate) - eventTime(b.eventDate));
+  const changesSorted = [...orderChanges].sort((a, b) => eventTime(a.eventDate) - eventTime(b.eventDate));
+
   return (
     <div>
       <h2 className="mb-2 text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Needs your approval</h2>
@@ -81,22 +87,22 @@ export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseO
         {(active) => {
           if (active === "orders") {
             return (
-              <ScrollRow>
-                {ordersToApprove.map((o) => <OrderApprovalCard key={o.id} order={o} />)}
-              </ScrollRow>
+              <CappedList items={ordersSorted} className={SCROLL_ROW} keyOf={(o) => o.id}>
+                {(o) => <OrderApprovalCard order={o} />}
+              </CappedList>
             );
           }
           if (active === "changes") {
             return (
-              <ScrollRow>
-                {orderChanges.map((o) => <OrderChangeCard key={o.id} change={o} />)}
-              </ScrollRow>
+              <CappedList items={changesSorted} className={SCROLL_ROW} keyOf={(o) => o.id}>
+                {(o) => <OrderChangeCard change={o} />}
+              </CappedList>
             );
           }
           return (
-            <ScrollRow>
-              {purchaseOrders.map((p) => <PurchaseOrderCard key={p.id} po={p} viewerIsAdmin={viewerIsAdmin} />)}
-            </ScrollRow>
+            <CappedList items={purchaseOrders} className={SCROLL_ROW} keyOf={(p) => p.id}>
+              {(p) => <PurchaseOrderCard po={p} viewerIsAdmin={viewerIsAdmin} />}
+            </CappedList>
           );
         }}
       </WorkTabs>
@@ -104,17 +110,9 @@ export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseO
   );
 }
 
-/**
- * Horizontal scroll row — cards sit side by side and scroll sideways rather
- * than stacking, so a tall approval queue doesn't dominate the dashboard.
- */
-function ScrollRow({ children }: { children: React.ReactNode }) {
-  return (
-    <ul className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin]">
-      {children}
-    </ul>
-  );
-}
+// Horizontal scroll row — cards sit side by side and scroll sideways rather
+// than stacking, so a tall approval queue doesn't dominate the dashboard.
+const SCROLL_ROW = "flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin]";
 
 function useApprove() {
   const router = useRouter();

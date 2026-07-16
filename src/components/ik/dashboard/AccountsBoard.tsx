@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { WorkTabs } from "@/components/ik/dashboard/WorkTabs";
+import { CappedList } from "@/components/ik/dashboard/CappedList";
 import { MarkPaidModal } from "@/components/ik/finance/MarkPaidModal";
 import { formatINR } from "@/lib/money";
 import { markVendorBillPaid } from "@/server/actions/procurement";
@@ -33,12 +34,16 @@ export function AccountsBoard({ receivables, payables }: { receivables: Receivab
     { key: "pay", label: "To pay", hint: "Vendor bills", count: payables.length },
   ];
 
+  // No due date on these rows — largest balance is the urgency signal.
+  const recSorted = [...receivables].sort((a, b) => Number(b.outstanding) - Number(a.outstanding));
+  const paySorted = [...payables].sort((a, b) => Number(b.outstanding) - Number(a.outstanding));
+
   return (
     <WorkTabs tabs={tabs} emptyHint="Nothing in {tab} right now.">
       {(active) =>
         active === "collect" ? (
-          <ul className="grid gap-2.5">
-            {receivables.map((r) => (
+          <CappedList items={recSorted} className="grid gap-2.5" keyOf={(r) => r.id}>
+            {(r) => (
               <li key={r.id} className="rounded-md border border-ik-rule bg-ik-card p-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="font-mono text-[12.5px] text-brand-700">{r.invoiceNo}</span>
@@ -58,11 +63,11 @@ export function AccountsBoard({ receivables, payables }: { receivables: Receivab
                   </Link>
                 </div>
               </li>
-            ))}
-          </ul>
+            )}
+          </CappedList>
         ) : (
-          <ul className="grid gap-2.5">
-            {payables.map((p) => (
+          <CappedList items={paySorted} className="grid gap-2.5" keyOf={(p) => p.id}>
+            {(p) => (
               <li key={p.id} className="rounded-md border border-ik-rule bg-ik-card p-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="font-mono text-[12.5px] text-brand-700">{p.billNo}</span>
@@ -85,8 +90,8 @@ export function AccountsBoard({ receivables, payables }: { receivables: Receivab
                   <Link href={`/procurement/vendor-bills/${p.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open</Link>
                 </div>
               </li>
-            ))}
-          </ul>
+            )}
+          </CappedList>
         )
       }
     </WorkTabs>

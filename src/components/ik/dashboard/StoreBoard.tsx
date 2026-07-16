@@ -4,6 +4,7 @@ import Link from "next/link";
 import { BanquetRequisitionStatus, ChefRequisitionStatus, VendorPOStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { WorkTabs } from "@/components/ik/dashboard/WorkTabs";
+import { CappedList } from "@/components/ik/dashboard/CappedList";
 import { formatIST } from "@/lib/time";
 import { formatINRWhole } from "@/lib/money";
 
@@ -75,6 +76,15 @@ export function StoreBoard({
     { key: "stock", label: "My purchase orders", hint: "Buy & receive", count: pos.length },
   ];
 
+  // Urgent-first: soonest event on top, undated last (stable). POs surface
+  // the ones the store must act on now, keeping their existing order within.
+  const eventTime = (d: string | null) => (d ? new Date(d).getTime() : Infinity);
+  const chefSorted = [...chefReqs].sort((a, b) => eventTime(a.eventDate) - eventTime(b.eventDate));
+  const fnbSorted = [...fnbReqs].sort((a, b) => eventTime(a.eventDate) - eventTime(b.eventDate));
+  const posSorted = [...pos].sort(
+    (a, b) => Number(PO_NEEDS_ACTION.has(b.status)) - Number(PO_NEEDS_ACTION.has(a.status)),
+  );
+
   return (
     <div>
       <div className="mb-3 flex justify-end">
@@ -85,8 +95,8 @@ export function StoreBoard({
       <WorkTabs tabs={tabs} emptyHint="Nothing in {tab} right now.">
         {(active) =>
           active === "fulfil" ? (
-            <ul className="grid gap-2.5">
-              {chefReqs.map((r) => (
+            <CappedList items={chefSorted} className="grid gap-2.5" keyOf={(r) => r.id}>
+              {(r) => (
                 <li key={r.id} className="rounded-md border border-amber bg-amber-wash p-3">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <span className="font-mono text-[12.5px] text-brand-700">{r.requisitionNo}</span>
@@ -109,11 +119,11 @@ export function StoreBoard({
                     </Link>
                   </div>
                 </li>
-              ))}
-            </ul>
+              )}
+            </CappedList>
           ) : active === "fnb" ? (
-            <ul className="grid gap-2.5">
-              {fnbReqs.map((r) => (
+            <CappedList items={fnbSorted} className="grid gap-2.5" keyOf={(r) => r.id}>
+              {(r) => (
                 <li key={r.id} className="rounded-md border border-amber bg-amber-wash p-3">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <span className="font-mono text-[12.5px] text-brand-700">{r.requisitionNo}</span>
@@ -136,11 +146,11 @@ export function StoreBoard({
                     </Link>
                   </div>
                 </li>
-              ))}
-            </ul>
+              )}
+            </CappedList>
           ) : (
-            <ul className="grid gap-2.5">
-              {pos.map((p) => {
+            <CappedList items={posSorted} className="grid gap-2.5" keyOf={(p) => p.id}>
+              {(p) => {
                 const act = PO_NEEDS_ACTION.has(p.status);
                 return (
                   <li
@@ -167,8 +177,8 @@ export function StoreBoard({
                     </div>
                   </li>
                 );
-              })}
-            </ul>
+              }}
+            </CappedList>
           )
         }
       </WorkTabs>

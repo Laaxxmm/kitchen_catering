@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { OrderChannel, OrderStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { WorkTabs } from "@/components/ik/dashboard/WorkTabs";
+import { CappedList } from "@/components/ik/dashboard/CappedList";
 import { Countdown } from "@/components/ik/dashboard/Countdown";
 import { formatIST } from "@/lib/time";
 import { isNextNavigationError } from "@/lib/next-error";
@@ -116,11 +117,9 @@ export function SalesBoard({ orders }: { orders: SalesOrder[] }) {
   return (
     <WorkTabs tabs={tabs} emptyHint="Nothing in {tab} right now.">
       {(active) => (
-        <ul className="grid gap-2.5">
-          {groups[active].map((o, i) => (
-            <SalesCard key={o.id} order={o} highlight={i === 0 && active === "draft"} />
-          ))}
-        </ul>
+        <CappedList items={groups[active]} className="grid gap-2.5" keyOf={(o) => o.id}>
+          {(o, i) => <SalesCard order={o} highlight={i === 0 && active === "draft"} />}
+        </CappedList>
       )}
     </WorkTabs>
   );

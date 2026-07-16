@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { DeliveryStatus, OrderChannel } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { CappedList } from "@/components/ik/dashboard/CappedList";
 import { StaffAllocation, type AllocatedStaff } from "@/components/ik/StaffAllocation";
 import { EventDateBadge } from "@/components/ik/EventDateBadge";
 import { isNextNavigationError } from "@/lib/next-error";
@@ -93,11 +94,17 @@ type TabKey = "prep" | "pickup" | "dispatch" | "out";
  */
 export function DriverWorkScreen({ eventPrep, pickups, deliveries }: Props) {
   const groups = useMemo(() => {
-    const dispatch = deliveries.filter((d) => d.status === DeliveryStatus.SCHEDULED);
-    const out = deliveries.filter(
-      (d) => d.status === DeliveryStatus.DISPATCHED || d.status === DeliveryStatus.IN_TRANSIT,
-    );
-    return { prep: eventPrep, pickup: pickups, dispatch, out };
+    // Urgent-first: soonest event / scheduled time on top.
+    const t = (d: string) => new Date(d).getTime();
+    const prep = [...eventPrep].sort((a, b) => t(a.eventDate) - t(b.eventDate));
+    const pickup = [...pickups].sort((a, b) => t(a.eventDate) - t(b.eventDate));
+    const dispatch = deliveries
+      .filter((d) => d.status === DeliveryStatus.SCHEDULED)
+      .sort((a, b) => t(a.scheduledAt) - t(b.scheduledAt));
+    const out = deliveries
+      .filter((d) => d.status === DeliveryStatus.DISPATCHED || d.status === DeliveryStatus.IN_TRANSIT)
+      .sort((a, b) => t(a.scheduledAt) - t(b.scheduledAt));
+    return { prep, pickup, dispatch, out };
   }, [eventPrep, pickups, deliveries]);
 
   // Outstanding prep (not yet marked ready) drives the tab badge + urgency.
@@ -155,32 +162,26 @@ export function DriverWorkScreen({ eventPrep, pickups, deliveries }: Props) {
         groups.prep.length === 0 ? (
           <Empty label={activeTab.label} />
         ) : (
-          <ul className="grid gap-2.5">
-            {groups.prep.map((o, i) => (
-              <EventPrepCard key={o.id} order={o} highlight={!o.prepReadyAt && i === 0} />
-            ))}
-          </ul>
+          <CappedList items={groups.prep} className="grid gap-2.5" keyOf={(o) => o.id}>
+            {(o, i) => <EventPrepCard order={o} highlight={!o.prepReadyAt && i === 0} />}
+          </CappedList>
         )
       ) : active === "pickup" ? (
         groups.pickup.length === 0 ? (
           <Empty label={activeTab.label} />
         ) : (
-          <ul className="grid gap-2.5">
-            {groups.pickup.map((o, i) => (
-              <PickupCard key={o.id} order={o} highlight={i === 0} />
-            ))}
-          </ul>
+          <CappedList items={groups.pickup} className="grid gap-2.5" keyOf={(o) => o.id}>
+            {(o, i) => <PickupCard order={o} highlight={i === 0} />}
+          </CappedList>
         )
       ) : (
         (() => {
           const list = active === "dispatch" ? groups.dispatch : groups.out;
           if (list.length === 0) return <Empty label={activeTab.label} />;
           return (
-            <ul className="grid gap-2.5">
-              {list.map((d, i) => (
-                <DeliveryCard key={d.id} delivery={d} highlight={i === 0} />
-              ))}
-            </ul>
+            <CappedList items={list} className="grid gap-2.5" keyOf={(d) => d.id}>
+              {(d, i) => <DeliveryCard delivery={d} highlight={i === 0} />}
+            </CappedList>
           );
         })()
       )}
