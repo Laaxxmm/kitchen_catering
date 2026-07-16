@@ -62,7 +62,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
         (po.status === VendorPOStatus.DRAFT || po.status === VendorPOStatus.PENDING_APPROVAL)));
   const canReceive = (po.status === VendorPOStatus.APPROVED || po.status === VendorPOStatus.SENT || po.status === VendorPOStatus.PARTIALLY_RECEIVED) && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
   // Supplier bills are finance-only — store keepers never record them.
-  const canRecordBill = role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS;
+  const canRecordBill = role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS || role === Role.STORE_KEEPER;
 
   async function doSubmit() { "use server"; return await submitVendorPO(id); }
   async function doApprove() { "use server"; return await approveVendorPO(id); }

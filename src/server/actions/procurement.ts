@@ -41,11 +41,10 @@ import { createVendorPOTx } from "@/server/procurement-core";
 import { lockBanquetItemRows, recomputeBanquetReqStatus } from "@/server/banquet-core";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
-// Supplier-bill handling (create + 3-way match) is a finance-desk job, not
-// a store job. Per the client: "record supplier bill is not required for
-// store or chef — only admin, manager and finance." Store keepers receive
-// goods (GRN) and stock updates automatically; the bill never touches them.
-const BILL_WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
+// Store keeper records the vendor's invoice at goods-in (they hold the
+// physical bill) and can 3-way match it; approve + pay stay finance-only
+// (APPROVE_ROLES / the payment gate).
+const BILL_WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.STORE_KEEPER];
 const APPROVE_ROLES = [Role.ADMIN, Role.MANAGER];
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.ACCOUNTS, Role.KITCHEN_HEAD];
 

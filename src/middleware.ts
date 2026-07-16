@@ -93,7 +93,7 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // raise the PO, coordinate with the vendor, record the GRN. So they get
   // purchase orders, vendors and GRNs. Supplier bills + payment stay with
   // finance (admin / manager / accounts).
-  { pattern: /^\/procurement\/vendor-bills(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
+  { pattern: /^\/procurement\/vendor-bills(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "STORE_KEEPER"] },
   { pattern: /^\/procurement(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "ACCOUNTS"] },
 
   // Housekeeping — hotel-side stockroom. Open to admin / manager (oversight)

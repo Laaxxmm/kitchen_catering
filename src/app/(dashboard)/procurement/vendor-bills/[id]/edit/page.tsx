@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function EditVendorBillPage({ params }: { params: Promise<{ id: string }> }) {
   // Same finance desk as bill creation (middleware gates the route too).
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.STORE_KEEPER]);
   const { id } = await params;
   const bill = await getVendorBill(id);
   if (!bill) notFound();

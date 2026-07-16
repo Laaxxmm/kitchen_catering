@@ -16,7 +16,7 @@ export default async function NewVendorBillPage({
   searchParams: Promise<{ poId?: string }>;
 }) {
   // Finance desk only — store keepers / chefs never record supplier bills.
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS]);
+  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.STORE_KEEPER]);
   const { poId } = await searchParams;
 
   const [vendors, pos, po] = await Promise.all([
