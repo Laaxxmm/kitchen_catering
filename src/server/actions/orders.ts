@@ -1692,6 +1692,12 @@ export async function getOrder(id: string) {
         select: { id: true, staffName: true, duty: true },
         orderBy: { createdAt: "asc" },
       },
+      // Leftovers returned from a counter-sale / ODC event — rendered as
+      // chips in the "Leftovers returned" section (that channel only).
+      leftoverReturns: {
+        select: { id: true, itemName: true, quantity: true, unit: true, disposition: true, note: true },
+        orderBy: { createdAt: "asc" },
+      },
       // Per-dish kitchen → delivery handover state (an order has at most
       // one production job). Lean select: only what the handover checklist
       // + accountability timeline need.

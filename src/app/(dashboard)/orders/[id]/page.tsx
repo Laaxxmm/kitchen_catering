@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { OrderStatus, ProductionJobItemStatus, Role } from "@prisma/client";
+import { OrderChannel, OrderStatus, ProductionJobItemStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -27,6 +27,7 @@ import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 import { HandoverChecklist } from "@/components/ik/HandoverChecklist";
 import { StaffAllocation } from "@/components/ik/StaffAllocation";
+import { LeftoverReturns } from "@/components/ik/LeftoverReturns";
 import type { ActionResult } from "@/lib/action-result";
 import { AdminApprovalBlock } from "./_components/AdminApprovalBlock";
 import { ChefApprovalBlock } from "./_components/ChefApprovalBlock";
@@ -99,9 +100,13 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // Whether the viewer may actually tick items (server re-checks anyway).
   const canHandOver =
     isManager || isChef || role === Role.DELIVERY || role === Role.FNB_SERVICE;
-  // Who may allocate / remove serving staff (server re-checks anyway).
+  // Who may allocate / remove serving staff (server re-checks anyway). The
+  // same set may log leftover returns.
   const canAllocateStaff =
     isManager || role === Role.FNB_SERVICE || role === Role.DELIVERY;
+  // Leftover returns only apply to walk-up counter sales and outdoor catering.
+  const showLeftovers =
+    order.channel === OrderChannel.COUNTER_SALE || order.channel === OrderChannel.ODC;
   // Accountability timeline: every handed dish, in handover order.
   const handedTimeline = (productionJob?.items ?? [])
     .filter((it) => it.handedOverAt != null)
@@ -535,6 +540,29 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               canEdit={canAllocateStaff}
             />
           </section>
+
+          {/* Leftovers returned — counter-sale / ODC only. A traceability log
+              of surplus food and where it went; no stock movement. */}
+          {showLeftovers && (
+            <section className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+              <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Leftovers returned</h3>
+              {order.leftoverReturns.length === 0 && !canAllocateStaff && (
+                <p className="text-[12.5px] text-ik-ink-3">No leftovers logged.</p>
+              )}
+              <LeftoverReturns
+                orderId={order.id}
+                leftovers={order.leftoverReturns.map((l) => ({
+                  id: l.id,
+                  itemName: l.itemName,
+                  quantity: l.quantity.toString(),
+                  unit: l.unit,
+                  disposition: l.disposition,
+                  note: l.note,
+                }))}
+                canEdit={canAllocateStaff}
+              />
+            </section>
+          )}
 
           <section className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Customer</h3>

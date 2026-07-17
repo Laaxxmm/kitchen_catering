@@ -52,6 +52,7 @@ const CHANNEL_LABEL: Record<OrderChannel, string> = {
   BUFFET: "Buffet",
   ODC: "ODC",
   PACKET: "Packed food",
+  COUNTER_SALE: "Counter sale",
   ROOM_SERVICE: "Room service",
   ALACARTE: "À la carte",
   MANAGEMENT: "Management",

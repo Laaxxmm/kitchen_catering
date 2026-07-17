@@ -29,6 +29,7 @@ const FEEDBACK_CHANNELS: ReadonlySet<OrderChannel> = new Set([
   OrderChannel.ALACARTE,
   OrderChannel.ODC,
   OrderChannel.PACKET,
+  OrderChannel.COUNTER_SALE,
 ]);
 
 export function channelWantsFeedback(channel: OrderChannel): boolean {
@@ -47,6 +48,7 @@ const EVENT_DELIVERY_CHANNELS: ReadonlySet<OrderChannel> = new Set([
   OrderChannel.BUFFET,
   OrderChannel.ODC,
   OrderChannel.PACKET,
+  OrderChannel.COUNTER_SALE,
 ]);
 
 export function isEventDeliveryChannel(channel: OrderChannel): boolean {
@@ -63,6 +65,7 @@ const PACKAGE_PRICED_CHANNELS: ReadonlySet<OrderChannel> = new Set([
   OrderChannel.BUFFET,
   OrderChannel.ODC,
   OrderChannel.PACKET,
+  OrderChannel.COUNTER_SALE,
 ]);
 
 export function isPackagePricedChannel(channel: OrderChannel): boolean {

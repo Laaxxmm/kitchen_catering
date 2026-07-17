@@ -87,9 +87,18 @@ enum OrderChannel {
   BUFFET
   ODC
   PACKET
+  COUNTER_SALE
   ROOM_SERVICE
   ALACARTE
   MANAGEMENT
+}
+
+// Where returned counter-sale / ODC leftovers went. Traceability only —
+// this is a returns log, not a stock movement (ad-hoc food items).
+enum LeftoverDisposition {
+  REUSE_BREAKFAST
+  CHARITY
+  DISCARDED
 }
 
 // How a purchase order is being procured. LOCAL + ONLINE always need both
@@ -448,6 +457,7 @@ model User {
   banquetRequisitionsCreated   BanquetRequisition[]   @relation("BanquetRequisitionCreatedBy")
   banquetRequisitionsFulfilled BanquetRequisition[]   @relation("BanquetRequisitionFulfilledBy")
   staffAllocationsMade         OrderStaffAllocation[] @relation("StaffAllocationBy")
+  leftoverReturnsRecorded      OrderLeftoverReturn[]  @relation("LeftoverReturnBy")
 
   productionItemsHandedOver ProductionJobItem[] @relation("ProductionItemHandedOverBy")
   // Notifications (Phase 5)
@@ -1016,6 +1026,7 @@ model Order {
   banquetReturns      BanquetReturn[]           @relation("BanquetReturnOrder")
   banquetRequisitions BanquetRequisition[]      @relation("BanquetRequisitionOrder")
   staffAllocations    OrderStaffAllocation[]
+  leftoverReturns     OrderLeftoverReturn[]
 
   @@index([status])
   @@index([customerId])
@@ -2516,6 +2527,25 @@ model OrderStaffAllocation {
   allocatedById String
   allocatedBy   User     @relation("StaffAllocationBy", fields: [allocatedById], references: [id])
   createdAt     DateTime @default(now())
+
+  @@index([orderId])
+}
+
+// Leftovers returned from a counter-sale / ODC event (cake, juice, chips…)
+// and where they went (next-day breakfast / charity / discarded). A per-
+// order returns log for traceability; no stock posting.
+model OrderLeftoverReturn {
+  id           String              @id @default(cuid())
+  orderId      String
+  order        Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  itemName     String
+  quantity     Decimal             @db.Decimal(14, 3)
+  unit         String
+  disposition  LeftoverDisposition
+  note         String?
+  recordedById String
+  recordedBy   User                @relation("LeftoverReturnBy", fields: [recordedById], references: [id])
+  createdAt    DateTime            @default(now())
 
   @@index([orderId])
 }

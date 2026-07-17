@@ -6,6 +6,7 @@ import {
   CustomerInvoiceKind,
   CustomerInvoiceStatus,
   DeliveryStatus,
+  LeftoverDisposition,
   MealType,
   OrderChannel,
   OrderStatus,
@@ -478,6 +479,22 @@ export const OrderStaffInput = z.object({
   orderId: z.string().min(1),
   staffName: z.string().trim().min(2).max(60),
   duty: z.string().trim().max(60).nullable().optional(),
+});
+
+// =====================================================================
+// LEFTOVER RETURNS (counter-sale / ODC returns log — traceability only)
+// =====================================================================
+
+export const OrderLeftoverInput = z.object({
+  orderId: z.string().min(1),
+  itemName: z.string().trim().min(2).max(80),
+  quantity: decimalString.refine(
+    (v) => Number.isFinite(Number(v)) && Number(v) > 0,
+    "Quantity must be greater than zero",
+  ),
+  unit: z.string().trim().min(1).max(20),
+  disposition: z.nativeEnum(LeftoverDisposition),
+  note: z.string().max(200).nullable().optional(),
 });
 
 // =====================================================================
