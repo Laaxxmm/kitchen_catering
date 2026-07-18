@@ -466,7 +466,9 @@ export async function listIngredients(opts: { query?: string; active?: boolean; 
         : {}),
     },
     orderBy: { name: "asc" },
-    take: 300,
+    // High cap so the full catalogue shows in requisition / PO pickers — the
+    // 300 default silently hid later items once the catalogue grew past it.
+    take: 2000,
   });
   return opts.lowStock
     ? rows.filter((r) => toDecimal(r.onHandQty).lte(toDecimal(r.reorderLevel)))

@@ -76,11 +76,11 @@ export function StoreBoard({
     { key: "stock", label: "My purchase orders", hint: "Buy & receive", count: pos.length },
   ];
 
-  // Urgent-first: soonest event on top, undated last (stable). POs surface
-  // the ones the store must act on now, keeping their existing order within.
-  const eventTime = (d: string | null) => (d ? new Date(d).getTime() : Infinity);
-  const chefSorted = [...chefReqs].sort((a, b) => eventTime(a.eventDate) - eventTime(b.eventDate));
-  const fnbSorted = [...fnbReqs].sort((a, b) => eventTime(a.eventDate) - eventTime(b.eventDate));
+  // Newest request first — the lists arrive createdAt-desc from the server,
+  // so keep that order (an event-date sort buried brand-new general requests
+  // that have no event date). POs still surface action-needed first.
+  const chefSorted = chefReqs;
+  const fnbSorted = fnbReqs;
   const posSorted = [...pos].sort(
     (a, b) => Number(PO_NEEDS_ACTION.has(b.status)) - Number(PO_NEEDS_ACTION.has(a.status)),
   );
