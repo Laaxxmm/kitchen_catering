@@ -799,6 +799,16 @@ async function createGRNInner(
         },
       });
 
+      // A free-text PO line (no linked kitchen ingredient or banquet item)
+      // has nowhere to post — warn instead of silently doing nothing (the
+      // "GRN posted but stock didn't move" surprise). One-off non-stock buys
+      // can ignore it; anything that should count must be linked/adjusted.
+      if (accepted.gt(0) && !poLine.ingredientId && !poLine.banquetItemId) {
+        warnings.push(
+          `GRN ${grnNo}: "${poLine.description}" isn't linked to a stock item, so nothing was added to stock. If it should count, add it to Kitchen/Banquet stock and record it via Stock adjustment.`,
+        );
+      }
+
       // Post inventory only if accepted > 0 AND the PO line links to an Ingredient.
       if (accepted.gt(0) && poLine.ingredientId && poLine.ingredient &&
           !unitsMatch(poLine.unit, poLine.ingredient.unit)) {
