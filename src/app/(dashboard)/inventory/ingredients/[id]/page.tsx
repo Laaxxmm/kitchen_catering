@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
-import { deactivateIngredient, getIngredient, reactivateIngredient, updateIngredient } from "@/server/actions/inventory";
+import { auth } from "@/server/auth";
+import { deactivateIngredient, getIngredient, listIngredients, reactivateIngredient, updateIngredient } from "@/server/actions/inventory";
 import { IngredientForm } from "../../_components/IngredientForm";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
+import { MergeIngredient } from "@/components/ik/MergeIngredient";
 import type { IngredientInputT } from "@/lib/validators";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +16,16 @@ export default async function IngredientDetailPage({ params }: { params: Promise
   const { id } = await params;
   const ingredient = await getIngredient(id);
   if (!ingredient) notFound();
+
+  const session = await auth();
+  const role = session?.user?.role as Role | undefined;
+  const canMerge = role === Role.ADMIN || role === Role.MANAGER;
+  // Target picker: active ingredients only, minus this one.
+  const mergeTargets = canMerge
+    ? (await listIngredients({ active: true }))
+        .filter((i) => i.id !== id)
+        .map((i) => ({ id: i.id, name: i.name, sku: i.sku }))
+    : [];
 
   async function update(input: IngredientInputT) {
     "use server";
@@ -65,6 +78,9 @@ export default async function IngredientDetailPage({ params }: { params: Promise
         onSubmit={update}
         submitLabel="Save changes"
       />
+      {canMerge && (
+        <MergeIngredient sourceId={id} sourceName={ingredient.name} targets={mergeTargets} />
+      )}
     </>
   );
 }

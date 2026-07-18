@@ -465,6 +465,98 @@ async function adjustIngredientStockInner(raw: unknown): Promise<{ ok: true; id:
   return { ok: true, id: result.id };
 }
 
+/**
+ * Merge a duplicate ingredient (SOURCE) into the keeper (TARGET). Duplicate
+ * names silently split stock — goods received on one twin are invisible to a
+ * requisition pointing at the other. This folds the source's stock into the
+ * target (weighted average, treating it as a receipt), re-points every table
+ * that references the source, and retires the source (kept for the audit
+ * trail, not deleted). Admin/manager only — this is a destructive catalogue
+ * op, not a storekeeper stock movement.
+ */
+export async function mergeIngredient(sourceId: string, targetId: string): Promise<ActionResult> {
+  try {
+    return await mergeIngredientInner(sourceId, targetId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function mergeIngredientInner(sourceId: string, targetId: string): Promise<{ ok: true }> {
+  const session = await requireRole([Role.ADMIN, Role.MANAGER]);
+  if (sourceId === targetId) throw new ActionError("Pick two different items to merge.");
+
+  await db.$transaction(async (tx) => {
+    // Lock both rows — the fold reads+writes target.onHandQty like a receipt
+    // does, so it needs the same serialisation. Sorted order avoids a deadlock
+    // if two merges touch the same pair from opposite directions.
+    for (const id of [sourceId, targetId].sort()) await lockIngredientRow(tx, id);
+
+    const [source, target] = await Promise.all([
+      tx.ingredient.findUnique({ where: { id: sourceId } }),
+      tx.ingredient.findUnique({ where: { id: targetId } }),
+    ]);
+    if (!source) throw new ActionError("Source ingredient not found");
+    if (!target) throw new ActionError("Target ingredient not found");
+
+    // a. Fold source stock into target (source on-hand = a receipt into target).
+    //    newMovingAverage rejects a zero receipt qty, so an empty source is a
+    //    no-op on the target's cost/qty.
+    if (toDecimal(source.onHandQty).gt(0)) {
+      const { qty, avgUnitCost } = newMovingAverage({
+        onHandQty: target.onHandQty,
+        avgUnitCost: target.avgUnitCost,
+        receiptQty: source.onHandQty,
+        receiptUnitCost: source.avgUnitCost,
+      });
+      await tx.ingredient.update({
+        where: { id: targetId },
+        data: {
+          onHandQty: qty.toDecimalPlaces(3).toString(),
+          avgUnitCost: avgUnitCost.toDecimalPlaces(4).toString(),
+        },
+      });
+    }
+
+    // b. Re-point every reference source → target. None of these tables has a
+    //    unique on ingredientId, so a plain updateMany can't collide.
+    const where = { where: { ingredientId: sourceId }, data: { ingredientId: targetId } };
+    await tx.ingredientReceipt.updateMany(where);
+    await tx.ingredientIssue.updateMany(where);
+    await tx.ingredientAdjustment.updateMany(where);
+    await tx.recipeIngredient.updateMany(where);
+    await tx.purchaseRequisitionLine.updateMany(where);
+    await tx.orderBudgetLine.updateMany(where);
+    await tx.vendorPOLine.updateMany(where);
+    await tx.chefRequisitionLine.updateMany(where);
+
+    // c. Retire the source — its stock now lives on the target. Keep the row
+    //    (audit trail); never delete.
+    await tx.ingredient.update({ where: { id: sourceId }, data: { active: false, onHandQty: "0" } });
+
+    // d. Audit.
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "INGREDIENT_MERGED",
+        entity: "Ingredient",
+        entityId: targetId,
+        payloadHash: sha256Json({
+          sourceId,
+          sourceSku: source.sku,
+          targetSku: target.sku,
+          movedQty: source.onHandQty.toString(),
+        }),
+      },
+    });
+  });
+
+  revalidatePath("/inventory/ingredients");
+  revalidatePath(`/inventory/ingredients/${sourceId}`);
+  revalidatePath(`/inventory/ingredients/${targetId}`);
+  return { ok: true };
+}
+
 // ─── Queries ─────────────────────────────────────────────────────────────
 
 export async function listIngredients(opts: { query?: string; active?: boolean; lowStock?: boolean } = {}) {
