@@ -107,6 +107,22 @@ async function createIngredientInner(raw: unknown): Promise<{ ok: true; id: stri
     throw new ActionError(`SKU "${input.sku}" is already used by "${dupe.name}".`);
   }
 
+  // Block duplicate NAMES too (case-insensitive). Two ingredients with the
+  // same name silently split stock — goods received on one are invisible to a
+  // requisition pointing at the other (the "1150 received, 0 on hand" bug).
+  // Force reuse of the existing item instead of a twin.
+  const nameDupe = await db.ingredient.findFirst({
+    where: { name: { equals: input.name.trim(), mode: "insensitive" } },
+    select: { sku: true, active: true },
+  });
+  if (nameDupe) {
+    throw new ActionError(
+      nameDupe.active
+        ? `An ingredient named "${input.name.trim()}" already exists (SKU ${nameDupe.sku}). Pick it from the list instead of adding a new one.`
+        : `A hidden ingredient named "${input.name.trim()}" already exists (SKU ${nameDupe.sku}). Unhide it from Kitchen stock → Show hidden items instead of adding a new one.`,
+    );
+  }
+
   const row = await db.$transaction(async (tx) => {
     const created = await tx.ingredient.create({
       data: {
