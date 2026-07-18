@@ -47,15 +47,27 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
   }
 
   const canSubmit = isChef && requisition.status === ChefRequisitionStatus.DRAFT;
-  // Cancel is creator-only and only while the store hasn't acted: DRAFT or
-  // SUBMITTED, nothing issued, no purchase running. Mirrors the server
-  // guards in cancelChefRequisition — computed here just to hide the form.
-  const canCancel =
-    session?.user?.id === requisition.createdById &&
+  // Two closers (mirrors the server guards in cancelChefRequisition):
+  //  - the chef who raised it: DRAFT/SUBMITTED, nothing issued, no PO running.
+  //  - the store / admin / manager declining it (reason required): DRAFT,
+  //    SUBMITTED or PARTIALLY_ISSUED.
+  const isCreator = session?.user?.id === requisition.createdById;
+  const isStoreClose =
+    !isCreator &&
+    !!role &&
+    (role === Role.STORE_KEEPER || role === Role.ADMIN || role === Role.MANAGER);
+  const creatorCanCancel =
+    isCreator &&
     (requisition.status === ChefRequisitionStatus.DRAFT ||
       requisition.status === ChefRequisitionStatus.SUBMITTED) &&
     !requisition.lines.some((l) => Number(l.issuedQty.toString()) > 0) &&
     !requisition.lines.some((l) => l.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT);
+  const storeCanClose =
+    isStoreClose &&
+    (requisition.status === ChefRequisitionStatus.DRAFT ||
+      requisition.status === ChefRequisitionStatus.SUBMITTED ||
+      requisition.status === ChefRequisitionStatus.PARTIALLY_ISSUED);
+  const canCancel = creatorCanCancel || storeCanClose;
   const canFulfil =
     isStore &&
     (requisition.status === ChefRequisitionStatus.SUBMITTED ||
@@ -159,12 +171,20 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
         <div className="mt-6 max-w-sm">
           <ActionReasonForm
             action={doCancel}
-            heading="Cancel requisition"
-            description="This tells the store to disregard the request."
-            submitLabel="Cancel requisition"
-            successMessage="Requisition cancelled — the store has been told to disregard it"
-            placeholder="Reason (optional)"
-            required={false}
+            heading={isCreator ? "Cancel requisition" : "Close request"}
+            description={
+              isCreator
+                ? "This tells the store to disregard the request."
+                : "Store can't fulfil this — the chef who raised it is told the reason."
+            }
+            submitLabel={isCreator ? "Cancel requisition" : "Close request"}
+            successMessage={
+              isCreator
+                ? "Requisition cancelled — the store has been told to disregard it"
+                : "Request closed — the chef has been notified"
+            }
+            placeholder={isCreator ? "Reason (optional)" : "Reason (required)"}
+            required={!isCreator}
             redirectTo="/requisitions"
           />
         </div>

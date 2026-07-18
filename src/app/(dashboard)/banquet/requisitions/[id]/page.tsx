@@ -31,14 +31,21 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
     ISSUE_ROLES.includes(role) &&
     (requisition.status === BanquetRequisitionStatus.SUBMITTED ||
       requisition.status === BanquetRequisitionStatus.PARTIALLY_ISSUED);
-  // The F&B user who raised it can withdraw their own mistake — but only
-  // while the requisition is still open and no stock has been issued.
-  // Mirrors the server guards in cancelBanquetRequisition.
-  const canCancel =
-    session?.user?.id === requisition.createdById &&
+  // Two closers (mirrors the server guards in cancelBanquetRequisition):
+  //  - the F&B user who raised it withdraws a mistake (no stock issued yet).
+  //  - the store / admin / manager declines a request it can't fulfil.
+  const isCreator = session?.user?.id === requisition.createdById;
+  const isStoreClose =
+    !isCreator &&
+    !!role &&
+    (role === Role.STORE_KEEPER || role === Role.ADMIN || role === Role.MANAGER);
+  const notTerminal =
     requisition.status !== BanquetRequisitionStatus.FULLY_ISSUED &&
-    requisition.status !== BanquetRequisitionStatus.CANCELLED &&
-    !requisition.lines.some((l) => Number(l.issuedQty.toString()) > 0);
+    requisition.status !== BanquetRequisitionStatus.CANCELLED;
+  const canCancel =
+    notTerminal &&
+    ((isCreator && !requisition.lines.some((l) => Number(l.issuedQty.toString()) > 0)) ||
+      isStoreClose);
 
   // Vendor picker for "Raise PO for shortfall" — only fetched when the
   // viewer can actually fulfil lines.
@@ -155,11 +162,20 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
         <div className="mt-6 max-w-sm">
           <ActionReasonForm
             action={doCancel}
-            heading="Cancel requisition"
-            description="This tells the store to disregard the request."
-            submitLabel="Cancel requisition"
-            successMessage="Requisition cancelled — the store has been told to disregard it"
-            placeholder="Reason"
+            heading={isCreator ? "Cancel requisition" : "Close request"}
+            description={
+              isCreator
+                ? "This tells the store to disregard the request."
+                : "Store can't fulfil this — the F&B team that raised it is told the reason."
+            }
+            submitLabel={isCreator ? "Cancel requisition" : "Close request"}
+            successMessage={
+              isCreator
+                ? "Requisition cancelled — the store has been told to disregard it"
+                : "Request closed — the F&B team has been notified"
+            }
+            placeholder="Reason (required)"
+            required
             redirectTo="/banquet/requisitions"
           />
         </div>

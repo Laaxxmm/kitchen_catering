@@ -31,7 +31,7 @@ import {
 import { nextChefRequisitionNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
-import { notifyRoles } from "@/server/actions/notifications";
+import { createNotification, notifyRoles } from "@/server/actions/notifications";
 import { deferAfterResponse } from "@/server/defer";
 import { createProductionJobForOrder } from "./production-jobs";
 
@@ -627,23 +627,37 @@ async function cancelChefRequisitionInner(id: string, reason?: string): Promise<
       },
     });
     if (!req) throw new ActionError("Requisition not found");
-    if (req.createdById !== session.user.id) {
-      throw new ActionError("Only the chef who raised this requisition can cancel it.");
+    // Two closers: the CHEF who raised it (cancel a mistake, reason optional),
+    // or the STORE / admin / manager declining a request it can't fulfil
+    // (reason required — the chef is then told). The store path skips the
+    // "ask the store to reconcile" refusals below since the store IS the one
+    // acting, and may close a partially-issued request (keeping issued lines).
+    const isCreator = req.createdById === session.user.id;
+    const isStoreClose =
+      !isCreator &&
+      (session.user.role === Role.STORE_KEEPER ||
+        session.user.role === Role.ADMIN ||
+        session.user.role === Role.MANAGER);
+    if (!isCreator && !isStoreClose) {
+      throw new ActionError("Only the chef who raised this, or the store, can close it.");
     }
-    if (
-      req.status !== ChefRequisitionStatus.DRAFT &&
-      req.status !== ChefRequisitionStatus.SUBMITTED
-    ) {
+    if (isStoreClose && !reason?.trim()) {
+      throw new ActionError("A reason is required to close another team's request.");
+    }
+    const closableStatuses: ChefRequisitionStatus[] = isStoreClose
+      ? [ChefRequisitionStatus.DRAFT, ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED]
+      : [ChefRequisitionStatus.DRAFT, ChefRequisitionStatus.SUBMITTED];
+    if (!closableStatuses.includes(req.status)) {
       throw new ActionError(
-        `Only draft or submitted requisitions can be cancelled — this one is ${req.status}.`,
+        `This requisition is ${req.status} and can no longer be closed.`,
       );
     }
-    if (req.lines.some((l) => toDecimal(l.issuedQty).gt(0))) {
+    if (isCreator && req.lines.some((l) => toDecimal(l.issuedQty).gt(0))) {
       throw new ActionError(
         "Stock has already been issued against this — ask the store to reconcile instead.",
       );
     }
-    if (req.lines.some((l) => l.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT)) {
+    if (isCreator && req.lines.some((l) => l.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT)) {
       throw new ActionError("A purchase is already running for a line — ask the store.");
     }
 
@@ -652,7 +666,7 @@ async function cancelChefRequisitionInner(id: string, reason?: string): Promise<
     const updated = await tx.chefRequisition.updateMany({
       where: {
         id,
-        status: { in: [ChefRequisitionStatus.DRAFT, ChefRequisitionStatus.SUBMITTED] },
+        status: { in: closableStatuses },
       },
       data: { status: ChefRequisitionStatus.CANCELLED, closedAt: new Date() },
     });
@@ -677,20 +691,34 @@ async function cancelChefRequisitionInner(id: string, reason?: string): Promise<
         payloadHash: sha256Json({ reason: reason?.trim() || null }),
       },
     });
-    return { requisitionNo: req.requisitionNo };
+    return { requisitionNo: req.requisitionNo, createdById: req.createdById, isStoreClose };
   });
 
-  // Tell the store immediately so nobody is mid-pick on a dead request.
-  const cancelledBy = session.user.name ?? "the chef";
-  deferAfterResponse("chef-req-cancel:notify", () =>
-    notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
-      kind: "GENERIC",
-      title: `${result.requisitionNo} cancelled by ${cancelledBy}`,
-      body: `${reason?.trim() || "No reason given"} — disregard this request; nothing needs issuing.`,
-      link: `/requisitions/${id}`,
-      dedupeKey: `chef-req-cancel:${id}`,
-    }),
-  );
+  const closedBy = session.user.name ?? "someone";
+  if (result.isStoreClose) {
+    // The store declined it — tell the chef who raised it (not the store).
+    deferAfterResponse("chef-req-store-close:notify", () =>
+      createNotification({
+        userId: result.createdById,
+        kind: "GENERIC",
+        title: `${result.requisitionNo} closed by the store`,
+        body: `${reason?.trim() || "No reason given"} — raise a fresh requisition if still needed.`,
+        link: `/requisitions/${id}`,
+        dedupeKey: `chef-req-store-close:${id}`,
+      }),
+    );
+  } else {
+    // The chef cancelled — tell the store so nobody is mid-pick.
+    deferAfterResponse("chef-req-cancel:notify", () =>
+      notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+        kind: "GENERIC",
+        title: `${result.requisitionNo} cancelled by ${closedBy}`,
+        body: `${reason?.trim() || "No reason given"} — disregard this request; nothing needs issuing.`,
+        link: `/requisitions/${id}`,
+        dedupeKey: `chef-req-cancel:${id}`,
+      }),
+    );
+  }
 
   revalidatePath("/requisitions");
   revalidatePath(`/requisitions/${id}`);

@@ -1158,12 +1158,17 @@ async function cancelBanquetRequisitionInner(id: string, reason: string): Promis
       },
     });
     if (!req) throw new ActionError("Requisition not found");
-    const canCancel =
-      session.user.role === Role.ADMIN ||
-      session.user.role === Role.MANAGER ||
-      req.createdById === session.user.id;
-    if (!canCancel) {
-      throw new ActionError("You can only cancel requisitions you raised.");
+    // The requester cancels their own; admin/manager oversee; and the STORE
+    // keeper can close (decline) a request it can't fulfil — the store is the
+    // party the "ask the store" guard below points to, so it's skipped for them.
+    const isCreator = req.createdById === session.user.id;
+    const isStoreClose =
+      !isCreator &&
+      (session.user.role === Role.STORE_KEEPER ||
+        session.user.role === Role.ADMIN ||
+        session.user.role === Role.MANAGER);
+    if (!isCreator && !isStoreClose) {
+      throw new ActionError("You can only close requisitions you raised.");
     }
     if (
       req.status === BanquetRequisitionStatus.FULLY_ISSUED ||
@@ -1173,8 +1178,9 @@ async function cancelBanquetRequisitionInner(id: string, reason: string): Promis
     }
     // Issued-stock guard: cancelling a requisition that already consumed
     // stock would orphan the issue — the movement is real and needs a
-    // return/reconciliation, not a cancel.
-    if (req.lines.some((l) => new Decimal(l.issuedQty.toString()).gt(0))) {
+    // return/reconciliation, not a cancel. The store closing it IS the
+    // reconciler, so this only blocks the requester's own cancel.
+    if (isCreator && req.lines.some((l) => new Decimal(l.issuedQty.toString()).gt(0))) {
       throw new ActionError(
         "Stock has already been issued against this — ask the store to reconcile instead.",
       );
@@ -1206,20 +1212,34 @@ async function cancelBanquetRequisitionInner(id: string, reason: string): Promis
         payloadHash: sha256Json({ reason: reason.trim() }),
       },
     });
-    return { requisitionNo: req.requisitionNo };
+    return { requisitionNo: req.requisitionNo, createdById: req.createdById, isStoreClose };
   });
 
-  // Tell the store immediately so nobody is mid-pick on a dead request.
-  const cancelledBy = session.user.name ?? "the requester";
-  deferAfterResponse("banquet-req-cancel:notify", () =>
-    notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
-      kind: "GENERIC",
-      title: `${result.requisitionNo} cancelled by ${cancelledBy}`,
-      body: `${reason.trim()} — disregard this request; nothing needs issuing.`,
-      link: `/banquet/requisitions/${id}`,
-      dedupeKey: `banquet-req-cancel:${id}`,
-    }),
-  );
+  if (result.isStoreClose) {
+    // The store declined it — tell the F&B requester who raised it.
+    deferAfterResponse("banquet-req-store-close:notify", () =>
+      createNotification({
+        userId: result.createdById,
+        kind: "GENERIC",
+        title: `${result.requisitionNo} closed by the store`,
+        body: `${reason.trim()} — raise a fresh requisition if still needed.`,
+        link: `/banquet/requisitions/${id}`,
+        dedupeKey: `banquet-req-store-close:${id}`,
+      }),
+    );
+  } else {
+    // The requester cancelled — tell the store so nobody is mid-pick.
+    const cancelledBy = session.user.name ?? "the requester";
+    deferAfterResponse("banquet-req-cancel:notify", () =>
+      notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+        kind: "GENERIC",
+        title: `${result.requisitionNo} cancelled by ${cancelledBy}`,
+        body: `${reason.trim()} — disregard this request; nothing needs issuing.`,
+        link: `/banquet/requisitions/${id}`,
+        dedupeKey: `banquet-req-cancel:${id}`,
+      }),
+    );
+  }
 
   revalidatePath("/banquet/requisitions");
   revalidatePath(`/banquet/requisitions/${id}`);
