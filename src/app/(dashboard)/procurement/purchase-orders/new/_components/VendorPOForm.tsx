@@ -13,9 +13,11 @@ import type { ActionResult } from "@/lib/action-result";
 
 interface Vendor { id: string; name: string; code: string; stateCode: string }
 interface Ingredient { id: string; sku: string; name: string; unit: string; gstRatePct: string }
+interface BanquetItem { id: string; sku: string; name: string; unit: string; gstRatePct?: string }
 
 interface DraftLine {
   ingredientId: string;
+  banquetItemId: string;
   sku: string;
   description: string;
   unit: string;
@@ -27,13 +29,14 @@ interface DraftLine {
 interface Props {
   vendors: Vendor[];
   ingredients: Ingredient[];
+  banquetItems?: BanquetItem[];
   onSubmit: (input: {
     vendorId: string;
     procurementType: "STANDARD" | "LOCAL" | "ONLINE";
     placeOfSupplyStateCode: string;
     expectedDate: string | undefined;
     notes: string | null;
-    lines: Array<{ ingredientId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
+    lines: Array<{ ingredientId: string | null; banquetItemId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
   }) => Promise<ActionResult | void>;
   // Pre-fill when the PO is being spun out of an approved PR — the lines
   // come straight from the request so the user only has to fill in prices.
@@ -48,10 +51,10 @@ interface Props {
 }
 
 function emptyLine(): DraftLine {
-  return { ingredientId: "", sku: "", description: "", unit: "kg", quantity: "1", unitPrice: "0", gstRatePct: "5" };
+  return { ingredientId: "", banquetItemId: "", sku: "", description: "", unit: "kg", quantity: "1", unitPrice: "0", gstRatePct: "5" };
 }
 
-export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, initialLines, onQuickAddVendor }: Props) {
+export function VendorPOForm({ vendors, ingredients, banquetItems = [], onSubmit, initialVendorId, initialLines, onQuickAddVendor }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [vendorOptions, setVendorOptions] = useState(vendors);
@@ -105,20 +108,25 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
     return { subtotal: subtotal.toDecimalPlaces(2), tax: tax.toDecimalPlaces(2), total: subtotal.plus(tax).toDecimalPlaces(2) };
   }, [lines]);
 
-  function pickIngredient(idx: number, ingredientId: string) {
-    const ing = ingredients.find((i) => i.id === ingredientId);
-    setLines((p) => p.map((x, i) =>
-      i === idx
-        ? {
-            ...x,
-            ingredientId,
-            sku: ing?.sku ?? x.sku,
-            description: ing?.name ?? x.description,
-            unit: ing?.unit ?? x.unit,
-            gstRatePct: ing?.gstRatePct ?? x.gstRatePct,
-          }
-        : x,
-    ));
+  // The option value is type-prefixed so the two catalogues don't collide:
+  // "ing:<id>" (kitchen), "bq:<id>" (banquet), "" (free text). A line links to
+  // EITHER an ingredient OR a banquet item, never both.
+  function pickItem(idx: number, value: string) {
+    const ing = value.startsWith("ing:") ? ingredients.find((i) => i.id === value.slice(4)) : undefined;
+    const bq = value.startsWith("bq:") ? banquetItems.find((b) => b.id === value.slice(3)) : undefined;
+    setLines((p) => p.map((x, i) => {
+      if (i !== idx) return x;
+      if (ing) {
+        return { ...x, ingredientId: ing.id, banquetItemId: "", sku: ing.sku, description: ing.name, unit: ing.unit, gstRatePct: ing.gstRatePct };
+      }
+      if (bq) {
+        // Banquet items don't carry GST in the catalogue — keep the line's
+        // current rate (bq.gstRatePct if a caller ever provides one).
+        return { ...x, ingredientId: "", banquetItemId: bq.id, sku: bq.sku, description: bq.name, unit: bq.unit, gstRatePct: bq.gstRatePct ?? x.gstRatePct };
+      }
+      // Free text — clear both ids, leave sku/description as typed.
+      return { ...x, ingredientId: "", banquetItemId: "" };
+    }));
   }
 
   function submit(e: React.FormEvent) {
@@ -154,6 +162,7 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
           notes: notes || null,
           lines: payload.map((l) => ({
             ingredientId: l.ingredientId || null,
+            banquetItemId: l.banquetItemId || null,
             sku: l.sku,
             description: l.description,
             unit: l.unit,
@@ -277,9 +286,16 @@ export function VendorPOForm({ vendors, ingredients, onSubmit, initialVendorId, 
                 return (
                   <tr key={idx} className="border-b border-ik-rule">
                     <td className="py-1 pr-2">
-                      <select value={l.ingredientId} onChange={(e) => pickIngredient(idx, e.target.value)} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1">
+                      <select value={l.banquetItemId ? `bq:${l.banquetItemId}` : l.ingredientId ? `ing:${l.ingredientId}` : ""} onChange={(e) => pickItem(idx, e.target.value)} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1">
                         <option value="">— free text —</option>
-                        {ingredients.map((i) => <option key={i.id} value={i.id}>{i.sku} · {i.name}</option>)}
+                        <optgroup label="Kitchen">
+                          {ingredients.map((i) => <option key={i.id} value={`ing:${i.id}`}>{i.sku} · {i.name}</option>)}
+                        </optgroup>
+                        {banquetItems.length > 0 && (
+                          <optgroup label="Banquet">
+                            {banquetItems.map((b) => <option key={b.id} value={`bq:${b.id}`}>{b.sku} · {b.name}</option>)}
+                          </optgroup>
+                        )}
                       </select>
                     </td>
                     <td className="py-1 pr-2"><input value={l.sku} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, sku: e.target.value } : x))} className="h-8 w-20 rounded border border-ik-rule bg-ik-card px-1 font-mono" /></td>

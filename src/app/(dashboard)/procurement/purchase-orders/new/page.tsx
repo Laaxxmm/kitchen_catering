@@ -3,6 +3,7 @@ import { ChefRequisitionLineStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { createVendor, listVendors } from "@/server/actions/vendors";
 import { listIngredients } from "@/server/actions/inventory";
+import { listBanquetItems } from "@/server/actions/banquet";
 import { createVendorPO } from "@/server/actions/procurement";
 import { getChefRequisition } from "@/server/actions/chef-requisitions";
 import { gateRolePage } from "@/server/rbac";
@@ -21,9 +22,10 @@ export default async function NewVendorPOPage({
   const { reqId, lowstock } = await searchParams;
   const fromLowStock = lowstock === "1";
 
-  const [vendors, ingredients, chefReq, lowStockItems] = await Promise.all([
+  const [vendors, ingredients, banquetItems, chefReq, lowStockItems] = await Promise.all([
     listVendors({ active: true }),
     listIngredients({ active: true }),
+    listBanquetItems({ activeOnly: true }),
     reqId ? getChefRequisition(reqId) : Promise.resolve(null),
     fromLowStock ? listIngredients({ active: true, lowStock: true }) : Promise.resolve([]),
   ]);
@@ -40,6 +42,7 @@ export default async function NewVendorPOPage({
         const shortfall = toDecimal(l.requestedQty).minus(toDecimal(l.issuedQty));
         return {
           ingredientId: l.ingredientId,
+          banquetItemId: "",
           sku: l.ingredient.sku,
           description: l.ingredient.name,
           unit: l.ingredient.unit,
@@ -56,6 +59,7 @@ export default async function NewVendorPOPage({
   if (fromLowStock) {
     prefillLines = lowStockItems.map((i) => ({
       ingredientId: i.id,
+      banquetItemId: "",
       sku: i.sku,
       description: i.name,
       unit: i.unit,
@@ -77,9 +81,11 @@ export default async function NewVendorPOPage({
     placeOfSupplyStateCode: string;
     expectedDate: string | undefined;
     notes: string | null;
-    lines: Array<{ ingredientId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
+    lines: Array<{ ingredientId: string | null; banquetItemId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
   }) {
     "use server";
+    // input.lines already carry banquetItemId; createVendorPO parses via
+    // VendorPOCreateInput (which includes it) so it forwards untouched.
     const r = await createVendorPO(input);
     if (!r.ok) return r;
     redirect(`/procurement/purchase-orders/${r.id}`);
@@ -139,6 +145,7 @@ export default async function NewVendorPOPage({
       <VendorPOForm
         vendors={vendors.map((v) => ({ id: v.id, name: v.name, code: v.code, stateCode: v.stateCode }))}
         ingredients={ingredients.map((i) => ({ id: i.id, sku: i.sku, name: i.name, unit: i.unit, gstRatePct: i.gstRatePct.toString() }))}
+        banquetItems={banquetItems.map((b) => ({ id: b.id, sku: b.sku ?? "", name: b.name, unit: b.unit }))}
         onSubmit={create}
         onQuickAddVendor={quickAddVendor}
         initialVendorId={suggestedVendorId}
