@@ -7,6 +7,7 @@ import { auth } from "@/server/auth";
 import { listChefRequisitions } from "@/server/actions/chef-requisitions";
 import { formatIST } from "@/lib/time";
 import { StatusPill, type PillTone } from "@/components/ik/StatusPill";
+import { RequisitionCards, type ReqCard } from "./_components/RequisitionCards";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,20 @@ const GROUP_ORDER: { key: Group; label: string }[] = [
 ];
 
 type Req = Awaited<ReturnType<typeof listChefRequisitions>>[number];
+
+/** Serialise a requisition into the plain card shape the client cards need. */
+function toCard(r: Req): ReqCard {
+  return {
+    id: r.id,
+    requisitionNo: r.requisitionNo,
+    status: r.status,
+    orderCode: r.order?.code ?? null,
+    customerName: r.order?.customer.name ?? null,
+    eventDate: r.order?.eventDate.toISOString() ?? null,
+    createdAt: r.createdAt.toISOString(),
+    lines: r._count.lines,
+  };
+}
 
 /** How soon the event is, from now — drives the urgency flag on open reqs. */
 function eventUrgency(eventDate: Date, now: Date): "overdue" | "today" | "soon" | null {
@@ -128,13 +143,48 @@ export default async function RequisitionsPage({
       {requisitions.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">No requisitions yet.</p>
       ) : isAll ? (
-        <div className="grid gap-5">
-          {GROUP_ORDER.map(({ key, label }) => {
-            const rows = requisitions.filter((r) => STATUS_META[r.status].group === key);
-            if (rows.length === 0) return null;
-            return <ReqSection key={key} title={label} rows={rows} now={now} />;
-          })}
-        </div>
+        (() => {
+          // The work queue ("Needs issuing" + part-issued) is date-first cards;
+          // the fully-issued / draft / cancelled groups stay as the compact
+          // table, collapsed below so the queue stays front and centre.
+          const issueRows = requisitions.filter((r) => STATUS_META[r.status].group === "issue");
+          const restGroups = GROUP_ORDER.filter((g) => g.key !== "issue")
+            .map((g) => ({ ...g, rows: requisitions.filter((r) => STATUS_META[r.status].group === g.key) }))
+            .filter((g) => g.rows.length > 0);
+          const restCount = restGroups.reduce((n, g) => n + g.rows.length, 0);
+          return (
+            <div className="grid gap-5">
+              {issueRows.length > 0 ? (
+                <section>
+                  <h2 className="mb-2 text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">
+                    Needs issuing · {issueRows.length}
+                  </h2>
+                  <RequisitionCards items={issueRows.map(toCard)} />
+                </section>
+              ) : (
+                <p className="text-[13px] text-ik-ink-3">Nothing to issue right now.</p>
+              )}
+              {restCount > 0 && (
+                <details className="rounded-md border border-ik-rule bg-ik-card px-4 py-3">
+                  <summary className="cursor-pointer text-[11px] uppercase tracking-[0.12em] text-ik-ink-3 hover:text-ik-ink">
+                    Fully issued &amp; closed · {restCount}
+                  </summary>
+                  <div className="mt-4 grid gap-5">
+                    {restGroups.map((g) => (
+                      <ReqSection key={g.key} title={g.label} rows={g.rows} now={now} />
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          );
+        })()
+      ) : filter === "issue" ? (
+        visible.length === 0 ? (
+          <p className="text-[13px] text-ik-ink-3">Nothing to issue right now.</p>
+        ) : (
+          <RequisitionCards items={visible.map(toCard)} />
+        )
       ) : visible.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">Nothing here right now.</p>
       ) : (

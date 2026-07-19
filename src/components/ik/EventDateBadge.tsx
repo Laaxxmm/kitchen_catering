@@ -28,14 +28,34 @@ export function eventPriority(eventDate: string): { label: string; cls: string; 
  * (TODAY / TOMORROW / IN N DAYS), the date in bold, the time under it, and
  * the live "due in" countdown. One component for the chef AND F&B screens
  * so the two boards always read the same.
+ *
+ * `mode="raised"` reuses the exact same block for order-less "general"
+ * requests, where `target` is the createdAt: there's no event to be urgent
+ * about, so the urgency pill becomes a neutral "RAISED" tag and the live
+ * due-in countdown is dropped. Same visual weight, no diverging copy.
  */
-export function EventDateBadge({ target, timeNote }: { target: string; timeNote?: string }) {
-  const prio = eventPriority(target);
+export function EventDateBadge({
+  target,
+  timeNote,
+  mode = "due",
+}: {
+  target: string;
+  timeNote?: string;
+  mode?: "due" | "raised";
+}) {
+  const raised = mode === "raised";
+  const prio = raised ? null : eventPriority(target);
   return (
     <div className="flex flex-col items-end gap-1">
-      <span className={"rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide " + prio.cls}>
-        {prio.label}
-      </span>
+      {raised ? (
+        <span className="rounded-full bg-ik-paper-alt px-2 py-0.5 text-[10px] font-bold tracking-wide text-ik-ink-2 ring-1 ring-ik-rule">
+          RAISED
+        </span>
+      ) : (
+        <span className={"rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide " + prio!.cls}>
+          {prio!.label}
+        </span>
+      )}
       <span className="text-[17px] font-bold leading-none text-ik-ink">
         {formatIST(new Date(target), "EEE d MMM")}
       </span>
@@ -43,7 +63,11 @@ export function EventDateBadge({ target, timeNote }: { target: string; timeNote?
         {timeNote ? `${timeNote} ` : ""}
         {formatIST(new Date(target), "HH:mm")}
       </span>
-      <Countdown target={target} />
+      {raised ? (
+        <span className="text-[11px] font-medium text-ik-ink-3">Raised</span>
+      ) : (
+        <Countdown target={target} />
+      )}
     </div>
   );
 }

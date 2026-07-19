@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { OrderChannel, OrderStatus, ProductionJobItemStatus, Role } from "@prisma/client";
+import { ChefRequisitionStatus, OrderChannel, OrderStatus, ProductionJobItemStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -63,6 +63,16 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // Catering submits still belong to sales / manager / admin.
   const isFnb = role === Role.DELIVERY || role === Role.FNB_SERVICE;
   const canSubmit = isSales || (isFnb && immediate);
+  // Storekeeper (or admin/manager) issuing an ISSUING order: send them
+  // straight to the still-open chef requisition. If every requisition was
+  // cancelled there's nothing to issue against and the chef must re-raise.
+  const canIssue = isManager || role === Role.STORE_KEEPER;
+  const openRequisition = order.chefRequisitions.find(
+    (r) =>
+      r.status === ChefRequisitionStatus.SUBMITTED ||
+      r.status === ChefRequisitionStatus.PARTIALLY_ISSUED,
+  );
+  const showIssueAction = canIssue && order.status === OrderStatus.ISSUING;
 
   // Feedback collection can be allocated once the order has been delivered.
   const feedbackEligible = (
@@ -222,6 +232,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             {!chefOnlyView && (
               <Link href={`/orders/${order.id}/pnl`}><Button variant="outline">P&amp;L</Button></Link>
             )}
+            {showIssueAction && openRequisition && (
+              <Link href={`/requisitions/${openRequisition.id}`}>
+                <Button>Issue ingredients</Button>
+              </Link>
+            )}
             {order.status === OrderStatus.DRAFT && canSubmit && (
               <ActionResultButton
                 action={doSubmit}
@@ -266,6 +281,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         role={role}
         immediate={immediate}
         hasRequisitions={order.chefRequisitions.length > 0}
+        openRequisitionId={openRequisition?.id ?? null}
         onIngredientsAvailable={doIngredientsAvailable}
         onMarkServed={doMarkServed}
       />
@@ -640,6 +656,9 @@ interface OrderNextStepProps {
   /** In-house immediate channel — submit goes straight to the chef. */
   immediate: boolean;
   hasRequisitions: boolean;
+  /** The order's still-open chef requisition (SUBMITTED / PARTIALLY_ISSUED),
+   *  or null if every one was cancelled — drives the ISSUING inline action. */
+  openRequisitionId: string | null;
   /** Server action: chef skips the requisition because stock is on hand. */
   onIngredientsAvailable: () => Promise<ActionResult>;
   /** Server action: one-tap "served" for in-house orders (no driver). */
@@ -653,11 +672,13 @@ interface OrderNextStepProps {
  * via the header button, PAID/COMPLETED/CANCELLED are read-only) and the
  * approval states (those use dedicated blocks above).
  */
-function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisitions, onIngredientsAvailable, onMarkServed }: OrderNextStepProps) {
+function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisitions, openRequisitionId, onIngredientsAvailable, onMarkServed }: OrderNextStepProps) {
   const isAdmin = role === Role.ADMIN;
   const isManager = role === Role.MANAGER || isAdmin;
   const isChef = role === Role.KITCHEN_HEAD || isAdmin;
   const isSales = role === Role.SALES || isManager;
+  // Storekeeper + management may act on the store-issue step.
+  const canIssue = isManager || role === Role.STORE_KEEPER;
   // F&B Service submits its own in-house (immediate) orders; catering submits
   // stay with sales/manager/admin. Mirrors `canSubmit` on the page.
   const canSubmit = isSales || ((role === Role.DELIVERY || role === Role.FNB_SERVICE) && immediate);
@@ -753,14 +774,26 @@ function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisi
         <>
           The store is issuing stock against the chef requisition. Once everything is issued, the order
           moves to the kitchen board automatically.
-          {hasRequisitions && (
+          {canIssue && openRequisitionId && (
+            <div className="mt-2">
+              <Link href={`/requisitions/${openRequisitionId}`}>
+                <Button size="sm">Issue ingredients</Button>
+              </Link>
+            </div>
+          )}
+          {canIssue && !openRequisitionId && (
+            <div className="mt-2 rounded-md border border-amber bg-amber-wash px-2.5 py-1.5 text-[12px] text-amber-700">
+              The stock request was closed — the chef needs to raise a fresh requisition.
+            </div>
+          )}
+          {!canIssue && hasRequisitions && (
             <div className="mt-2 text-[12px] text-ik-ink-3">
               Track progress on the requisition page (linked under &ldquo;Chef requisitions&rdquo; below).
             </div>
           )}
         </>
       );
-      tone = "muted";
+      tone = canIssue ? "urgent" : "muted";
       break;
 
     case OrderStatus.READY_FOR_PRODUCTION:

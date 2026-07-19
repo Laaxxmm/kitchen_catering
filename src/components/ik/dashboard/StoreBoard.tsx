@@ -5,7 +5,7 @@ import { BanquetRequisitionStatus, ChefRequisitionStatus, VendorPOStatus } from 
 import { Button } from "@/components/ui/button";
 import { WorkTabs } from "@/components/ik/dashboard/WorkTabs";
 import { CappedList } from "@/components/ik/dashboard/CappedList";
-import { formatIST } from "@/lib/time";
+import { EventDateBadge } from "@/components/ik/EventDateBadge";
 import { formatINRWhole } from "@/lib/money";
 
 export interface StoreReq {
@@ -16,6 +16,8 @@ export interface StoreReq {
   orderCode: string | null;
   customerName: string;
   eventDate: string | null;
+  /** ISO createdAt — the "raised" date shown for order-less requests. */
+  createdAt: string;
   lines: number;
 }
 export interface StoreFnbReq {
@@ -26,6 +28,8 @@ export interface StoreFnbReq {
   /** null when the request isn't tied to an order. */
   orderCode: string | null;
   eventDate: string | null;
+  /** ISO createdAt — the "raised" date shown for order-less requests. */
+  createdAt: string;
   lines: number;
 }
 export interface StorePO {
@@ -98,25 +102,29 @@ export function StoreBoard({
             <CappedList items={chefSorted} className="grid gap-2.5" keyOf={(r) => r.id}>
               {(r) => (
                 <li key={r.id} className="rounded-md border border-amber bg-amber-wash p-3">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="font-mono text-[12.5px] text-brand-700">{r.requisitionNo}</span>
-                    {r.eventDate && (
-                      <span className="text-[11.5px] text-ik-ink-3">{formatIST(new Date(r.eventDate), "EEE d MMM HH:mm")}</span>
-                    )}
-                  </div>
-                  <div className="mt-1 text-[13px] text-ik-ink">
-                    <strong>{r.customerName}</strong>
-                    {r.orderCode
-                      ? <span className="text-ik-ink-3"> · order {r.orderCode}</span>
-                      : <span className="text-ik-ink-3"> · general kitchen request</span>}
-                  </div>
-                  <div className="mt-0.5 text-[12px] text-ik-ink-2">
-                    {r.lines} {r.lines === 1 ? "line" : "lines"} · {r.status === "PARTIALLY_ISSUED" ? "partly issued" : "to issue"}
-                  </div>
-                  <div className="mt-2.5 flex items-center gap-2">
-                    <Link href={`/requisitions/${r.id}`}>
-                      <Button size="sm">Open to issue</Button>
-                    </Link>
+                  <div className="flex justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="font-mono text-[12.5px] text-brand-700">{r.requisitionNo}</span>
+                      <div className="mt-1 text-[13px] text-ik-ink">
+                        <strong>{r.customerName}</strong>
+                        {r.orderCode
+                          ? <span className="text-ik-ink-3"> · order {r.orderCode}</span>
+                          : <span className="text-ik-ink-3"> · general kitchen request</span>}
+                      </div>
+                      <div className="mt-0.5 text-[12px] text-ik-ink-2">
+                        {r.lines} {r.lines === 1 ? "line" : "lines"} · {r.status === "PARTIALLY_ISSUED" ? "partly issued" : "to issue"}
+                      </div>
+                      <div className="mt-2.5 flex items-center gap-2">
+                        <Link href={`/requisitions/${r.id}`}>
+                          <Button size="sm">Open to issue</Button>
+                        </Link>
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      {r.eventDate
+                        ? <EventDateBadge target={r.eventDate} />
+                        : <EventDateBadge target={r.createdAt} mode="raised" />}
+                    </div>
                   </div>
                 </li>
               )}
@@ -125,25 +133,29 @@ export function StoreBoard({
             <CappedList items={fnbSorted} className="grid gap-2.5" keyOf={(r) => r.id}>
               {(r) => (
                 <li key={r.id} className="rounded-md border border-amber bg-amber-wash p-3">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="font-mono text-[12.5px] text-brand-700">{r.requisitionNo}</span>
-                    {r.eventDate && (
-                      <span className="text-[11.5px] text-ik-ink-3">{formatIST(new Date(r.eventDate), "EEE d MMM HH:mm")}</span>
-                    )}
-                  </div>
-                  <div className="mt-1 text-[13px] text-ik-ink">
-                    <strong>{r.requestedBy}</strong>
-                    {r.orderCode
-                      ? <span className="text-ik-ink-3"> · order {r.orderCode}</span>
-                      : <span className="text-ik-ink-3"> · banquet store request</span>}
-                  </div>
-                  <div className="mt-0.5 text-[12px] text-ik-ink-2">
-                    {r.lines} {r.lines === 1 ? "line" : "lines"} · {r.status === "PARTIALLY_ISSUED" ? "partly issued" : "to issue"}
-                  </div>
-                  <div className="mt-2.5 flex items-center gap-2">
-                    <Link href={`/banquet/requisitions/${r.id}`}>
-                      <Button size="sm">Open to issue</Button>
-                    </Link>
+                  <div className="flex justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="font-mono text-[12.5px] text-brand-700">{r.requisitionNo}</span>
+                      <div className="mt-1 text-[13px] text-ik-ink">
+                        <strong>{r.requestedBy}</strong>
+                        {r.orderCode
+                          ? <span className="text-ik-ink-3"> · order {r.orderCode}</span>
+                          : <span className="text-ik-ink-3"> · banquet store request</span>}
+                      </div>
+                      <div className="mt-0.5 text-[12px] text-ik-ink-2">
+                        {r.lines} {r.lines === 1 ? "line" : "lines"} · {r.status === "PARTIALLY_ISSUED" ? "partly issued" : "to issue"}
+                      </div>
+                      <div className="mt-2.5 flex items-center gap-2">
+                        <Link href={`/banquet/requisitions/${r.id}`}>
+                          <Button size="sm">Open to issue</Button>
+                        </Link>
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      {r.eventDate
+                        ? <EventDateBadge target={r.eventDate} />
+                        : <EventDateBadge target={r.createdAt} mode="raised" />}
+                    </div>
                   </div>
                 </li>
               )}

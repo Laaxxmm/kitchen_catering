@@ -249,6 +249,7 @@ export default async function DashboardPage({
               orderCode: r.order?.code ?? null,
               customerName: r.order?.customer.name ?? "Kitchen stock request",
               eventDate: r.order?.eventDate.toISOString() ?? null,
+              createdAt: r.createdAt.toISOString(),
               lines: r._count.lines,
             }))}
             fnbReqs={fnbReqs.map((r) => ({
@@ -258,6 +259,7 @@ export default async function DashboardPage({
               requestedBy: r.createdBy.name ?? "F&B Service",
               orderCode: r.order?.code ?? null,
               eventDate: r.order?.eventDate.toISOString() ?? null,
+              createdAt: r.createdAt.toISOString(),
               lines: r._count.lines,
             }))}
             pos={pos.map((p) => ({
