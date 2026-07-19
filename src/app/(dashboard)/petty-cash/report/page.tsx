@@ -46,7 +46,18 @@ export default async function PettyCashReportPage({
         eyebrow="Petty cash"
         title="Report"
         description={`Movements ${fromStr} → ${toStr}${selectedFloat ? ` · ${selectedFloat.name}` : " · all floats"}.`}
-        actions={<Link href="/petty-cash"><Button variant="outline">Back</Button></Link>}
+        actions={
+          <div className="flex gap-2">
+            <a
+              href={`/api/petty-cash/report/pdf?from=${fromStr}&to=${toStr}${floatId ? `&float=${floatId}` : ""}`}
+              target="_blank"
+              rel="noopener"
+            >
+              <Button>Download PDF</Button>
+            </a>
+            <Link href="/petty-cash"><Button variant="outline">Back</Button></Link>
+          </div>
+        }
       />
 
       <form action="/petty-cash/report" className="mb-4 flex flex-wrap items-end gap-2">
