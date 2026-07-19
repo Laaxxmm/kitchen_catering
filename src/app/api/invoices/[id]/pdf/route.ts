@@ -5,12 +5,9 @@ import { getCustomerInvoice } from "@/server/actions/customer-invoices";
 /**
  * GET /api/invoices/[id]/pdf — streams the invoice PDF.
  *
- * Auth: leverages getCustomerInvoice's role gate. DELIVERY role won't
- * see this URL via the UI; if they hit it directly, the inner
- * requireSession() still admits any signed-in user — we may want to
- * tighten this with a role check if invoice PDF visibility becomes a
- * concern. For now anyone signed in with access to the invoice page
- * can download.
+ * Auth: leverages getCustomerInvoice's role gate (READ_ROLES). This route
+ * has no middleware rule of its own, so that gate is the only check — a
+ * role outside READ_ROLES gets an AuthorizationError, not a PDF.
  */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

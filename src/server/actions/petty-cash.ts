@@ -22,9 +22,11 @@ import {
 } from "@/server/action-result";
 
 // Petty cash is a finance-desk responsibility — the accounts team runs it
-// end to end (create floats, top up, reverse) alongside admin/manager.
+// end to end (create floats, top up, reverse, record vouchers) alongside
+// admin/manager. Reads are gated the same as the /petty-cash routes in
+// middleware.ts (ADMIN/MANAGER/ACCOUNTS) — field roles could previously
+// reach balances/vouchers by direct action invocation (AUDIT_REPORT M3).
 const PETTY_MANAGE = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
-const ANY_WRITE = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.ACCOUNTS];
 const TOPUP_APPROVAL_THRESHOLD = new Decimal(10000); // ₹10k — requires manager+ approval
 
 /**
@@ -77,7 +79,7 @@ async function createPettyCashFloatInner(raw: unknown): Promise<{ ok: true; id: 
 }
 
 export async function listPettyCashFloats() {
-  await requireRole(ANY_WRITE);
+  await requireRole(PETTY_MANAGE);
   return db.pettyCashFloat.findMany({
     where: { active: true },
     include: {
@@ -89,7 +91,7 @@ export async function listPettyCashFloats() {
 }
 
 export async function getPettyCashFloat(id: string) {
-  await requireRole(ANY_WRITE);
+  await requireRole(PETTY_MANAGE);
   return db.pettyCashFloat.findUnique({
     where: { id },
     include: {
@@ -106,11 +108,11 @@ export async function getPettyCashFloat(id: string) {
 
 /**
  * Single voucher with the fields the printable PDF needs (float name,
- * recorded-by). Read-gated like the rest of petty cash (ANY_WRITE = the
+ * recorded-by). Read-gated like the rest of petty cash (PETTY_MANAGE = the
  * roles that can view a float). Returns null when not found.
  */
 export async function getPettyCashVoucherForPdf(id: string) {
-  await requireRole(ANY_WRITE);
+  await requireRole(PETTY_MANAGE);
   return db.pettyCashVoucher.findUnique({
     where: { id },
     include: {
@@ -135,7 +137,7 @@ export async function createPettyCashVoucher(
 async function createPettyCashVoucherInner(
   raw: unknown,
 ): Promise<{ ok: true; id: string; voucherNo: string; warning?: string }> {
-  const session = await requireRole(ANY_WRITE);
+  const session = await requireRole(PETTY_MANAGE);
   const input = PettyCashVoucherInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {

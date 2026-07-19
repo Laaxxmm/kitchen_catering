@@ -49,7 +49,7 @@ import { toDecimal } from "@/lib/money";
 import { indefineStateCode } from "@/lib/org";
 import { isImmediateChannel, channelWantsFeedback, isEventDeliveryChannel, isPackagePricedChannel } from "@/lib/order-channels";
 import { getOrCreateHouseCustomerId } from "@/lib/house-customer";
-import { createNotification, notifyRoles } from "@/server/actions/notifications";
+import { createNotification, notifyRoles } from "@/server/notification-core";
 import { deferAfterResponse } from "@/server/defer";
 import { cancelBanquetRequisitionsWithPOs } from "@/server/banquet-core";
 import { formatIST, istToUtc } from "@/lib/time";
@@ -937,9 +937,9 @@ export async function chefApproveOrder(
     // + SMTP handshake took seconds and froze the chef's approve button.
     if (triggerProforma) {
       deferAfterResponse("chef-approve:proforma+notify", async () => {
-        const { createProformaInvoiceForOrder } = await import("./customer-invoices");
+        const { createProformaInvoiceForOrderCore } = await import("@/server/customer-invoices-core");
         try {
-          await createProformaInvoiceForOrder(id);
+          await createProformaInvoiceForOrderCore(id);
         } catch (err) {
           console.error(`[proforma] order ${id} failed:`, err);
         }
@@ -1506,7 +1506,10 @@ async function allocateOrderFeedbackInner(
       kind: "TASK_ASSIGNED",
       title: `Collect feedback — order ${order.code}`,
       body: `Get ${order.customer.name}'s feedback and record it.`,
-      link: `/orders/${orderId}`,
+      // Link to the assignee's task, not the order — housekeeping/maintenance
+      // staff can't open /orders/{id}, but /tasks/{id} is open to any
+      // authenticated user (AUDIT_REPORT M15).
+      link: `/tasks/${task.id}`,
       dedupeKey: `order-feedback:${task.id}`,
     }),
   );

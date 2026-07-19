@@ -31,7 +31,7 @@ import {
 import { nextChefRequisitionNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
-import { createNotification, notifyRoles } from "@/server/actions/notifications";
+import { createNotification, notifyRoles } from "@/server/notification-core";
 import { deferAfterResponse } from "@/server/defer";
 import { createProductionJobForOrder } from "./production-jobs";
 

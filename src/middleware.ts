@@ -120,7 +120,10 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   { pattern: /^\/invoices\/generate(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   { pattern: /^\/invoices\/[^/]+\/edit(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   { pattern: /^\/invoices\/room-service(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "FNB_SERVICE", "DELIVERY"] },
-  { pattern: /^\/invoices(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "FNB_SERVICE", "DELIVERY"] },
+  // SALES gets read access to invoice detail pages — they follow payment
+  // status and the "invoice paid" notification links here. The list / new /
+  // generate / edit rules above stay finance-only.
+  { pattern: /^\/invoices(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS", "FNB_SERVICE", "DELIVERY", "SALES"] },
   { pattern: /^\/payments(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   // Petty cash is a finance-desk job — admin / manager / accounts. Salary +
   // reports stay admin/manager.

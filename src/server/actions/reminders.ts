@@ -3,7 +3,7 @@
 import { Role, VendorBillStatus } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
-import { notifyRoles } from "@/server/actions/notifications";
+import { notifyRoles } from "@/server/notification-core";
 import { actionFailure, type ActionResultWith } from "@/server/action-result";
 import { deferAfterResponse } from "@/server/defer";
 

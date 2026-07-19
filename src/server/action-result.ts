@@ -52,17 +52,22 @@ export function actionFailure(err: unknown): { ok: false; error: string } {
   }
   if (err instanceof ZodError) {
     const first = err.issues[0];
+    if (!first) return { ok: false, error: "Invalid input" };
+    // Show the human field name, not the raw Zod path: "lines.0.requestedQty"
+    // → "requested qty". Take the last string segment (skip array indices),
+    // split camelCase into spaced lowercase words.
+    const segments = first.path.filter((p): p is string => typeof p === "string");
+    const label = segments.length
+      ? segments[segments.length - 1].replace(/([A-Z])/g, " $1").toLowerCase().trim()
+      : "";
     return {
       ok: false,
-      error: first
-        ? `${first.path.length ? `${first.path.join(".")}: ` : ""}${first.message}`
-        : "Invalid input",
+      error: label ? `${label}: ${first.message}` : first.message,
     };
   }
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     if (err.code === "P2002") {
-      const target = Array.isArray(err.meta?.target) ? (err.meta.target as string[]).join(", ") : "value";
-      return { ok: false, error: `Already exists — another record uses the same ${target}.` };
+      return { ok: false, error: "A record with these details already exists." };
     }
     if (err.code === "P2025") {
       return { ok: false, error: "That record no longer exists — refresh and try again." };

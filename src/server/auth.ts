@@ -33,6 +33,14 @@ const credentialsSchema = z.object({
   password: z.string().min(1),
 });
 
+// Emails are PII — mask them in production logs ("l***@example.com");
+// keep them readable in dev where the logs stay on the developer's machine.
+function logSafeEmail(email: string): string {
+  if (process.env.NODE_ENV !== "production") return email;
+  const [local, domain] = email.split("@");
+  return `${local?.[0] ?? ""}***@${domain ?? ""}`;
+}
+
 // Full NextAuth instance — imports Prisma + bcrypt. Only server routes
 // (route handlers, layouts, server actions) should import from this file.
 // Middleware imports `./auth.config` directly to stay edge-safe.
@@ -58,7 +66,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           60_000,
         );
         if (!limit.allowed) {
-          console.warn("[login] rate-limited", parsed.data.email);
+          console.warn("[login] rate-limited", logSafeEmail(parsed.data.email));
           return null;
         }
 
@@ -66,11 +74,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           where: { email: parsed.data.email },
         });
         if (!user) {
-          console.warn("[login] no user with email:", parsed.data.email);
+          console.warn("[login] no user with email:", logSafeEmail(parsed.data.email));
           return null;
         }
         if (!user.active) {
-          console.warn("[login] user is inactive:", parsed.data.email);
+          console.warn("[login] user is inactive:", logSafeEmail(parsed.data.email));
           return null;
         }
 
@@ -78,7 +86,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!ok) {
           console.warn(
             "[login] bcrypt mismatch for",
-            parsed.data.email,
+            logSafeEmail(parsed.data.email),
             "(hash prefix",
             user.passwordHash.slice(0, 7),
             ")",
@@ -86,7 +94,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        console.log("[login] OK", parsed.data.email, "role", user.role);
+        console.log("[login] OK", logSafeEmail(parsed.data.email), "role", user.role);
         return {
           id: user.id,
           email: user.email,

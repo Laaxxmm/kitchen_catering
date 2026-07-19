@@ -13,7 +13,7 @@ import {
   TaskTemplateInput,
   TaskUpdateInput,
 } from "@/lib/validators";
-import { createNotification } from "@/server/actions/notifications";
+import { createNotification } from "@/server/notification-core";
 import { deferAfterResponse } from "@/server/defer";
 import {
   ActionError,

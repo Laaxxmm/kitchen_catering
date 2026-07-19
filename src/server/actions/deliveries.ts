@@ -5,7 +5,6 @@ import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import {
   DeliveryStatus,
-  OrderChannel,
   OrderStatus,
   PaymentMethod,
   ProductionJobItemStatus,
@@ -30,8 +29,8 @@ import {
 import { nextDeliveryNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { istToUtc } from "@/lib/time";
-import { channelWantsFeedback, isEventDeliveryChannel } from "@/lib/order-channels";
-import { notifyRoles } from "@/server/actions/notifications";
+import { channelWantsFeedback, isEventDeliveryChannel, EVENT_DELIVERY_CHANNEL_LIST } from "@/lib/order-channels";
+import { notifyRoles } from "@/server/notification-core";
 import { markAllItemsHandedOver } from "@/server/actions/production-jobs";
 
 // Off-site catering orders (banquet / ODC / packed) move through these
@@ -174,15 +173,21 @@ async function handToDeliveryInner(orderId: string): Promise<{ ok: true }> {
   });
   const where = order.roomNumber ? ` · Room ${order.roomNumber}` : "";
   // Fan-out is best-effort — the chef's button shouldn't wait on it.
-  deferAfterResponse("hand-to-delivery:notify", () =>
-    notifyRoles([Role.DELIVERY, Role.ADMIN, Role.MANAGER], {
-      kind: "GENERIC",
-      title: `Order ${order.code} ready to dispatch`,
-      body: `${order.customer.name} · ${order.channel}${where}. Cooked and ready — schedule the delivery.`,
+  // Drivers can't open /deliveries/new (admin/manager page) — their link
+  // goes to the work screen instead (AUDIT_REPORT M15).
+  const handoverPayload = {
+    kind: "GENERIC" as const,
+    title: `Order ${order.code} ready to dispatch`,
+    body: `${order.customer.name} · ${order.channel}${where}. Cooked and ready — schedule the delivery.`,
+    dedupeKey: `order-ready-dispatch:${orderId}`,
+  };
+  deferAfterResponse("hand-to-delivery:notify", async () => {
+    await notifyRoles([Role.ADMIN, Role.MANAGER], {
+      ...handoverPayload,
       link: `/deliveries/new?orderId=${orderId}`,
-      dedupeKey: `order-ready-dispatch:${orderId}`,
-    }),
-  );
+    });
+    await notifyRoles([Role.DELIVERY], { ...handoverPayload, link: "/dashboard" });
+  });
   revalidatePath("/dashboard");
   revalidatePath("/kitchen");
   revalidatePath("/deliveries");
@@ -200,7 +205,7 @@ export async function listEventPrepQueue() {
   await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
   const rows = await db.order.findMany({
     where: {
-      channel: { in: [OrderChannel.BANQUET, OrderChannel.BUFFET, OrderChannel.ODC, OrderChannel.PACKET] },
+      channel: { in: EVENT_DELIVERY_CHANNEL_LIST },
       status: { in: EVENT_PREP_STATUSES },
     },
     select: {

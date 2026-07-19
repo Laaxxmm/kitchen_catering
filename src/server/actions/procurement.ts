@@ -36,7 +36,7 @@ import { sha256Json } from "@/lib/audit";
 import { newMovingAverage } from "@/lib/inventory-cost";
 import { toDecimal } from "@/lib/money";
 import { getSettingOr } from "@/lib/settings";
-import { createNotification, notifyRoles } from "@/server/actions/notifications";
+import { createNotification, notifyRoles } from "@/server/notification-core";
 import { createVendorPOTx } from "@/server/procurement-core";
 import { lockBanquetItemRows, recomputeBanquetReqStatus } from "@/server/banquet-core";
 

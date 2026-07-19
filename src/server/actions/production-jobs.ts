@@ -22,7 +22,7 @@ import { sha256Json } from "@/lib/audit";
 import { formatIST } from "@/lib/time";
 import { ActionError, actionFailure, type ActionResult } from "@/server/action-result";
 import { deferAfterResponse } from "@/server/defer";
-import { notifyRoles } from "@/server/actions/notifications";
+import { notifyRoles } from "@/server/notification-core";
 
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD, Role.STORE_KEEPER, Role.SALES, Role.ACCOUNTS,
@@ -344,15 +344,21 @@ async function completeOrderHandoverIfAllHanded(
  */
 function scheduleHandoverNotify(n: HandoverNotifyPayload): void {
   const where = n.roomNumber ? ` · Room ${n.roomNumber}` : "";
-  deferAfterResponse("hand-to-delivery:notify", () =>
-    notifyRoles([Role.DELIVERY, Role.ADMIN, Role.MANAGER], {
-      kind: "GENERIC",
-      title: `Order ${n.code} ready to dispatch`,
-      body: `${n.customerName} · ${n.channel}${where}. Cooked and ready — schedule the delivery.`,
+  // Drivers can't open /deliveries/new (admin/manager page) — their link
+  // goes to the work screen instead (AUDIT_REPORT M15).
+  const payload = {
+    kind: "GENERIC" as const,
+    title: `Order ${n.code} ready to dispatch`,
+    body: `${n.customerName} · ${n.channel}${where}. Cooked and ready — schedule the delivery.`,
+    dedupeKey: `order-ready-dispatch:${n.orderId}`,
+  };
+  deferAfterResponse("hand-to-delivery:notify", async () => {
+    await notifyRoles([Role.ADMIN, Role.MANAGER], {
+      ...payload,
       link: `/deliveries/new?orderId=${n.orderId}`,
-      dedupeKey: `order-ready-dispatch:${n.orderId}`,
-    }),
-  );
+    });
+    await notifyRoles([Role.DELIVERY], { ...payload, link: "/dashboard" });
+  });
 }
 
 function revalidateHandoverPaths(orderId: string): void {

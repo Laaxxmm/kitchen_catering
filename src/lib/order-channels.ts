@@ -51,6 +51,9 @@ const EVENT_DELIVERY_CHANNELS: ReadonlySet<OrderChannel> = new Set([
   OrderChannel.COUNTER_SALE,
 ]);
 
+/** Array form for Prisma `{ channel: { in: … } }` filters — same set. */
+export const EVENT_DELIVERY_CHANNEL_LIST: OrderChannel[] = [...EVENT_DELIVERY_CHANNELS];
+
 export function isEventDeliveryChannel(channel: OrderChannel): boolean {
   return EVENT_DELIVERY_CHANNELS.has(channel);
 }

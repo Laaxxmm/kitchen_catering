@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Role } from "@prisma/client";
 import { db } from "@/server/db";
-import { notifyRoles } from "@/server/actions/notifications";
+import { notifyRoles } from "@/server/notification-core";
 import { ActionError, actionFailure, type ActionResult } from "@/server/action-result";
 import { deferAfterResponse } from "@/server/defer";
 

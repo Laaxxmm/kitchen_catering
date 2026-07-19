@@ -3,10 +3,8 @@ import { DeliveryStatus, OrderStatus } from "@prisma/client";
 import { db } from "@/server/db";
 import { MobileAuthError, mobileError, requireMobileAuth } from "@/server/mobile-auth";
 import { sha256Json } from "@/lib/audit";
-import {
-  createTaxInvoiceForOrderInTx,
-  emailTaxInvoice,
-} from "@/server/actions/customer-invoices";
+import { createTaxInvoiceForOrderInTx } from "@/server/actions/customer-invoices";
+import { emailTaxInvoiceCore } from "@/server/customer-invoices-core";
 
 /**
  * POST /api/mobile/deliveries/:id/confirm-otp
@@ -94,7 +92,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     // Post-commit email — best-effort.
     if (result.invoiceCreated) {
-      void emailTaxInvoice(result.invoiceId);
+      void emailTaxInvoiceCore(result.invoiceId);
     }
     return Response.json({ status: result.status });
   } catch (err) {

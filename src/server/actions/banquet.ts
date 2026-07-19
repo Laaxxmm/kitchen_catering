@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import {
   BanquetRequisitionLineStatus,
   BanquetRequisitionStatus,
-  OrderChannel,
   Prisma,
   Role,
 } from "@prisma/client";
@@ -15,7 +14,8 @@ import { istToUtc } from "@/lib/time";
 import { sha256Json } from "@/lib/audit";
 import { indefineStateCode } from "@/lib/org";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
-import { createNotification, notifyRoles } from "@/server/actions/notifications";
+import { EVENT_DELIVERY_CHANNEL_LIST } from "@/lib/order-channels";
+import { createNotification, notifyRoles } from "@/server/notification-core";
 import { deferAfterResponse } from "@/server/defer";
 import { nextBanquetRequisitionNumber } from "@/lib/sequences";
 import {
@@ -784,7 +784,7 @@ export async function listBanquetEvents() {
   await requireRole(READ_ROLES);
   const rows = await db.order.findMany({
     where: {
-      channel: { in: [OrderChannel.BANQUET, OrderChannel.BUFFET, OrderChannel.ODC, OrderChannel.PACKET] },
+      channel: { in: EVENT_DELIVERY_CHANNEL_LIST },
       status: { notIn: INACTIVE_ORDER_STATUSES },
     },
     select: { id: true, code: true, channel: true, eventDate: true, customer: { select: { name: true } } },

@@ -258,7 +258,9 @@ export async function recordIngredientReceipt(raw: unknown): Promise<ActionResul
 }
 
 async function recordIngredientReceiptInner(raw: unknown): Promise<{ ok: true; id: string }> {
-  const session = await requireRole(WRITE_ROLES);
+  // ACCOUNTS records books-side receipts — matches the /inventory/receipts
+  // middleware rule ("store + accounts"). Issues stay store-only (L1).
+  const session = await requireRole([...WRITE_ROLES, Role.ACCOUNTS]);
   const input = IngredientReceiptInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {
@@ -498,6 +500,14 @@ async function mergeIngredientInner(sourceId: string, targetId: string): Promise
     ]);
     if (!source) throw new ActionError("Source ingredient not found");
     if (!target) throw new ActionError("Target ingredient not found");
+
+    // Merging across units numerically corrupts stock, cost and every open
+    // line (5 pkt folded into kg becomes 5 kg) — refuse (AUDIT_REPORT M20).
+    if (source.unit.trim().toLowerCase() !== target.unit.trim().toLowerCase()) {
+      throw new ActionError(
+        `These items are tracked in different units (${source.unit} vs ${target.unit}) — align the units first, then merge.`,
+      );
+    }
 
     // a. Fold source stock into target (source on-hand = a receipt into target).
     //    newMovingAverage rejects a zero receipt qty, so an empty source is a
