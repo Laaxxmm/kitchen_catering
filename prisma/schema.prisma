@@ -1288,32 +1288,40 @@ model DeliveryAttempt {
 // PROCUREMENT — PurchaseRequisition → VendorPO → GRN → VendorBill
 // =====================================================================
 
+// New vendors created by the store need GM/Admin sign-off before POs can
+// be raised on them (client #12). Existing vendors default APPROVED.
+enum VendorApprovalStatus {
+  PENDING_APPROVAL
+  APPROVED
+}
+
 model Vendor {
-  id                String             @id @default(cuid())
-  code              String             @unique // V-0001
+  id                String               @id @default(cuid())
+  code              String               @unique // V-0001
   name              String
   gstin             String?
   pan               String?
   stateCode         String
-  category          VendorCategory     @default(OTHER)
-  msme              Boolean            @default(false)
+  category          VendorCategory       @default(OTHER)
+  msme              Boolean              @default(false)
   contactName       String?
   phone             String?
   email             String?
   address           String?
-  paymentTerms      VendorPaymentTerms @default(NET_30)
-  creditLimit       Decimal            @default(0) @db.Decimal(14, 2)
+  paymentTerms      VendorPaymentTerms   @default(NET_30)
+  creditLimit       Decimal              @default(0) @db.Decimal(14, 2)
   notes             String?
-  active            Boolean            @default(true)
+  active            Boolean              @default(true)
+  approvalStatus    VendorApprovalStatus @default(APPROVED)
   // Statutory / recurring service vendors (electricity, rent, GST,
   // telecom, statutory body). Triggers a reminder Task 3 days before
   // the next bill's due date — and an immediate one if any of their
   // bills is currently past-due. See server/actions/reminders.ts.
-  isStatutory       Boolean            @default(false)
-  defaultTdsRatePct Decimal?           @db.Decimal(5, 2)
+  isStatutory       Boolean              @default(false)
+  defaultTdsRatePct Decimal?             @db.Decimal(5, 2)
   defaultTdsSection String?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 
   purchaseOrders        VendorPO[]
   bills                 VendorBill[]
