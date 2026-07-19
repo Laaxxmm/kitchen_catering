@@ -1160,6 +1160,11 @@ model ChefRequisitionLine {
   unitCostSnapshot Decimal                   @db.Decimal(12, 4)
   status           ChefRequisitionLineStatus @default(PENDING)
   notes            String?
+  // The PO line buying this line's shortfall (set when the store raises a
+  // PO from the requisition); GRN acceptance flips the line back to PENDING
+  // so the store issues it — mirrors BanquetRequisitionLine.vendorPOLineId.
+  vendorPOLineId   String?
+  vendorPOLine     VendorPOLine?             @relation("ChefReqLineToPOLine", fields: [vendorPOLineId], references: [id])
 
   ingredientIssues IngredientIssue[]
 
@@ -1450,6 +1455,7 @@ model VendorPOLine {
   grnLines        GRNLine[]                @relation("GRNLineToPOLine")
   // Requisition lines whose shortfall this PO line is buying.
   banquetReqLines BanquetRequisitionLine[]
+  chefReqLines    ChefRequisitionLine[]    @relation("ChefReqLineToPOLine")
 
   @@index([poId, sortOrder])
   @@index([banquetItemId])
