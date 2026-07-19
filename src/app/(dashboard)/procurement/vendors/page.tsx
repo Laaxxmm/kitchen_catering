@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { VendorApprovalStatus } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -65,7 +66,15 @@ export default async function VendorsPage({
                 <TableCell className="font-mono text-[12px]">{v.gstin ?? "—"}</TableCell>
                 <TableCell>{v.stateCode}</TableCell>
                 <TableCell>{v.paymentTerms}</TableCell>
-                <TableCell>{v.active ? <span className="text-positive">Active</span> : <span className="text-ik-ink-3">Inactive</span>}</TableCell>
+                <TableCell>
+                  {!v.active ? (
+                    <span className="text-ik-ink-3">Inactive</span>
+                  ) : v.approvalStatus === VendorApprovalStatus.PENDING_APPROVAL ? (
+                    <span className="text-gold">Pending approval</span>
+                  ) : (
+                    <span className="text-positive">Active</span>
+                  )}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

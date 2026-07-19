@@ -1,4 +1,4 @@
-import { Prisma, ProcurementType, VendorPOStatus } from "@prisma/client";
+import { ChefRequisitionLineStatus, Prisma, ProcurementType, VendorPOStatus } from "@prisma/client";
 import { toDecimal } from "@/lib/money";
 import { indefineStateCode } from "@/lib/org";
 import { summarise } from "@/lib/gst";
@@ -36,6 +36,18 @@ export async function createVendorPOTx(
     if (!l.unitPrice.trim()) {
       throw new ActionError(`Line "${l.description}": enter the unit price (0 is fine).`);
     }
+  }
+
+  // Store-created vendors need GM/Admin sign-off before money moves on them.
+  const vendor = await tx.vendor.findUnique({
+    where: { id: input.vendorId },
+    select: { approvalStatus: true, name: true },
+  });
+  if (!vendor) throw new ActionError("Vendor not found — refresh and pick again.");
+  if (vendor.approvalStatus !== "APPROVED") {
+    throw new ActionError(
+      `"${vendor.name}" is awaiting approval — ask a manager to approve them first.`,
+    );
   }
 
   const supplierState = indefineStateCode();
@@ -98,6 +110,21 @@ export async function createVendorPOTx(
     // the created line ids back.
     include: { lines: { orderBy: { sortOrder: "asc" } } },
   });
+
+  // M16: back-link chef requisition lines this PO is buying for (?reqId=
+  // prefill flow) — GRN acceptance then flips them back to issuable and
+  // notifies the store + chef, mirroring the banquet vendorPOLineId link.
+  // Guarded on AWAITING_PROCUREMENT so a stale/duplicate prefill can't
+  // rewire a line that was already issued, cancelled or re-procured.
+  for (let idx = 0; idx < input.lines.length; idx++) {
+    const chefReqLineId = input.lines[idx].chefReqLineId;
+    if (!chefReqLineId) continue;
+    await tx.chefRequisitionLine.updateMany({
+      where: { id: chefReqLineId, status: ChefRequisitionLineStatus.AWAITING_PROCUREMENT },
+      data: { vendorPOLineId: created.lines[idx].id },
+    });
+  }
+
   await tx.auditLog.create({
     data: {
       userId,

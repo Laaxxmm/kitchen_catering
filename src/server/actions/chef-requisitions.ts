@@ -332,6 +332,46 @@ export async function removeChefRequisitionLine(lineId: string): Promise<ActionR
   }
 }
 
+/**
+ * Change a line's requested quantity while the requisition is still DRAFT
+ * (#17 — the chef fixes a typo before submitting). Add/remove cover the
+ * rest of draft editing.
+ */
+export async function updateChefRequisitionLineQty(lineId: string, qty: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(REQUISITION_CREATE_ROLES);
+    const newQty = toDecimal(qty);
+    if (newQty.lte(0)) throw new ActionError("Quantity must be above 0");
+
+    await db.$transaction(async (tx) => {
+      const line = await tx.chefRequisitionLine.findUnique({
+        where: { id: lineId },
+        include: { requisition: { select: { id: true, status: true } } },
+      });
+      if (!line) throw new ActionError("Line not found");
+      if (line.requisition.status !== ChefRequisitionStatus.DRAFT) {
+        throw new ActionError("Lines can only be edited on DRAFT requisitions");
+      }
+      await tx.chefRequisitionLine.update({
+        where: { id: lineId },
+        data: { requestedQty: newQty.toDecimalPlaces(3).toString() },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "CHEF_REQUISITION_LINE_QTY_CHANGED",
+          entity: "ChefRequisition",
+          entityId: line.requisition.id,
+          payloadHash: sha256Json({ lineId, from: line.requestedQty.toString(), to: newQty.toString() }),
+        },
+      });
+    });
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
 // =====================================================================
 // SUBMIT / FULFIL
 // =====================================================================

@@ -1,13 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Role, VendorCategory, VendorPaymentTerms } from "@prisma/client";
+import { Role, VendorApprovalStatus, VendorCategory, VendorPaymentTerms } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { VendorInput, type VendorInputT } from "@/lib/validators";
 import { sha256Json } from "@/lib/audit";
 import { nextVendorCode } from "@/lib/sequences";
+import { toDecimal } from "@/lib/money";
+import { notifyRoles } from "@/server/notification-core";
+import { deferAfterResponse } from "@/server/defer";
 import {
+  ActionError,
   actionFailure,
   type ActionResult,
   type ActionResultWith,
@@ -61,10 +65,18 @@ async function createVendorInner(raw: unknown): Promise<{ ok: true; id: string; 
   const session = await requireRole(WRITE_ROLES);
   const input = VendorInput.parse(raw);
 
+  // Store-keeper-added vendors need a management sign-off before POs can be
+  // raised on them; admin/manager/accounts creations stay auto-approved.
+  const needsApproval = session.user.role === Role.STORE_KEEPER;
+
   const vendor = await db.$transaction(async (tx) => {
     const code = await nextVendorCode(tx);
     const row = await tx.vendor.create({
-      data: { code, ...dataFromInput(input) },
+      data: {
+        code,
+        ...dataFromInput(input),
+        ...(needsApproval ? { approvalStatus: VendorApprovalStatus.PENDING_APPROVAL } : {}),
+      },
     });
     await tx.auditLog.create({
       data: {
@@ -72,14 +84,73 @@ async function createVendorInner(raw: unknown): Promise<{ ok: true; id: string; 
         action: "VENDOR_CREATED",
         entity: "Vendor",
         entityId: row.id,
-        payloadHash: sha256Json({ code, name: input.name }),
+        payloadHash: sha256Json({ code, name: input.name, needsApproval }),
       },
     });
     return row;
   });
 
+  if (needsApproval) {
+    deferAfterResponse("vendor-create:notify-approvers", () =>
+      notifyRoles([Role.ADMIN, Role.MANAGER], {
+        kind: "GENERIC",
+        title: `New vendor ${vendor.name} awaits approval`,
+        body: `The store added vendor ${vendor.name} (${vendor.code}). Approve them before purchase orders can be raised.`,
+        link: `/procurement/vendors/${vendor.id}`,
+        dedupeKey: `vendor-approval:${vendor.id}`,
+      }),
+    );
+  }
+
   revalidatePath("/procurement/vendors");
   return { ok: true, id: vendor.id, code: vendor.code };
+}
+
+/**
+ * Management sign-off on a store-keeper-added vendor. Guarded
+ * PENDING_APPROVAL → APPROVED; anything else refuses. Vendor has no
+ * creator column, so the "approved" notice fans out to the store-keeper
+ * role instead of a specific user.
+ */
+export async function approveVendor(id: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole([Role.ADMIN, Role.MANAGER]);
+    const vendor = await db.$transaction(async (tx) => {
+      const row = await tx.vendor.findUnique({ where: { id } });
+      if (!row) throw new ActionError("Vendor not found");
+      if (row.approvalStatus !== VendorApprovalStatus.PENDING_APPROVAL) {
+        throw new ActionError("This vendor is already approved.");
+      }
+      await tx.vendor.update({
+        where: { id },
+        data: { approvalStatus: VendorApprovalStatus.APPROVED },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "VENDOR_APPROVED",
+          entity: "Vendor",
+          entityId: id,
+        },
+      });
+      return row;
+    });
+
+    deferAfterResponse("vendor-approve:notify-store", () =>
+      notifyRoles([Role.STORE_KEEPER], {
+        kind: "GENERIC",
+        title: `Vendor ${vendor.name} approved — POs can now be raised`,
+        link: `/procurement/vendors/${id}`,
+        dedupeKey: `vendor-approved:${id}`,
+      }),
+    );
+
+    revalidatePath("/procurement/vendors");
+    revalidatePath(`/procurement/vendors/${id}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
 }
 
 export async function updateVendor(id: string, raw: unknown): Promise<ActionResult> {
@@ -211,14 +282,17 @@ export async function getVendorHistory(vendorId: string) {
   }
   events.sort((a, b) => a.at.getTime() - b.at.getTime());
 
-  let running = 0;
+  // Decimal accumulation throughout — this is money (L3: the previous
+  // Number() float version drifted on paise).
+  let running = toDecimal(0);
+  let totalBilled = toDecimal(0);
+  let totalPaid = toDecimal(0);
   const out: VendorTimelineEntry[] = [];
-  let totalBilled = 0;
-  let totalPaid = 0;
   for (const e of events) {
     if (e.type === "BILL") {
-      running += Number(e.bill.grandTotal);
-      totalBilled += Number(e.bill.grandTotal);
+      const amount = toDecimal(e.bill.grandTotal);
+      running = running.plus(amount);
+      totalBilled = totalBilled.plus(amount);
       out.push({
         kind: "BILL",
         id: e.bill.id,
@@ -228,11 +302,12 @@ export async function getVendorHistory(vendorId: string) {
         status: e.bill.status,
         grandTotal: e.bill.grandTotal.toString(),
         amountPaid: e.bill.amountPaid.toString(),
-        runningOutstanding: running.toFixed(2),
+        runningOutstanding: running.toDecimalPlaces(2).toString(),
       });
     } else {
-      running -= Number(e.payment.amount);
-      totalPaid += Number(e.payment.amount);
+      const amount = toDecimal(e.payment.amount);
+      running = running.minus(amount);
+      totalPaid = totalPaid.plus(amount);
       out.push({
         kind: "PAYMENT",
         id: e.payment.id,
@@ -241,16 +316,16 @@ export async function getVendorHistory(vendorId: string) {
         method: e.payment.method,
         reference: e.payment.reference,
         amount: e.payment.amount.toString(),
-        runningOutstanding: running.toFixed(2),
+        runningOutstanding: running.toDecimalPlaces(2).toString(),
       });
     }
   }
   return {
     timeline: out.reverse(),
     totals: {
-      billed: totalBilled.toFixed(2),
-      paid: totalPaid.toFixed(2),
-      outstanding: running.toFixed(2),
+      billed: totalBilled.toDecimalPlaces(2).toString(),
+      paid: totalPaid.toDecimalPlaces(2).toString(),
+      outstanding: running.toDecimalPlaces(2).toString(),
     },
   };
 }

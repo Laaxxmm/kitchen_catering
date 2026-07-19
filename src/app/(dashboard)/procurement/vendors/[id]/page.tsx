@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Role, VendorApprovalStatus } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
-import { deactivateVendor, getVendor, updateVendor } from "@/server/actions/vendors";
+import { auth } from "@/server/auth";
+import { approveVendor, deactivateVendor, getVendor, updateVendor } from "@/server/actions/vendors";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { listVendorPOs } from "@/server/actions/procurement";
 import { VendorForm } from "../_components/VendorForm";
@@ -15,8 +17,16 @@ export const dynamic = "force-dynamic";
 
 export default async function VendorDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [vendor, pos] = await Promise.all([getVendor(id), listVendorPOs({ vendorId: id })]);
+  const [vendor, pos, session] = await Promise.all([
+    getVendor(id),
+    listVendorPOs({ vendorId: id }),
+    auth(),
+  ]);
   if (!vendor) notFound();
+
+  const role = session?.user?.role as Role | undefined;
+  const canApprove = role === Role.ADMIN || role === Role.MANAGER;
+  const isPending = vendor.approvalStatus === VendorApprovalStatus.PENDING_APPROVAL;
 
   async function update(input: VendorInputT) {
     "use server";
@@ -28,6 +38,10 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
     "use server";
     return await deactivateVendor(id);
   }
+  async function approve() {
+    "use server";
+    return await approveVendor(id);
+  }
 
   return (
     <>
@@ -38,6 +52,11 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
         actions={
           <div className="flex gap-2">
             <Link href="/procurement/vendors"><Button variant="outline">Back</Button></Link>
+            {isPending && canApprove && (
+              <ActionResultButton action={approve} successMessage="Vendor approved — POs can now be raised">
+                Approve vendor
+              </ActionResultButton>
+            )}
             {vendor.active && (
               <ActionResultButton action={deactivate} variant="outline" successMessage="Vendor deactivated">
                 Deactivate
@@ -46,6 +65,13 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
           </div>
         }
       />
+      {isPending && (
+        <div className="mb-4 rounded-md border border-ik-rule bg-ik-card p-3 text-[13px] text-ik-ink-2">
+          <span className="font-medium text-gold">Pending approval</span> — this vendor was added by
+          the store and needs an admin or manager&apos;s approval before purchase orders can be
+          raised on them.
+        </div>
+      )}
       <DetailTabs
         tabs={[
           {

@@ -4,10 +4,11 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { DeliveryStatus, OrderChannel } from "@prisma/client";
+import { DeliveryStatus, OrderChannel, type OrderStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { CappedList } from "@/components/ik/dashboard/CappedList";
+import { STATUS_LABEL } from "@/lib/order-status";
 import { StaffAllocation, type AllocatedStaff } from "@/components/ik/StaffAllocation";
 import { EventDateBadge } from "@/components/ik/EventDateBadge";
 import { isNextNavigationError } from "@/lib/next-error";
@@ -64,10 +65,23 @@ export interface DriverDelivery {
   items: OrderLine[];
 }
 
+export interface UpcomingOrder {
+  id: string;
+  code: string;
+  channel: OrderChannel;
+  status: OrderStatus;
+  headcount: number;
+  eventDate: string;
+  customerName: string;
+}
+
 interface Props {
   eventPrep: EventPrepOrder[];
   pickups: PickupOrder[];
   deliveries: DriverDelivery[];
+  /** #18: confirmed event orders in the next 7 days — read-only heads-up
+   *  while the food is still in the kitchen. Collapsed by default. */
+  upcoming?: UpcomingOrder[];
 }
 
 const CHANNEL_LABEL: Record<OrderChannel, string> = {
@@ -93,7 +107,7 @@ type TabKey = "prep" | "pickup" | "dispatch" | "out";
  * delivery team readies cutlery + arrangements ahead of the event, and the
  * tab's urgency dot flags how many are still outstanding.
  */
-export function DriverWorkScreen({ eventPrep, pickups, deliveries }: Props) {
+export function DriverWorkScreen({ eventPrep, pickups, deliveries, upcoming = [] }: Props) {
   const groups = useMemo(() => {
     // Urgent-first: soonest event / scheduled time on top.
     const t = (d: string) => new Date(d).getTime();
@@ -185,6 +199,43 @@ export function DriverWorkScreen({ eventPrep, pickups, deliveries }: Props) {
             </CappedList>
           );
         })()
+      )}
+
+      {/* #18: read-only heads-up of confirmed events in the next 7 days —
+          still in the kitchen, nothing to action yet. Native <details>,
+          collapsed by default. */}
+      {upcoming.length > 0 && (
+        <details className="mt-4 rounded-md border border-ik-rule bg-ik-card p-3">
+          <summary className="cursor-pointer text-[13px] font-medium text-ik-ink">
+            Upcoming orders ({upcoming.length}) <span className="font-normal text-ik-ink-3">· next 7 days, still in the kitchen</span>
+          </summary>
+          <div className="mt-2.5">
+            <CappedList items={upcoming} className="grid gap-2" keyOf={(o) => o.id}>
+              {(o) => (
+                <li className="rounded-md border border-ik-rule bg-ik-paper-alt p-2.5">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <span className="font-mono text-[12.5px] text-brand-700">{o.code}</span>
+                      <span className="rounded-full bg-ik-card px-2 py-0.5 text-[10.5px] text-ik-ink-2 ring-1 ring-ik-rule">
+                        {CHANNEL_LABEL[o.channel]}
+                      </span>
+                    </div>
+                    <EventDateBadge target={o.eventDate} />
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[12.5px]">
+                    <span className="text-ik-ink">
+                      <strong>{o.customerName}</strong>
+                      <span className="text-ik-ink-3"> · {o.headcount} pax</span>
+                    </span>
+                    <span className="rounded-full bg-amber-wash px-2 py-0.5 text-[10.5px] font-medium text-amber-700">
+                      {STATUS_LABEL[o.status]}
+                    </span>
+                  </div>
+                </li>
+              )}
+            </CappedList>
+          </div>
+        </details>
       )}
     </section>
   );
@@ -400,7 +451,7 @@ function DeliveryCard({ delivery, highlight }: { delivery: DriverDelivery; highl
               size="sm"
               disabled={pending}
               onClick={() =>
-                run(() => confirmDeliveryOTP(delivery.id, { paymentCollected: false }), "Delivered — invoice sent to customer")
+                run(() => confirmDeliveryOTP(delivery.id, { paymentCollected: false }), "Delivered — accounts will raise the invoice")
               }
             >
               Mark delivered

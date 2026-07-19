@@ -15,10 +15,13 @@ import type { ActionResult } from "@/lib/action-result";
 interface Vendor { id: string; name: string; code: string; stateCode: string }
 interface Ingredient { id: string; sku: string; name: string; unit: string; gstRatePct: string }
 interface BanquetItem { id: string; sku: string; name: string; unit: string; gstRatePct?: string }
+interface OrderOption { id: string; code: string; customerName: string }
 
 interface DraftLine {
   ingredientId: string;
   banquetItemId: string;
+  /** Chef requisition line this PO line is buying for (?reqId= prefill). */
+  chefReqLineId?: string | null;
   sku: string;
   description: string;
   unit: string;
@@ -31,13 +34,18 @@ interface Props {
   vendors: Vendor[];
   ingredients: Ingredient[];
   banquetItems?: BanquetItem[];
+  /** Optional "For order" picker — links the PO to the catering order it's
+   *  buying for (shown on the PO detail/list). */
+  orders?: OrderOption[];
+  initialOrderId?: string | null;
   onSubmit: (input: {
     vendorId: string;
+    orderId: string | null;
     procurementType: "STANDARD" | "LOCAL" | "ONLINE";
     placeOfSupplyStateCode: string;
     expectedDate: string | undefined;
     notes: string | null;
-    lines: Array<{ ingredientId: string | null; banquetItemId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
+    lines: Array<{ ingredientId: string | null; banquetItemId: string | null; chefReqLineId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
   }) => Promise<ActionResult | void>;
   // Pre-fill when the PO is being spun out of an approved PR — the lines
   // come straight from the request so the user only has to fill in prices.
@@ -52,14 +60,15 @@ interface Props {
 }
 
 function emptyLine(): DraftLine {
-  return { ingredientId: "", banquetItemId: "", sku: "", description: "", unit: "kg", quantity: "1", unitPrice: "0", gstRatePct: "5" };
+  return { ingredientId: "", banquetItemId: "", chefReqLineId: null, sku: "", description: "", unit: "kg", quantity: "1", unitPrice: "0", gstRatePct: "5" };
 }
 
-export function VendorPOForm({ vendors, ingredients, banquetItems = [], onSubmit, initialVendorId, initialLines, onQuickAddVendor }: Props) {
+export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders = [], initialOrderId, onSubmit, initialVendorId, initialLines, onQuickAddVendor }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [vendorOptions, setVendorOptions] = useState(vendors);
   const [vendorId, setVendorId] = useState(initialVendorId || "");
+  const [orderId, setOrderId] = useState(initialOrderId || "");
   const [procurementType, setProcurementType] = useState<"STANDARD" | "LOCAL" | "ONLINE">("STANDARD");
   // Inline "add vendor" toggle.
   const [addingVendor, setAddingVendor] = useState(false);
@@ -117,16 +126,19 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], onSubmit
     const bq = value.startsWith("bq:") ? banquetItems.find((b) => b.id === value.slice(3)) : undefined;
     setLines((p) => p.map((x, i) => {
       if (i !== idx) return x;
+      // Changing the item breaks any chef-requisition back-link the prefill
+      // carried — the requisition line must not end up tied to a PO line
+      // buying a different item.
       if (ing) {
-        return { ...x, ingredientId: ing.id, banquetItemId: "", sku: ing.sku, description: ing.name, unit: ing.unit, gstRatePct: ing.gstRatePct };
+        return { ...x, ingredientId: ing.id, banquetItemId: "", chefReqLineId: null, sku: ing.sku, description: ing.name, unit: ing.unit, gstRatePct: ing.gstRatePct };
       }
       if (bq) {
         // Banquet items don't carry GST in the catalogue — keep the line's
         // current rate (bq.gstRatePct if a caller ever provides one).
-        return { ...x, ingredientId: "", banquetItemId: bq.id, sku: bq.sku, description: bq.name, unit: bq.unit, gstRatePct: bq.gstRatePct ?? x.gstRatePct };
+        return { ...x, ingredientId: "", banquetItemId: bq.id, chefReqLineId: null, sku: bq.sku, description: bq.name, unit: bq.unit, gstRatePct: bq.gstRatePct ?? x.gstRatePct };
       }
       // Free text — clear both ids, leave sku/description as typed.
-      return { ...x, ingredientId: "", banquetItemId: "" };
+      return { ...x, ingredientId: "", banquetItemId: "", chefReqLineId: null };
     }));
   }
 
@@ -165,6 +177,7 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], onSubmit
       try {
         const res = await onSubmit({
           vendorId,
+          orderId: orderId || null,
           procurementType,
           placeOfSupplyStateCode,
           expectedDate: expectedDate || undefined,
@@ -172,6 +185,7 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], onSubmit
           lines: payload.map((l) => ({
             ingredientId: l.ingredientId || null,
             banquetItemId: l.banquetItemId || null,
+            chefReqLineId: l.chefReqLineId || null,
             sku: l.sku,
             description: l.description,
             unit: l.unit,
@@ -250,6 +264,24 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], onSubmit
             Approval by value: under ₹5,000 the manager signs off; ₹5,000 and above needs admin.
           </p>
         </div>
+        {orders.length > 0 && (
+          <div className="grid gap-1">
+            <Label htmlFor="forOrder">For order (optional)</Label>
+            <Combobox
+              value={orderId}
+              onChange={setOrderId}
+              options={[
+                { value: "", label: "— not for a specific order —" },
+                ...orders.map((o) => ({ value: o.id, label: `${o.code} · ${o.customerName}` })),
+              ]}
+              placeholder="Type an order code or customer…"
+              emptyText="No order matches"
+            />
+            <p className="text-[11.5px] text-ik-ink-3">
+              Link this purchase to the catering order it&apos;s buying for — it then shows on the PO.
+            </p>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="grid gap-1">
             <Label htmlFor="pos">Place of supply (state code)</Label>

@@ -325,7 +325,13 @@ async function recordVendorBillPaymentInner(raw: unknown): Promise<{ ok: true; i
       select: { id: true, status: true, grandTotal: true },
     });
     if (!bill) throw new ActionError("Bill not found");
-    if (bill.status !== VendorBillStatus.APPROVED && bill.status !== VendorBillStatus.MATCHED) {
+    // OVERDUE is just APPROVED/MATCHED past its due date (the reminders
+    // cron flips it) — it must stay payable.
+    if (
+      bill.status !== VendorBillStatus.APPROVED &&
+      bill.status !== VendorBillStatus.MATCHED &&
+      bill.status !== VendorBillStatus.OVERDUE
+    ) {
       throw new ActionError(`Cannot pay a bill in status ${bill.status}`);
     }
     // H2: over-payment guard (was missing on the vendor side) — mirror the

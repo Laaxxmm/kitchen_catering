@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { deactivateUser, getUser, updateUser } from "@/server/actions/users";
 import { UserForm } from "../_components/UserForm";
-import { ActionResultButton } from "@/components/ik/ActionResultButton";
+import { DeactivateUserButton } from "../_components/DeactivateUserButton";
 
 export const dynamic = "force-dynamic";
 
@@ -32,11 +32,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
         actions={
           <div className="flex gap-2">
             <Link href="/admin/users"><Button variant="outline">Back</Button></Link>
-            {user.active && (
-              <ActionResultButton action={deactivate} variant="outline" successMessage="User deactivated">
-                Deactivate
-              </ActionResultButton>
-            )}
+            {user.active && <DeactivateUserButton action={deactivate} />}
           </div>
         }
       />

@@ -9,12 +9,13 @@ import {
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { amountInWords } from "@/lib/amount-in-words";
+import { getSetting } from "@/lib/settings";
 import {
   indefineAddress,
-  indefineBankDetails,
   indefineCompanyName,
   indefineGstin,
 } from "@/lib/org";
+import type { InvoiceBankDetailsT } from "@/lib/validators";
 
 const BRAND = "#0F6E56";
 const INK = "#1F2A24";
@@ -347,10 +348,10 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
           </View>
         </View>
 
-        {/* Bank details */}
+        {/* Payment details — only when bank details are actually configured */}
         {data.seller.bankDetails && (
           <View style={s.bankBlock} wrap={false}>
-            <Text style={s.bankLabel}>Bank details</Text>
+            <Text style={s.bankLabel}>Payment details</Text>
             <Text style={s.td}>{data.seller.bankDetails}</Text>
           </View>
         )}
@@ -403,6 +404,23 @@ export async function renderCustomerInvoicePDF(input: {
   notes?: string | null;
   terms?: string | null;
 }): Promise<Buffer> {
+  // Admin-maintained bank details (Admin → Settings → Invoice bank details).
+  // Falls back to an explicit INDEFINE_BANK_DETAILS env override for
+  // deployments configured before the setting existed. When neither is set
+  // the Payment-details box is omitted — no placeholder account numbers.
+  const bank = await getSetting<InvoiceBankDetailsT>("invoice.bankDetails");
+  const bankLines = bank
+    ? [
+        bank.accountName && `Account name: ${bank.accountName}`,
+        bank.accountNumber && `A/C no: ${bank.accountNumber}`,
+        bank.ifsc && `IFSC: ${bank.ifsc}`,
+        bank.bankBranch && `Bank & branch: ${bank.bankBranch}`,
+        bank.upiId && `UPI: ${bank.upiId}`,
+      ].filter((l): l is string => Boolean(l))
+    : [];
+  const bankDetails =
+    bankLines.length > 0 ? bankLines.join("\n") : (process.env.INDEFINE_BANK_DETAILS ?? "");
+
   const data: InvoicePDFData = {
     invoiceNo: input.invoiceNo,
     issuedAt: input.issuedAt,
@@ -416,7 +434,7 @@ export async function renderCustomerInvoicePDF(input: {
       name: indefineCompanyName(),
       gstin: indefineGstin(),
       address: indefineAddress(),
-      bankDetails: indefineBankDetails(),
+      bankDetails,
     },
     customer: {
       name: input.customer.name,

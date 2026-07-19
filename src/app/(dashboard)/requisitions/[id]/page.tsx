@@ -7,14 +7,19 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { auth } from "@/server/auth";
 import {
+  addChefRequisitionLine,
   cancelChefRequisition,
   getChefRequisition,
   issueChefRequisitionLine,
+  removeChefRequisitionLine,
   sendChefRequisitionLineToProcurement,
   submitChefRequisition,
+  updateChefRequisitionLineQty,
 } from "@/server/actions/chef-requisitions";
+import { listIngredients } from "@/server/actions/inventory";
 import { formatIST } from "@/lib/time";
 import { LineFulfilControls } from "./_components/LineFulfilControls";
+import { DraftAddLine, DraftLineControls } from "./_components/DraftEditControls";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 
@@ -28,6 +33,10 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
   const isAdmin = role === Role.ADMIN;
   const isStore = role === Role.STORE_KEEPER || isAdmin;
   const isChef = role === Role.KITCHEN_HEAD || isAdmin;
+  // #17: the chef can edit a DRAFT's lines (add / remove / change qty)
+  // before submitting. Catalogue only fetched when the editor renders.
+  const canEditDraft = isChef && requisition.status === ChefRequisitionStatus.DRAFT;
+  const ingredients = canEditDraft ? await listIngredients({ active: true }) : [];
 
   async function doSubmit() {
     "use server";
@@ -44,6 +53,18 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
   async function doCancel(reason: string) {
     "use server";
     return await cancelChefRequisition(id, reason || undefined);
+  }
+  async function doAddLine(ingredientId: string, qty: string) {
+    "use server";
+    return await addChefRequisitionLine(id, { ingredientId, requestedQty: qty });
+  }
+  async function doRemoveLine(lineId: string) {
+    "use server";
+    return await removeChefRequisitionLine(lineId);
+  }
+  async function doUpdateQty(lineId: string, qty: string) {
+    "use server";
+    return await updateChefRequisitionLineQty(lineId, qty);
   }
 
   const canSubmit = isChef && requisition.status === ChefRequisitionStatus.DRAFT;
@@ -133,7 +154,7 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
             <TableHead className="text-right">Issued</TableHead>
             <TableHead className="text-right">On hand</TableHead>
             <TableHead>Status</TableHead>
-            {canFulfil && <TableHead>Action</TableHead>}
+            {(canFulfil || canEditDraft) && <TableHead>Action</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -162,10 +183,27 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
                   />
                 </TableCell>
               )}
+              {canEditDraft && (
+                <TableCell>
+                  <DraftLineControls
+                    lineId={l.id}
+                    requestedQty={l.requestedQty.toString()}
+                    onUpdateQty={doUpdateQty}
+                    onRemove={doRemoveLine}
+                  />
+                </TableCell>
+              )}
             </TableRow>
           ))}
         </TableBody>
       </Table>
+
+      {canEditDraft && (
+        <DraftAddLine
+          ingredients={ingredients.map((i) => ({ id: i.id, sku: i.sku, name: i.name, unit: i.unit }))}
+          onAdd={doAddLine}
+        />
+      )}
 
       {canCancel && (
         <div className="mt-6 max-w-sm">

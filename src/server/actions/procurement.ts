@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { Decimal } from "decimal.js";
 import {
   BanquetRequisitionLineStatus,
+  ChefRequisitionLineStatus,
+  ChefRequisitionStatus,
   GRNStatus,
   PaymentMethod,
   Prisma,
@@ -728,6 +730,40 @@ async function lockIngredientRow(tx: Prisma.TransactionClient, id: string) {
   await tx.$executeRaw`SELECT 1 FROM "Ingredient" WHERE "id" = ${id} FOR UPDATE`;
 }
 
+/**
+ * Recompute a chef requisition's rolled-up status after a GRN flips lines
+ * back from AWAITING_PROCUREMENT to PENDING. Same semantics as the issue
+ * path in chef-requisitions.ts: any issued progress → PARTIALLY_ISSUED,
+ * otherwise SUBMITTED. FULLY_ISSUED is unreachable here (the flipped line
+ * is PENDING), and the status guard keeps terminal requisitions
+ * (CANCELLED / FULLY_ISSUED) untouched.
+ */
+async function recomputeChefReqStatusTx(
+  tx: Prisma.TransactionClient,
+  reqId: string,
+  userId: string,
+) {
+  const lines = await tx.chefRequisitionLine.findMany({
+    where: { requisitionId: reqId },
+    select: { status: true },
+  });
+  const anyProgress = lines.some(
+    (l) =>
+      l.status === ChefRequisitionLineStatus.ISSUED ||
+      l.status === ChefRequisitionLineStatus.PARTIALLY_ISSUED,
+  );
+  await tx.chefRequisition.updateMany({
+    where: {
+      id: reqId,
+      status: { in: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED] },
+    },
+    data: {
+      status: anyProgress ? ChefRequisitionStatus.PARTIALLY_ISSUED : ChefRequisitionStatus.SUBMITTED,
+      lastFulfilledById: userId,
+    },
+  });
+}
+
 async function createGRNInner(
   raw: unknown,
 ): Promise<{ ok: true; id: string; grnNo: string; warnings?: string[] }> {
@@ -739,6 +775,13 @@ async function createGRNInner(
   // Requisition lines flipped back to PENDING by this GRN — collected inside
   // the tx, used for the deferred notifications + page revalidation after it.
   const banquetFlips: Array<{
+    reqId: string;
+    requisitionNo: string;
+    createdById: string;
+    itemName: string;
+  }> = [];
+  // M16: same, for chef (kitchen) requisition lines bought via this PO.
+  const chefFlips: Array<{
     reqId: string;
     requisitionNo: string;
     createdById: string;
@@ -894,6 +937,45 @@ async function createGRNInner(
             grnLineId: grnLine.id,
           },
         });
+
+        // M16: chef requisition lines waiting on this exact PO line — the
+        // goods are in and stock is posted, so they're issuable again.
+        // Mirrors the banquet flip below. Guarded on line status AND a live
+        // parent so a cancelled requisition isn't resurrected.
+        const chefLinked = await tx.chefRequisitionLine.findMany({
+          where: {
+            vendorPOLineId: poLine.id,
+            status: ChefRequisitionLineStatus.AWAITING_PROCUREMENT,
+            requisition: {
+              status: {
+                in: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED],
+              },
+            },
+          },
+          select: {
+            id: true,
+            requisitionId: true,
+            requisition: { select: { requisitionNo: true, createdById: true } },
+            ingredient: { select: { name: true } },
+          },
+        });
+        if (chefLinked.length > 0) {
+          await tx.chefRequisitionLine.updateMany({
+            where: { id: { in: chefLinked.map((l) => l.id) } },
+            data: { status: ChefRequisitionLineStatus.PENDING },
+          });
+          for (const reqId of new Set(chefLinked.map((l) => l.requisitionId))) {
+            await recomputeChefReqStatusTx(tx, reqId, session.user.id);
+          }
+          chefFlips.push(
+            ...chefLinked.map((l) => ({
+              reqId: l.requisitionId,
+              requisitionNo: l.requisition.requisitionNo,
+              createdById: l.requisition.createdById,
+              itemName: l.ingredient.name,
+            })),
+          );
+        }
       }
 
       // Banquet-store goods (PO raised off an F&B requisition shortfall):
@@ -1082,6 +1164,54 @@ async function createGRNInner(
     revalidatePath("/banquet");
     revalidatePath("/banquet/items");
     revalidatePath("/dashboard");
+  }
+
+  // M16: kitchen stock arrived and chef requisition lines re-opened — tell
+  // the store counter and the chef who raised them. Same shape as the
+  // banquet fan-out above.
+  if (chefFlips.length > 0) {
+    const grnNo = result.grnNo;
+    const grnId = result.id;
+    const actorId = session.user.id;
+    deferAfterResponse("grn-chefreq:notify", async () => {
+      const byReq = new Map<
+        string,
+        { requisitionNo: string; createdById: string; items: string[] }
+      >();
+      for (const f of chefFlips) {
+        const entry = byReq.get(f.reqId) ?? {
+          requisitionNo: f.requisitionNo,
+          createdById: f.createdById,
+          items: [],
+        };
+        entry.items.push(f.itemName);
+        byReq.set(f.reqId, entry);
+      }
+      for (const [reqId, f] of byReq) {
+        await notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+          kind: "GENERIC",
+          title: `Goods for ${f.requisitionNo} arrived — open to issue`,
+          body: `${f.items.join(", ")} received via GRN ${grnNo}.`,
+          link: `/requisitions/${reqId}`,
+          dedupeKey: `grn-chefreq:${grnId}:${reqId}`,
+        });
+        if (f.createdById !== actorId) {
+          await createNotification({
+            userId: f.createdById,
+            kind: "GENERIC",
+            title: `Your ${f.items.join(", ")} has arrived — the store can issue it now`,
+            body: `${f.requisitionNo}: received via GRN ${grnNo}.`,
+            link: `/requisitions/${reqId}`,
+            dedupeKey: `grn-chefreq-req:${grnId}:${reqId}`,
+          });
+        }
+      }
+    });
+    for (const reqId of new Set(chefFlips.map((f) => f.reqId))) {
+      revalidatePath(`/requisitions/${reqId}`);
+    }
+    revalidatePath("/requisitions");
+    revalidatePath("/queue/issuing");
   }
 
   // Unit mismatches: stock was NOT auto-posted for some lines. Tell the
@@ -1590,7 +1720,7 @@ export async function listVendorPOs(opts: { status?: VendorPOStatus[]; vendorId?
     },
     include: {
       vendor: { select: { name: true, code: true } },
-      order: { select: { code: true } },
+      order: { select: { id: true, code: true } },
       _count: { select: { lines: true } },
     },
     orderBy: { issueDate: "desc" },

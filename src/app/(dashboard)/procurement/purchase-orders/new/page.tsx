@@ -7,6 +7,8 @@ import { listBanquetItems } from "@/server/actions/banquet";
 import { createVendorPO } from "@/server/actions/procurement";
 import { getChefRequisition } from "@/server/actions/chef-requisitions";
 import { gateRolePage } from "@/server/rbac";
+import { db } from "@/server/db";
+import { REVISABLE_ORDER_STATUSES } from "@/lib/order-status";
 import { toDecimal } from "@/lib/money";
 import { VendorPOForm } from "./_components/VendorPOForm";
 
@@ -22,12 +24,21 @@ export default async function NewVendorPOPage({
   const { reqId, lowstock } = await searchParams;
   const fromLowStock = lowstock === "1";
 
-  const [vendors, ingredients, banquetItems, chefReq, lowStockItems] = await Promise.all([
+  const [vendors, ingredients, banquetItems, chefReq, lowStockItems, activeOrders] = await Promise.all([
     listVendors({ active: true }),
     listIngredients({ active: true }),
     listBanquetItems({ activeOnly: true }),
     reqId ? getChefRequisition(reqId) : Promise.resolve(null),
     fromLowStock ? listIngredients({ active: true, lowStock: true }) : Promise.resolve([]),
+    // "For order" picker (#9/#27): orders still in the kitchen's hands —
+    // that's when a PO is being raised for them. Direct scoped query is
+    // fine here: the page gate above is ADMIN/MANAGER/STORE_KEEPER.
+    db.order.findMany({
+      where: { status: { in: REVISABLE_ORDER_STATUSES } },
+      select: { id: true, code: true, customer: { select: { name: true } } },
+      orderBy: { eventDate: "asc" },
+      take: 200,
+    }),
   ]);
 
   // Raised from a chef-requisition shortfall: pre-fill the short items with
@@ -43,6 +54,9 @@ export default async function NewVendorPOPage({
         return {
           ingredientId: l.ingredientId,
           banquetItemId: "",
+          // M16: back-link — createVendorPOTx sets this line's
+          // vendorPOLineId so the GRN can flip it back to issuable.
+          chefReqLineId: l.id as string | null,
           sku: l.ingredient.sku,
           description: l.ingredient.name,
           unit: l.ingredient.unit,
@@ -60,6 +74,7 @@ export default async function NewVendorPOPage({
     prefillLines = lowStockItems.map((i) => ({
       ingredientId: i.id,
       banquetItemId: "",
+      chefReqLineId: null,
       sku: i.sku,
       description: i.name,
       unit: i.unit,
@@ -77,11 +92,12 @@ export default async function NewVendorPOPage({
 
   async function create(input: {
     vendorId: string;
+    orderId: string | null;
     procurementType: "STANDARD" | "LOCAL" | "ONLINE";
     placeOfSupplyStateCode: string;
     expectedDate: string | undefined;
     notes: string | null;
-    lines: Array<{ ingredientId: string | null; banquetItemId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
+    lines: Array<{ ingredientId: string | null; banquetItemId: string | null; chefReqLineId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
   }) {
     "use server";
     // input.lines already carry banquetItemId; createVendorPO parses via
@@ -146,6 +162,15 @@ export default async function NewVendorPOPage({
         vendors={vendors.map((v) => ({ id: v.id, name: v.name, code: v.code, stateCode: v.stateCode }))}
         ingredients={ingredients.map((i) => ({ id: i.id, sku: i.sku, name: i.name, unit: i.unit, gstRatePct: i.gstRatePct.toString() }))}
         banquetItems={banquetItems.map((b) => ({ id: b.id, sku: b.sku ?? "", name: b.name, unit: b.unit }))}
+        orders={[
+          // The requisition's own order first (even if it moved past the
+          // "active" window) so the prefill's default selection resolves.
+          ...(chefReq?.order && !activeOrders.some((o) => o.id === chefReq.order!.id)
+            ? [{ id: chefReq.order.id, code: chefReq.order.code, customerName: chefReq.order.customer.name }]
+            : []),
+          ...activeOrders.map((o) => ({ id: o.id, code: o.code, customerName: o.customer.name })),
+        ]}
+        initialOrderId={chefReq?.order?.id ?? null}
         onSubmit={create}
         onQuickAddVendor={quickAddVendor}
         initialVendorId={suggestedVendorId}

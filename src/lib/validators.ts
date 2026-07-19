@@ -373,6 +373,22 @@ export const OrderReviseInput = z.object({
   // Reschedule: IST "yyyy-MM-ddTHH:mm". Only applied when it differs from
   // the order's current event date; must be in the future when it does.
   eventDate: z.string().trim().min(1).nullable().optional(),
+  // Meal-type change (client moved lunch → dinner). Applied only when it
+  // differs from the order's current value; audited.
+  mealType: z.nativeEnum(MealType).optional(),
+  // NEW dishes added mid-flight. Priced server-side from the dish's
+  // current catalogue price (never client-supplied) via computeLine.
+  addDishes: z
+    .array(
+      z.object({
+        dishId: z.string().min(1),
+        portions: z.coerce
+          .number()
+          .int("Portions must be a whole number")
+          .min(1, "Portions must be at least 1"),
+      }),
+    )
+    .optional(),
   revisionNote: z.string().trim().min(1, "A revision note is required").max(2000),
 });
 export type OrderReviseInputT = z.infer<typeof OrderReviseInput>;
@@ -580,6 +596,11 @@ export const VendorPOLineInput = z.object({
   // BanquetReceipt against this item. Mutually exclusive with ingredientId
   // (enforced in createVendorPOTx).
   banquetItemId: z.string().nullable().optional(),
+  // Chef requisition line whose shortfall this PO line is buying (the
+  // ?reqId= prefill flow). createVendorPOTx back-links
+  // ChefRequisitionLine.vendorPOLineId so GRN acceptance can flip the line
+  // back to issuable — mirrors the banquet vendorPOLineId link.
+  chefReqLineId: z.string().nullable().optional(),
   sku: z.string().min(1, "Each line needs an SKU / item name").max(40),
   description: z.string().min(1).max(500),
   unit: z.string().min(1).max(20),
@@ -1008,6 +1029,18 @@ export const SettingUpdateInput = z.object({
   key: z.string().min(1).max(80),
   value: z.unknown(),
 });
+
+// Bank details printed on customer invoices — stored as one JSON value at
+// Settings key "invoice.bankDetails". All fields optional; empty strings
+// mean "leave that line off the invoice".
+export const InvoiceBankDetailsInput = z.object({
+  accountName: z.string().trim().max(120).default(""),
+  accountNumber: z.string().trim().max(40).default(""),
+  ifsc: z.string().trim().max(20).default(""),
+  bankBranch: z.string().trim().max(160).default(""),
+  upiId: z.string().trim().max(120).default(""),
+});
+export type InvoiceBankDetailsT = z.infer<typeof InvoiceBankDetailsInput>;
 
 // Re-export enums for callers that want to discriminate without importing
 // twice. Keeps consumer imports clean.

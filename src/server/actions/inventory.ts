@@ -637,3 +637,89 @@ export async function listRecentIssues(opts: { limit?: number } = {}) {
     },
   });
 }
+
+/**
+ * Per-ingredient movement ledger for the detail page: every receipt (+),
+ * issue (−) and manual adjustment (±) in one reverse-chronological list,
+ * capped at the latest 100 entries. Read-only, same gate as the other
+ * inventory reads.
+ */
+export type IngredientMovementEntry = {
+  kind: "RECEIPT" | "ISSUE" | "ADJUSTMENT";
+  id: string;
+  at: Date;
+  /** Signed quantity string, e.g. "+12.5" / "-3". */
+  qty: string;
+  /** Who recorded it, where the source row tracks a user. */
+  by: string | null;
+  /** Human context: cost + supplier / order + purpose / reason. */
+  detail: string;
+};
+
+const MOVEMENT_CAP = 100;
+
+export async function listIngredientMovements(
+  ingredientId: string,
+): Promise<IngredientMovementEntry[]> {
+  await requireRole(READ_ROLES);
+  const [receipts, issues, adjustments] = await Promise.all([
+    db.ingredientReceipt.findMany({
+      where: { ingredientId },
+      orderBy: { receivedAt: "desc" },
+      take: MOVEMENT_CAP,
+      include: { recordedBy: { select: { name: true } } },
+    }),
+    db.ingredientIssue.findMany({
+      where: { ingredientId },
+      orderBy: { issuedAt: "desc" },
+      take: MOVEMENT_CAP,
+      include: {
+        issuedBy: { select: { name: true } },
+        order: { select: { code: true } },
+      },
+    }),
+    db.ingredientAdjustment.findMany({
+      where: { ingredientId },
+      orderBy: { adjustedAt: "desc" },
+      take: MOVEMENT_CAP,
+      include: { adjustedBy: { select: { name: true } } },
+    }),
+  ]);
+
+  const rows: IngredientMovementEntry[] = [
+    ...receipts.map((r) => ({
+      kind: "RECEIPT" as const,
+      id: r.id,
+      at: r.receivedAt,
+      qty: `+${r.qty.toString()}`,
+      by: r.recordedBy?.name ?? null,
+      detail: [
+        `₹${r.unitCost.toString()}/unit`,
+        r.supplier ? `from ${r.supplier}` : null,
+        r.note,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    })),
+    ...issues.map((i) => ({
+      kind: "ISSUE" as const,
+      id: i.id,
+      at: i.issuedAt,
+      qty: `-${i.qty.toString()}`,
+      by: i.issuedBy.name,
+      detail: [i.order ? `order ${i.order.code}` : "no order", i.note]
+        .filter(Boolean)
+        .join(" · "),
+    })),
+    ...adjustments.map((a) => ({
+      kind: "ADJUSTMENT" as const,
+      id: a.id,
+      at: a.adjustedAt,
+      qty: toDecimal(a.delta).gte(0) ? `+${a.delta.toString()}` : a.delta.toString(),
+      by: a.adjustedBy.name,
+      detail: [a.reason, a.note].filter(Boolean).join(" · "),
+    })),
+  ];
+  rows.sort((x, y) => y.at.getTime() - x.at.getTime());
+  return rows.slice(0, MOVEMENT_CAP);
+}

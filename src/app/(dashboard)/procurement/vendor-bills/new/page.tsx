@@ -90,6 +90,10 @@ export default async function NewVendorBillPage({
       )}
 
       <VendorBillForm
+        // Keyed on the PO so picking one in the form (which navigates to
+        // ?poId=) re-mounts the form with the prefilled lines — same-route
+        // navigation otherwise keeps the client component's old state.
+        key={poId ?? "no-po"}
         vendors={vendors.map((v) => ({ id: v.id, name: v.name, code: v.code }))}
         pos={pos.map((p) => ({ id: p.id, poNo: p.poNo, vendorId: p.vendorId, vendorName: p.vendor.name }))}
         onSubmit={create}

@@ -1,6 +1,6 @@
 "use server";
 
-import { Role, VendorBillStatus } from "@prisma/client";
+import { Role, VendorBillStatus, VendorPOStatus } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { notifyRoles } from "@/server/notification-core";
@@ -30,6 +30,10 @@ interface ReminderRunResult {
   scanned: number;
   notified: number;
   tasksCreated: number;
+  /** L10: bills flipped APPROVED/MATCHED → OVERDUE this run. */
+  billsFlippedOverdue: number;
+  /** M18: POs stuck in PENDING_APPROVAL nudged to their approver tier. */
+  poApprovalNudges: number;
   bills: Array<{
     billId: string;
     billNo: string;
@@ -64,10 +68,51 @@ export async function runVendorPaymentRemindersInternal(): Promise<ReminderRunRe
   const now = new Date();
   const in3Days = new Date(now.getTime() + 3 * 24 * 3600 * 1000);
   const in7Days = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
+  const todayKey = ymd(now);
+
+  // L10: flip past-due bills to OVERDUE first, so the AP donut / filters
+  // reflect reality and the reminder scan below (which includes OVERDUE)
+  // still nags about them. Guarded updateMany: only APPROVED/MATCHED move.
+  const overdueFlip = await db.vendorBill.updateMany({
+    where: {
+      status: { in: [VendorBillStatus.APPROVED, VendorBillStatus.MATCHED] },
+      dueDate: { lt: now },
+    },
+    data: { status: VendorBillStatus.OVERDUE },
+  });
+
+  // M18: POs parked in PENDING_APPROVAL — nudge whoever owes the next
+  // signature, once per day. Manager step not done yet → manager + admin;
+  // manager done, waiting on the ≥₹5k admin step → admin only.
+  const stuckPOs = await db.vendorPO.findMany({
+    where: { status: VendorPOStatus.PENDING_APPROVAL },
+    select: {
+      id: true,
+      poNo: true,
+      grandTotal: true,
+      managerApprovedAt: true,
+      vendor: { select: { name: true } },
+    },
+  });
+  for (const po of stuckPOs) {
+    const roles = po.managerApprovedAt
+      ? [Role.ADMIN]
+      : [Role.MANAGER, Role.ADMIN];
+    deferAfterResponse(`po-approval-nudge:${po.id}`, () =>
+      notifyRoles(roles, {
+        kind: "GENERIC",
+        title: `PO ${po.poNo} is waiting for your approval`,
+        body: `${po.vendor.name} · ₹${po.grandTotal.toString()}${po.managerApprovedAt ? " · manager has signed off — admin approval needed" : ""}. The vendor can't be sent anything until it's approved.`,
+        link: `/procurement/purchase-orders/${po.id}`,
+        dedupeKey: `po-approval-nudge:${po.id}:${todayKey}`,
+      }),
+    );
+  }
 
   // Pull open bills with a due date in the next 7 days (covers both
   // the regular 3-day window and the statutory 7-day window). Filter
-  // out PAID + DRAFT + CANCELLED.
+  // out PAID + DRAFT + CANCELLED. OVERDUE stays in the scan — flipping
+  // a bill's status must not silence its payment reminders.
   const candidates = await db.vendorBill.findMany({
     where: {
       status: {
@@ -75,6 +120,7 @@ export async function runVendorPaymentRemindersInternal(): Promise<ReminderRunRe
           VendorBillStatus.MATCHED,
           VendorBillStatus.DISCREPANCY,
           VendorBillStatus.APPROVED,
+          VendorBillStatus.OVERDUE,
         ],
       },
       OR: [
@@ -87,7 +133,6 @@ export async function runVendorPaymentRemindersInternal(): Promise<ReminderRunRe
     },
   });
 
-  const todayKey = ymd(now);
   const out: ReminderRunResult["bills"] = [];
   let tasksCreated = 0;
   let notified = 0;
@@ -174,6 +219,8 @@ export async function runVendorPaymentRemindersInternal(): Promise<ReminderRunRe
     scanned: candidates.length,
     notified,
     tasksCreated,
+    billsFlippedOverdue: overdueFlip.count,
+    poApprovalNudges: stuckPOs.length,
     bills: out,
   };
 }

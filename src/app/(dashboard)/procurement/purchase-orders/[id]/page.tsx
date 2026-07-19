@@ -120,6 +120,14 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
             Manager approved · awaiting Admin
           </span>
         )}
+        {po.order && (
+          <span className="text-ik-ink-3">
+            For order{" "}
+            <Link href={`/orders/${po.order.id}`} className="font-mono text-brand hover:underline">
+              {po.order.code}
+            </Link>
+          </span>
+        )}
         <span className="text-ik-ink-3">Issued {formatIST(po.issueDate, "yyyy-MM-dd")}</span>
         {po.expectedDate && <span className="text-ik-ink-3">· Expected {formatIST(po.expectedDate, "yyyy-MM-dd")}</span>}
         {po.managerApprovedAt && (

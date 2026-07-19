@@ -54,6 +54,7 @@ export default async function VendorPOsPage({
               <TableHead>PO no</TableHead>
               <TableHead>Date</TableHead>
               <TableHead>Vendor</TableHead>
+              <TableHead>For order</TableHead>
               <TableHead>Tier</TableHead>
               <TableHead className="text-right">Lines</TableHead>
               <TableHead className="text-right">Total</TableHead>
@@ -66,6 +67,13 @@ export default async function VendorPOsPage({
                 <TableCell><Link href={`/procurement/purchase-orders/${po.id}`} className="font-mono text-brand hover:underline">{po.poNo}</Link></TableCell>
                 <TableCell className="font-mono text-[12px]">{formatIST(po.issueDate, "yyyy-MM-dd")}</TableCell>
                 <TableCell>{po.vendor.name} <span className="text-ik-ink-3">· {po.vendor.code}</span></TableCell>
+                <TableCell>
+                  {po.order ? (
+                    <Link href={`/orders/${po.order.id}`} className="font-mono text-[12px] text-brand hover:underline">{po.order.code}</Link>
+                  ) : (
+                    <span className="text-ik-ink-3">—</span>
+                  )}
+                </TableCell>
                 <TableCell>{po.approvalTier}</TableCell>
                 <TableCell className="text-right">{po._count.lines}</TableCell>
                 <TableCell className="text-right font-mono">{formatINR(po.grandTotal)}</TableCell>

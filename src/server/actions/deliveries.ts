@@ -64,8 +64,9 @@ const READ_ROLES = [
 /**
  * Schedule a delivery against a READY order. The OTP step has been
  * dropped — the driver confirms delivery directly from the mobile app
- * when they hand the goods over. Tax invoice is auto-generated the
- * moment delivery is confirmed (see `confirmDeliveryOTP`).
+ * when they hand the goods over. Invoicing is deferred: accounts /
+ * admin / manager generates the tax invoice manually from the order
+ * detail page after delivery (see `confirmDeliveryOTP`).
  *
  * The legacy `otpHash` / `otpAttempts` columns remain on the schema
  * (cheap, harmless) so confirm-side code that branches on their absence
@@ -155,22 +156,28 @@ async function handToDeliveryInner(orderId: string): Promise<{ ok: true }> {
   // Stamp the intimation so the kitchen card flips to "Delivery informed".
   // Status guard in the WHERE: if the order moved on since the read (a
   // concurrent dispatch/cancel), skip the stamp — same no-op as above.
-  const updated = await db.order.updateMany({
-    where: { id: orderId, status: OrderStatus.READY },
-    data: { handedToDeliveryAt: new Date() },
+  // L8: stamp + audit are one transaction so the audit trail can't miss a
+  // committed stamp (or record one that rolled back).
+  const stamped = await db.$transaction(async (tx) => {
+    const updated = await tx.order.updateMany({
+      where: { id: orderId, status: OrderStatus.READY },
+      data: { handedToDeliveryAt: new Date() },
+    });
+    if (updated.count === 0) return false;
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "ORDER_HANDED_TO_DELIVERY",
+        entity: "Order",
+        entityId: orderId,
+      },
+    });
+    return true;
   });
-  if (updated.count === 0) {
+  if (!stamped) {
     revalidatePath("/kitchen");
     return { ok: true };
   }
-  await db.auditLog.create({
-    data: {
-      userId: session.user.id,
-      action: "ORDER_HANDED_TO_DELIVERY",
-      entity: "Order",
-      entityId: orderId,
-    },
-  });
   const where = order.roomNumber ? ` · Room ${order.roomNumber}` : "";
   // Fan-out is best-effort — the chef's button shouldn't wait on it.
   // Drivers can't open /deliveries/new (admin/manager page) — their link
@@ -239,6 +246,53 @@ export async function listEventPrepQueue() {
     prepReadyAt: o.eventPrepReadyAt ? o.eventPrepReadyAt.toISOString() : null,
     prepReadyBy: o.eventPrepReadyBy?.name ?? null,
     staff: o.staffAllocations,
+  }));
+}
+
+/**
+ * #18: read-only "what's coming" list for the F&B / delivery dashboard —
+ * confirmed event-delivery orders (accepted onward, i.e. past the manager
+ * gate) with an event in the next 7 days. Includes the pre-kitchen
+ * statuses the event-prep queue doesn't watch, so F&B sees an order while
+ * it's still being chef-reviewed or cooked.
+ */
+export async function listUpcomingEventOrders() {
+  await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
+  const now = new Date();
+  const in7Days = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
+  const rows = await db.order.findMany({
+    where: {
+      channel: { in: EVENT_DELIVERY_CHANNEL_LIST },
+      status: {
+        in: [
+          OrderStatus.PENDING_CHEF_APPROVAL,
+          OrderStatus.CHANGES_PROPOSED_BY_CHEF,
+          OrderStatus.CHEF_APPROVED,
+          ...EVENT_PREP_STATUSES,
+        ],
+      },
+      eventDate: { gte: now, lt: in7Days },
+    },
+    select: {
+      id: true,
+      code: true,
+      channel: true,
+      status: true,
+      headcount: true,
+      eventDate: true,
+      customer: { select: { name: true } },
+    },
+    orderBy: { eventDate: "asc" },
+    take: 100,
+  });
+  return rows.map((o) => ({
+    id: o.id,
+    code: o.code,
+    channel: o.channel,
+    status: o.status,
+    headcount: o.headcount,
+    eventDate: o.eventDate.toISOString(),
+    customerName: o.customer.name,
   }));
 }
 
@@ -696,12 +750,18 @@ export async function markDeliveryArrived(id: string): Promise<ActionResult> {
  * door). No OTP needed — the customer-readback step has been retired.
  *
  * In one transaction:
- *   1. Mark the delivery DELIVERED + record the timestamp.
- *   2. Optionally capture payment-on-delivery (amount + method + ref).
- *   3. Auto-create + issue the GST tax invoice for the order.
- *   4. Advance the order DELIVERED → INVOICED.
- *   5. If payment was collected, record it against the freshly-created
- *      invoice (so the line ties out 3-way: delivery ↔ invoice ↔ payment).
+ *   1. Mark the delivery DELIVERED + record the timestamp (guarded — a
+ *      cancelled/already-settled delivery or order refuses cleanly).
+ *   2. Optionally capture payment-on-delivery (amount + method + ref),
+ *      stashed on the DELIVERY row — deliberately NOT bound to an
+ *      invoice yet.
+ *   3. Advance the order READY / OUT_FOR_DELIVERY → DELIVERED and mint
+ *      the public feedback token for channels that want it.
+ *
+ * Invoicing is DEFERRED (auto-invoicing was deliberately removed):
+ * accounts / admin / manager generates the tax invoice manually from the
+ * order detail page, and any pending payment-on-delivery amounts are
+ * credited against it there.
  *
  * The function name still ends `…OTP` to keep the existing route shims
  * working without a rename sweep; the OTP field on the input is now

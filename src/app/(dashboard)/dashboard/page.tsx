@@ -15,7 +15,7 @@ import { BanquetPanel } from "@/components/ik/dashboard/BanquetPanel";
 import { ChefWorkScreen } from "@/components/ik/dashboard/ChefWorkScreen";
 import { listChefBoardOrders } from "@/server/actions/production-jobs";
 import { DriverWorkScreen } from "@/components/ik/dashboard/DriverWorkScreen";
-import { listReadyForDispatch, listMyActiveDeliveries, listEventPrepQueue } from "@/server/actions/deliveries";
+import { listReadyForDispatch, listMyActiveDeliveries, listEventPrepQueue, listUpcomingEventOrders } from "@/server/actions/deliveries";
 import { SalesBoard } from "@/components/ik/dashboard/SalesBoard";
 import { StoreBoard } from "@/components/ik/dashboard/StoreBoard";
 import { ManagerApprovalsBoard } from "@/components/ik/dashboard/ManagerApprovalsBoard";
@@ -441,10 +441,12 @@ export default async function DashboardPage({
           ? sp.scope
           : "today";
     const window = istScopeWindow(sp.scope, sp.date);
-    const [allEventPrep, allPickups, allDeliveries] = await Promise.all([
+    const [allEventPrep, allPickups, allDeliveries, upcoming] = await Promise.all([
       listEventPrepQueue(),
       listReadyForDispatch(),
       listMyActiveDeliveries(),
+      // #18: read-only heads-up — confirmed event orders in the next 7 days.
+      listUpcomingEventOrders(),
     ]);
     const within = (iso: string | Date, w: { from: Date; toExclusive: Date } | null) => {
       if (!w) return true;
@@ -535,6 +537,7 @@ export default async function DashboardPage({
               customerName: d.order.customer.name,
               items: (d.order.items ?? []).map((it) => ({ label: it.dish?.name ?? "—", portions: it.portions.toString() })),
             }))}
+            upcoming={upcoming}
           />
           <BanquetPanel />
         </div>

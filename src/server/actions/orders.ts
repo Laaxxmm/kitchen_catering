@@ -499,7 +499,7 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
     const keeps = input.items.filter((li) => li.portions > 0);
     // Lines the form didn't send stay untouched.
     const untouched = order.items.filter((it) => !input.items.some((li) => li.id === it.id));
-    if (keeps.length + untouched.length === 0) {
+    if (keeps.length + untouched.length + (input.addDishes?.length ?? 0) === 0) {
       throw new ActionError("An order needs at least one dish — cancel the order instead of zeroing every line.");
     }
 
@@ -527,6 +527,48 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
           lineTotal: c.total.toString(),
         },
       });
+    }
+
+    // #16: ADD new dishes mid-flight. Priced server-side from each dish's
+    // CURRENT catalogue price via computeLine — the client only names the
+    // dish and portions, never a price. Runs before the contract-value
+    // re-sum below so per-dish channels pick the new lines up; package
+    // channels keep their lump sum regardless.
+    const addedNames: string[] = [];
+    if (input.addDishes && input.addDishes.length > 0) {
+      const dishes = await tx.dish.findMany({
+        where: { id: { in: input.addDishes.map((d) => d.dishId) } },
+        select: { id: true, name: true, unitPrice: true, gstRatePct: true },
+      });
+      const dishById = new Map(dishes.map((d) => [d.id, d]));
+      let sortOrder = order.items.reduce((m, it) => Math.max(m, it.sortOrder), -1) + 1;
+      for (const add of input.addDishes) {
+        const dish = dishById.get(add.dishId);
+        if (!dish) {
+          throw new ActionError("A dish in this revision no longer exists — refresh and try again.");
+        }
+        const c = computeLine(
+          String(add.portions),
+          dish.unitPrice.toString(),
+          "0",
+          dish.gstRatePct.toString(),
+        );
+        await tx.orderItem.create({
+          data: {
+            orderId: id,
+            dishId: dish.id,
+            sortOrder: sortOrder++,
+            portions: String(add.portions),
+            unitPrice: dish.unitPrice.toString(),
+            discountPct: "0",
+            gstRatePct: dish.gstRatePct.toString(),
+            lineSubtotal: c.subtotal.toString(),
+            lineTax: c.tax.toString(),
+            lineTotal: c.total.toString(),
+          },
+        });
+        addedNames.push(dish.name);
+      }
     }
 
     // Contract value: package channels carry the renegotiated lump sum
@@ -563,6 +605,10 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
       }
     }
 
+    // #14: meal-type change — applied only when it actually differs.
+    const newMealType =
+      input.mealType && input.mealType !== order.mealType ? input.mealType : null;
+
     // Status guard in the WHERE clause: if the order moved (e.g. went out
     // for delivery) between our read and this write, match zero rows and
     // roll the whole revision back.
@@ -572,6 +618,7 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
         headcount: input.headcount,
         contractValue: contractValue.toString(),
         ...(newEventDate ? { eventDate: newEventDate } : {}),
+        ...(newMealType ? { mealType: newMealType } : {}),
       },
     });
     if (updated.count === 0) {
@@ -592,19 +639,22 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
             headcount: order.headcount,
             contractValue: order.contractValue.toString(),
             eventDate: order.eventDate.toISOString(),
+            mealType: order.mealType,
           },
           after: {
             headcount: input.headcount,
             contractValue: contractValue.toString(),
             eventDate: (newEventDate ?? order.eventDate).toISOString(),
+            mealType: newMealType ?? order.mealType,
           },
           removedLines: removals.length,
+          addedDishes: addedNames,
           note: input.revisionNote,
         }),
       },
     });
 
-    return { code: order.code, oldPax: order.headcount, newEventDate };
+    return { code: order.code, oldPax: order.headcount, newEventDate, newMealType, addedNames };
   });
 
   revalidatePath(`/orders/${id}`);
@@ -612,16 +662,18 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
   revalidatePath("/dashboard");
   revalidatePath("/kitchen");
 
+  const noteParts = [
+    revised.newEventDate
+      ? `Rescheduled to ${formatIST(revised.newEventDate, "EEE d MMM yyyy HH:mm")}.`
+      : null,
+    revised.newMealType ? `Meal changed to ${revised.newMealType.toLowerCase().replace("_", " ")}.` : null,
+    revised.addedNames.length > 0 ? `Added: ${revised.addedNames.join(", ")}.` : null,
+    input.revisionNote,
+  ]
+    .filter(Boolean)
+    .join(" ");
   deferAfterResponse("order-revise:notify", () =>
-    notifyOrderRevised(
-      id,
-      revised.code,
-      revised.oldPax,
-      input.headcount,
-      revised.newEventDate
-        ? `Rescheduled to ${formatIST(revised.newEventDate, "EEE d MMM yyyy HH:mm")}. ${input.revisionNote}`
-        : input.revisionNote,
-    ),
+    notifyOrderRevised(id, revised.code, revised.oldPax, input.headcount, noteParts),
   );
   return { ok: true };
 }
@@ -660,7 +712,9 @@ async function notifyOrderRevised(
       (openRequisition
         ? " Review the ingredient requisition — quantities were planned for the old headcount."
         : "");
-    await notifyRoles([Role.KITCHEN_HEAD, Role.DELIVERY, Role.FNB_SERVICE], {
+    // STORE_KEEPER included (#6/#19): the store preps against requisitions
+    // that a revision may have just invalidated.
+    await notifyRoles([Role.KITCHEN_HEAD, Role.DELIVERY, Role.FNB_SERVICE, Role.STORE_KEEPER], {
       kind: "GENERIC",
       title: `Order ${code} revised — ${oldPax ?? "?"} → ${newPax} pax`,
       body,

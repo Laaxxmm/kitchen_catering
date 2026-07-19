@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
-import { Role } from "@prisma/client";
+import { DeliveryStatus, Role, TaskStatus } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { UserInput, UserUpdateInput } from "@/lib/validators";
@@ -92,7 +92,9 @@ export async function updateUser(id: string, raw: unknown): Promise<ActionResult
   }
 }
 
-export async function deactivateUser(id: string): Promise<ActionResult> {
+export async function deactivateUser(
+  id: string,
+): Promise<ActionResultWith<{ warning?: string }>> {
   try {
     const session = await requireRole(ADMIN_ONLY);
     if (id === session.user.id) throw new ActionError("You cannot deactivate yourself");
@@ -107,8 +109,37 @@ export async function deactivateUser(id: string): Promise<ActionResult> {
         },
       });
     });
+
+    // L11: surface work still assigned to the deactivated user so the
+    // admin reassigns it instead of it silently going stale.
+    const [openTasks, activeDeliveries] = await Promise.all([
+      db.task.count({
+        where: {
+          assignedToId: id,
+          status: { in: [TaskStatus.ASSIGNED, TaskStatus.SUBMITTED, TaskStatus.REJECTED] },
+        },
+      }),
+      db.delivery.count({
+        where: {
+          driverUserId: id,
+          status: {
+            in: [DeliveryStatus.SCHEDULED, DeliveryStatus.DISPATCHED, DeliveryStatus.IN_TRANSIT],
+          },
+        },
+      }),
+    ]);
+    let warning: string | undefined;
+    if (openTasks > 0 || activeDeliveries > 0) {
+      const parts: string[] = [];
+      if (openTasks > 0) parts.push(`${openTasks} open task${openTasks === 1 ? "" : "s"}`);
+      if (activeDeliveries > 0) {
+        parts.push(`${activeDeliveries} active deliver${activeDeliveries === 1 ? "y" : "ies"}`);
+      }
+      warning = `They still have ${parts.join(" and ")} — reassign from the Tasks / Deliveries screens.`;
+    }
+
     revalidatePath("/admin/users");
-    return { ok: true };
+    return { ok: true, warning };
   } catch (err) {
     return actionFailure(err);
   }

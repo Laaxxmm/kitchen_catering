@@ -61,6 +61,19 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
 
   const filteredPos = pos.filter((p) => p.vendorId === vendorId);
 
+  // Choosing a PO reloads the page with ?poId= so the server-side prefill
+  // runs (vendor locked, lines defaulted to the GRN-received quantities,
+  // unit prices + GST from the PO). Anything already typed is replaced —
+  // the PO is the source of truth for the lines.
+  function onPoChange(nextPoId: string) {
+    if (isEdit) return;
+    router.push(
+      nextPoId
+        ? `/procurement/vendor-bills/new?poId=${nextPoId}`
+        : "/procurement/vendor-bills/new",
+    );
+  }
+
   const totals = useMemo(() => {
     let sub = new Decimal(0);
     let tax = new Decimal(0);
@@ -112,21 +125,22 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="grid gap-1">
             <Label htmlFor="vendorId">Vendor<span className="text-gold" aria-hidden> *</span></Label>
-            <select id="vendorId" value={vendorId} onChange={(e) => { setVendorId(e.target.value); setPoId(""); }} disabled={isEdit} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px] disabled:opacity-60">
+            {/* Vendor is locked once a PO is linked — the PO determines the supplier. */}
+            <select id="vendorId" value={vendorId} onChange={(e) => { setVendorId(e.target.value); setPoId(""); }} disabled={isEdit || !!poId} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px] disabled:opacity-60">
               <option value="" disabled>— pick vendor —</option>
               {vendors.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
             </select>
           </div>
           <div className="grid gap-1">
-            <Label htmlFor="poId">Linked PO (optional, enables 3-way match)</Label>
-            <select id="poId" value={poId} onChange={(e) => setPoId(e.target.value)} disabled={isEdit} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px] disabled:opacity-60">
+            <Label htmlFor="poId">Linked PO (optional, prefills lines + enables 3-way match)</Label>
+            <select id="poId" value={poId} onChange={(e) => onPoChange(e.target.value)} disabled={isEdit} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px] disabled:opacity-60">
               <option value="">— no PO —</option>
               {filteredPos.map((p) => <option key={p.id} value={p.id}>{p.poNo}</option>)}
             </select>
           </div>
           <div className="grid gap-1">
             <Label htmlFor="vendorBillNo">Vendor invoice #</Label>
-            <Input id="vendorBillNo" value={vendorBillNo} onChange={(e) => setVendorBillNo(e.target.value)} />
+            <Input id="vendorBillNo" maxLength={60} value={vendorBillNo} onChange={(e) => setVendorBillNo(e.target.value)} />
           </div>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -165,7 +179,7 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
               const tax = sub.times(new Decimal(l.gstRatePct || "0").div(100));
               return (
                 <tr key={idx} className="border-b border-ik-rule">
-                  <td className="py-1 pr-2"><input value={l.description} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, description: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1" /></td>
+                  <td className="py-1 pr-2"><input maxLength={500} value={l.description} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, description: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1" /></td>
                   <td className="py-1 pr-2"><input type="number" step="any" min="0.001" value={l.quantity} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, quantity: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
                   <td className="py-1 pr-2"><input value={l.unit} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, unit: e.target.value } : x))} className="h-8 w-12 rounded border border-ik-rule bg-ik-card px-1" /></td>
                   <td className="py-1 pr-2"><input type="number" step="0.01" min="0" value={l.unitPrice} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, unitPrice: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
@@ -187,7 +201,7 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
 
       <div className="grid gap-1 max-w-2xl">
         <Label htmlFor="notes">Notes</Label>
-        <Textarea id="notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <Textarea id="notes" rows={2} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </div>
 
       <div className="sticky bottom-0 z-10 -mx-4 mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-ik-rule bg-ik-paper/90 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-ik-paper/75 md:-mx-6 md:px-6">

@@ -4,7 +4,9 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Decimal } from "decimal.js";
+import { MealType } from "@prisma/client";
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { Textarea } from "@/components/ui/textarea";
 import { isNextNavigationError } from "@/lib/next-error";
 import type { ActionResult } from "@/lib/action-result";
@@ -19,16 +21,37 @@ interface Line {
   gstRatePct: string;
 }
 
+interface DishOption {
+  id: string;
+  name: string;
+  unit: string;
+  unitPrice: string;
+  gstRatePct: string;
+}
+
+const MEAL_LABEL: Record<MealType, string> = {
+  BREAKFAST: "Breakfast",
+  LUNCH: "Lunch",
+  DINNER: "Dinner",
+  HIGH_TEA: "High tea",
+  SNACKS: "Snacks",
+  CUSTOM: "Custom",
+};
+
 interface Props {
   orderId: string;
   currentHeadcount: number;
   /** IST "yyyy-MM-ddTHH:mm" backing the datetime-local input. */
   currentEventDate: string;
+  currentMealType: MealType;
   /** Package-priced channel (banquet / buffet / ODC / packet) — contract
    *  value is the lump-sum package total, not the line sum. */
   packageChannel: boolean;
   currentContractValue: string;
   lines: Line[];
+  /** Dishes from the order's channel menu, for the "Add dish" picker.
+   *  Prices shown are indicative — the server re-prices from the catalogue. */
+  dishes: DishOption[];
   onSubmit: (raw: unknown) => Promise<ActionResult>;
 }
 
@@ -47,9 +70,11 @@ export function ReviseOrderForm({
   orderId,
   currentHeadcount,
   currentEventDate,
+  currentMealType,
   packageChannel,
   currentContractValue,
   lines,
+  dishes,
   onSubmit,
 }: Props) {
   const router = useRouter();
@@ -61,7 +86,13 @@ export function ReviseOrderForm({
   const [packageTotal, setPackageTotal] = useState(currentContractValue);
   const [eventDate, setEventDate] = useState(currentEventDate);
   const dateChanged = eventDate !== currentEventDate;
+  const [mealType, setMealType] = useState<MealType>(currentMealType);
   const [note, setNote] = useState("");
+  // NEW dishes to add: { dishId, portions } rows. Priced server-side; the
+  // preview uses the same catalogue price the server will read.
+  const [added, setAdded] = useState<Array<{ dishId: string; portions: string }>>([]);
+  const [pickDishId, setPickDishId] = useState("");
+  const dishById = useMemo(() => new Map(dishes.map((d) => [d.id, d])), [dishes]);
 
   // Current vs new contract value. Package channels carry the typed lump
   // sum; per-dish channels re-sum the lines exactly like the server will.
@@ -76,8 +107,14 @@ export function ReviseOrderForm({
       if (p <= 0) continue;
       sum = sum.plus(lineTotal(p, l.unitPrice, l.discountPct, l.gstRatePct));
     }
+    for (const a of added) {
+      const d = dishById.get(a.dishId);
+      const p = Math.trunc(Number(a.portions)) || 0;
+      if (!d || p <= 0) continue;
+      sum = sum.plus(lineTotal(p, d.unitPrice, "0", d.gstRatePct));
+    }
     return sum.toDecimalPlaces(2);
-  }, [packageChannel, packageTotal, lines, portions]);
+  }, [packageChannel, packageTotal, lines, portions, added, dishById]);
 
   const removedCount = lines.filter((l) => Number(portions[l.id] ?? "0") === 0).length;
 
@@ -93,7 +130,16 @@ export function ReviseOrderForm({
       }
       items.push({ id: l.id, portions: p });
     }
-    if (items.every((it) => it.portions === 0)) {
+    const addDishes: Array<{ dishId: string; portions: number }> = [];
+    for (const a of added) {
+      const p = Number(a.portions);
+      const d = dishById.get(a.dishId);
+      if (!Number.isInteger(p) || p < 1) {
+        return toast.error(`Portions for the added “${d?.name ?? "dish"}” must be a whole number of at least 1`);
+      }
+      addDishes.push({ dishId: a.dishId, portions: p });
+    }
+    if (items.every((it) => it.portions === 0) && addDishes.length === 0) {
       return toast.error("At least one dish must keep portions — cancel the order instead of zeroing everything");
     }
     if (dateChanged && !eventDate) return toast.error("Pick the new event date & time");
@@ -108,6 +154,8 @@ export function ReviseOrderForm({
           items,
           ...(packageChannel ? { packageTotal: packageTotal.trim() } : {}),
           ...(dateChanged ? { eventDate } : {}),
+          ...(mealType !== currentMealType ? { mealType } : {}),
+          ...(addDishes.length > 0 ? { addDishes } : {}),
           revisionNote: note.trim(),
         });
         if (res && res.ok === false) {
@@ -143,6 +191,27 @@ export function ReviseOrderForm({
             aria-label="New headcount"
           />
           <span className="text-ik-ink-3">pax</span>
+        </div>
+      </section>
+
+      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+        <h3 className="mb-2 text-[14px] font-medium text-ik-ink">Meal</h3>
+        <div className="flex items-center gap-3 text-[13px]">
+          <select
+            value={mealType}
+            onChange={(e) => setMealType(e.target.value as MealType)}
+            className="h-9 rounded border border-ik-rule bg-ik-card px-2 text-[13px]"
+            aria-label="Meal type"
+          >
+            {(Object.keys(MEAL_LABEL) as MealType[]).map((m) => (
+              <option key={m} value={m}>{MEAL_LABEL[m]}</option>
+            ))}
+          </select>
+          {mealType !== currentMealType && (
+            <span className="rounded-full bg-amber-wash px-2 py-0.5 text-[11.5px] font-medium text-amber-700">
+              was {MEAL_LABEL[currentMealType]}
+            </span>
+          )}
         </div>
       </section>
 
@@ -193,6 +262,72 @@ export function ReviseOrderForm({
           </p>
         )}
       </section>
+
+      {dishes.length > 0 && (
+        <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <h3 className="mb-1 text-[14px] font-medium text-ik-ink">Add dishes</h3>
+          <p className="mb-2 text-[12px] text-ik-ink-3">
+            New dishes are priced at the menu&apos;s current rate when you save.
+          </p>
+          {added.length > 0 && (
+            <ul className="mb-2 grid gap-1.5">
+              {added.map((a, idx) => {
+                const d = dishById.get(a.dishId);
+                if (!d) return null;
+                return (
+                  <li key={`${a.dishId}-${idx}`} className="flex flex-wrap items-center gap-2 text-[12.5px]">
+                    <span className="text-ik-ink">{d.name}</span>
+                    <span className="text-[11px] text-ik-ink-3">₹{d.unitPrice}/{d.unit}</span>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={a.portions}
+                      onChange={(e) =>
+                        setAdded((prev) => prev.map((x, i) => (i === idx ? { ...x, portions: e.target.value } : x)))
+                      }
+                      className="h-8 w-24 rounded border border-ik-rule bg-ik-card px-1 text-right font-mono"
+                      aria-label={`Portions for ${d.name}`}
+                    />
+                    <button
+                      type="button"
+                      className="text-alert"
+                      aria-label={`Remove ${d.name}`}
+                      onClick={() => setAdded((prev) => prev.filter((_, i) => i !== idx))}
+                    >
+                      ×
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-[240px]">
+              <Combobox
+                value={pickDishId}
+                onChange={setPickDishId}
+                options={dishes.map((d) => ({ value: d.id, label: `${d.name} · ₹${d.unitPrice}` }))}
+                placeholder="Type to search a dish…"
+                emptyText="No dish matches"
+              />
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!pickDishId}
+              onClick={() => {
+                if (!pickDishId) return;
+                setAdded((prev) => [...prev, { dishId: pickDishId, portions: headcount || "1" }]);
+                setPickDishId("");
+              }}
+            >
+              + Add dish
+            </Button>
+          </div>
+        </section>
+      )}
 
       {packageChannel && (
         <section className="rounded-md border border-ik-rule bg-ik-card p-4">
