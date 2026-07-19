@@ -21,6 +21,23 @@ import type { ActionResult } from "@/lib/action-result";
  * — keeps the server-action call site server-side (in the page) while
  * the modal lives client-side.
  */
+// Human labels for the payment-method picker — raw enum values
+// ("BANK_TRANSFER", "CREDIT_NOTE") invite miscategorised receipts. Typed as
+// Record<PaymentMethod, …> so a new enum member fails the build until labelled.
+const METHOD_LABELS: Record<PaymentMethod, string> = {
+  [PaymentMethod.CASH]: "Cash",
+  [PaymentMethod.CHEQUE]: "Cheque",
+  [PaymentMethod.NEFT]: "NEFT",
+  [PaymentMethod.RTGS]: "RTGS",
+  [PaymentMethod.IMPS]: "IMPS",
+  [PaymentMethod.UPI]: "UPI",
+  [PaymentMethod.BANK_TRANSFER]: "Bank transfer",
+  [PaymentMethod.CREDIT_NOTE]: "Credit note (adjustment)",
+  [PaymentMethod.WAIVER]: "Waiver",
+  [PaymentMethod.ADJUSTMENT]: "Adjustment",
+  [PaymentMethod.OTHER]: "Other",
+};
+
 interface Props {
   outstanding: string;
   onSubmit: (input: {
@@ -114,7 +131,7 @@ export function MarkPaidModal({ outstanding, onSubmit }: Props) {
               >
                 {Object.values(PaymentMethod).map((m) => (
                   <option key={m} value={m}>
-                    {m}
+                    {METHOD_LABELS[m]}
                   </option>
                 ))}
               </select>

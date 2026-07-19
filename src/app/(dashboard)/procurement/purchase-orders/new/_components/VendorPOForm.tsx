@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Combobox, type ComboOption } from "@/components/ui/combobox";
 import { isNextNavigationError } from "@/lib/next-error";
 import type { ActionResult } from "@/lib/action-result";
 
@@ -58,7 +59,7 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], onSubmit
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [vendorOptions, setVendorOptions] = useState(vendors);
-  const [vendorId, setVendorId] = useState(initialVendorId || vendors[0]?.id || "");
+  const [vendorId, setVendorId] = useState(initialVendorId || "");
   const [procurementType, setProcurementType] = useState<"STANDARD" | "LOCAL" | "ONLINE">("STANDARD");
   // Inline "add vendor" toggle.
   const [addingVendor, setAddingVendor] = useState(false);
@@ -129,6 +130,14 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], onSubmit
     }));
   }
 
+  // Combobox has no optgroups, so the Kitchen/Banquet split is carried as a
+  // label prefix. Value encoding is unchanged: "ing:<id>" / "bq:<id>" / "".
+  const itemOptions: ComboOption[] = useMemo(() => [
+    { value: "", label: "— free text —" },
+    ...ingredients.map((i) => ({ value: `ing:${i.id}`, label: `Kitchen · ${i.sku} · ${i.name}` })),
+    ...banquetItems.map((b) => ({ value: `bq:${b.id}`, label: `Banquet · ${b.sku} · ${b.name}` })),
+  ], [ingredients, banquetItems]);
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!vendorId) return toast.error("Pick a vendor");
@@ -197,6 +206,7 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], onSubmit
             onChange={(e) => setVendorId(e.target.value)}
             className="h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
           >
+            <option value="" disabled>— pick vendor —</option>
             {vendorOptions.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
           </select>
           <div className="flex items-center justify-between">
@@ -285,18 +295,14 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], onSubmit
                 const tax = sub.times(new Decimal(l.gstRatePct || "0").div(100));
                 return (
                   <tr key={idx} className="border-b border-ik-rule">
-                    <td className="py-1 pr-2">
-                      <select value={l.banquetItemId ? `bq:${l.banquetItemId}` : l.ingredientId ? `ing:${l.ingredientId}` : ""} onChange={(e) => pickItem(idx, e.target.value)} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1">
-                        <option value="">— free text —</option>
-                        <optgroup label="Kitchen">
-                          {ingredients.map((i) => <option key={i.id} value={`ing:${i.id}`}>{i.sku} · {i.name}</option>)}
-                        </optgroup>
-                        {banquetItems.length > 0 && (
-                          <optgroup label="Banquet">
-                            {banquetItems.map((b) => <option key={b.id} value={`bq:${b.id}`}>{b.sku} · {b.name}</option>)}
-                          </optgroup>
-                        )}
-                      </select>
+                    <td className="py-1 pr-2 min-w-[220px]">
+                      <Combobox
+                        value={l.banquetItemId ? `bq:${l.banquetItemId}` : l.ingredientId ? `ing:${l.ingredientId}` : ""}
+                        onChange={(v) => pickItem(idx, v)}
+                        options={itemOptions}
+                        placeholder="Type to search an item…"
+                        emptyText="No item matches"
+                      />
                     </td>
                     <td className="py-1 pr-2"><input value={l.sku} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, sku: e.target.value } : x))} className="h-8 w-20 rounded border border-ik-rule bg-ik-card px-1 font-mono" /></td>
                     <td className="py-1 pr-2"><input value={l.description} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, description: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1" /></td>

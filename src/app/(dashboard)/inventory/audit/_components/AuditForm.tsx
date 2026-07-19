@@ -63,6 +63,7 @@ export function AuditForm({ ingredients, onSubmit }: Props) {
 
   return (
     <form onSubmit={submit} className="grid gap-4">
+      <div className="overflow-x-auto">
       <table className="w-full text-[12.5px]">
         <thead className="border-b border-ik-rule text-left text-ik-ink-3">
           <tr>
@@ -96,6 +97,7 @@ export function AuditForm({ ingredients, onSubmit }: Props) {
           ))}
         </tbody>
       </table>
+      </div>
 
       <div className="grid gap-1 max-w-2xl">
         <Label htmlFor="notes">Notes (applied to every adjustment)</Label>

@@ -74,6 +74,7 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
     <form onSubmit={submit} className="grid gap-4">
       <section className="rounded-md border border-ik-rule bg-ik-card p-4">
         <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Lines</h3>
+        <div className="overflow-x-auto">
         <table className="w-full text-[12.5px]">
           <thead className="border-b border-ik-rule text-left text-ik-ink-3">
             <tr>
@@ -106,6 +107,7 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
             ))}
           </tbody>
         </table>
+        </div>
       </section>
 
       <div className="grid gap-1 max-w-2xl">

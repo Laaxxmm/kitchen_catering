@@ -35,7 +35,7 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   STORE_KEEPER: new Set([
     // "banquet": the store keeper loads/corrects F&B + cutlery stock too
     // (writes gated by the stock.storeDirectEdit toggle server-side).
-    "dashboard", "tasks", "requisitions", "inventory", "banquet", "purchaseorders", "vendors",
+    "dashboard", "tasks", "requisitions", "inventory", "banquet", "purchaseorders", "vendors", "supplierbills",
   ]),
   // Kitchen head: cooking-side work only. No Sales section — they drive
   // everything from the tabbed kitchen dashboard + Kitchen + Requisitions.

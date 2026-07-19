@@ -6,13 +6,24 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusBadge } from "@/components/ui/status-badge";
 import { auth } from "@/server/auth";
 import { listVendorBills } from "@/server/actions/procurement";
+import { listVendors } from "@/server/actions/vendors";
 import { formatINR } from "@/lib/money";
 
 
 export const dynamic = "force-dynamic";
 
-export default async function VendorBillsPage() {
-  const [session, bills] = await Promise.all([auth(), listVendorBills()]);
+export default async function VendorBillsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ vendorId?: string }>;
+}) {
+  const sp = await searchParams;
+  const vendorId = sp.vendorId || undefined;
+  const [session, bills, vendors] = await Promise.all([
+    auth(),
+    listVendorBills({ vendorId }),
+    listVendors({ active: true }),
+  ]);
   const role = session?.user?.role;
   // Vendor side: accounts pays the suppliers, so admin / manager /
   // accounts all get the one-click mark-paid here. (Customer-side
@@ -27,6 +38,17 @@ export default async function VendorBillsPage() {
         description="Bills from suppliers. 3-way match (bill ↔ PO ↔ GRN), then approve and mark paid when the payment goes out."
         actions={canMark ? <Link href="/procurement/vendor-bills/new"><Button>New bill</Button></Link> : undefined}
       />
+      <form method="get" className="mb-4 flex flex-wrap items-end gap-2">
+        <div className="grid gap-1">
+          <label htmlFor="vendorId" className="text-[11.5px] text-ik-ink-3">Filter by vendor</label>
+          <select id="vendorId" name="vendorId" defaultValue={vendorId ?? ""} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
+            <option value="">All vendors</option>
+            {vendors.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
+          </select>
+        </div>
+        <Button type="submit" variant="outline">Filter</Button>
+        {vendorId && <Link href="/procurement/vendor-bills"><Button type="button" variant="ghost">Clear</Button></Link>}
+      </form>
       {bills.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">No vendor bills yet.</p>
       ) : (

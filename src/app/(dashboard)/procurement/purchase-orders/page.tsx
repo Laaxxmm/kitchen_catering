@@ -4,13 +4,23 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { listVendorPOs } from "@/server/actions/procurement";
+import { listVendors } from "@/server/actions/vendors";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
-export default async function VendorPOsPage() {
-  const pos = await listVendorPOs();
+export default async function VendorPOsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ vendorId?: string }>;
+}) {
+  const sp = await searchParams;
+  const vendorId = sp.vendorId || undefined;
+  const [pos, vendors] = await Promise.all([
+    listVendorPOs({ vendorId }),
+    listVendors({ active: true }),
+  ]);
   return (
     <>
       <PageHeader
@@ -24,6 +34,17 @@ export default async function VendorPOsPage() {
           </div>
         }
       />
+      <form method="get" className="mb-4 flex flex-wrap items-end gap-2">
+        <div className="grid gap-1">
+          <label htmlFor="vendorId" className="text-[11.5px] text-ik-ink-3">Filter by vendor</label>
+          <select id="vendorId" name="vendorId" defaultValue={vendorId ?? ""} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
+            <option value="">All vendors</option>
+            {vendors.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
+          </select>
+        </div>
+        <Button type="submit" variant="outline">Filter</Button>
+        {vendorId && <Link href="/procurement/purchase-orders"><Button type="button" variant="ghost">Clear</Button></Link>}
+      </form>
       {pos.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">No POs yet.</p>
       ) : (

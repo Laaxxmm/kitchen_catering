@@ -256,7 +256,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
               <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Vendor bills</h3>
               <ul className="grid gap-1 text-[13px]">
                 {po.bills.map((b) => (
-                  <li key={b.id}><Link href={`/procurement/vendor-bills/${b.id}`} className="font-mono text-brand hover:underline">{b.billNo}</Link> · {b.status}</li>
+                  <li key={b.id} className="flex items-center gap-1.5"><Link href={`/procurement/vendor-bills/${b.id}`} className="font-mono text-brand hover:underline">{b.billNo}</Link> <StatusBadge status={b.status} /></li>
                 ))}
               </ul>
             </div>

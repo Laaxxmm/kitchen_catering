@@ -49,7 +49,7 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const isEdit = mode === "edit";
-  const [vendorId, setVendorId] = useState(initialVendorId || vendors[0]?.id || "");
+  const [vendorId, setVendorId] = useState(initialVendorId || "");
   const [poId, setPoId] = useState<string>(initialPoId || "");
   const [vendorBillNo, setVendorBillNo] = useState(defaults?.vendorBillNo ?? "");
   const [issueDate, setIssueDate] = useState(defaults?.issueDate ?? "");
@@ -113,6 +113,7 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
           <div className="grid gap-1">
             <Label htmlFor="vendorId">Vendor<span className="text-gold" aria-hidden> *</span></Label>
             <select id="vendorId" value={vendorId} onChange={(e) => { setVendorId(e.target.value); setPoId(""); }} disabled={isEdit} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px] disabled:opacity-60">
+              <option value="" disabled>— pick vendor —</option>
               {vendors.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
             </select>
           </div>
@@ -145,6 +146,7 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
           <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Lines</h3>
           <Button type="button" size="sm" variant="outline" onClick={() => setLines((p) => [...p, empty()])}>+ Add line</Button>
         </div>
+        <div className="overflow-x-auto">
         <table className="w-full text-[12.5px]">
           <thead className="border-b border-ik-rule text-left text-ik-ink-3">
             <tr>
@@ -180,6 +182,7 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
             <tr className="font-medium"><td colSpan={5} className="py-1 pr-2 text-right">Grand total</td><td className="py-1 pr-2 text-right">₹{totals.grand.toString()}</td><td></td></tr>
           </tfoot>
         </table>
+        </div>
       </section>
 
       <div className="grid gap-1 max-w-2xl">
