@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { Decimal } from "decimal.js";
 import {
   ApprovalDecision,
+  BanquetRequisitionStatus,
   ChefRequisitionLineStatus,
   ChefRequisitionStatus,
   DeliveryStatus,
@@ -15,6 +16,7 @@ import {
   Role,
   TaskPriority,
   TaskStatus,
+  VendorPOStatus,
 } from "@prisma/client";
 import { db } from "@/server/db";
 import {
@@ -49,6 +51,7 @@ import { isImmediateChannel, channelWantsFeedback, isEventDeliveryChannel, isPac
 import { getOrCreateHouseCustomerId } from "@/lib/house-customer";
 import { createNotification, notifyRoles } from "@/server/actions/notifications";
 import { deferAfterResponse } from "@/server/defer";
+import { cancelBanquetRequisitionsWithPOs } from "@/server/banquet-core";
 import { formatIST, istToUtc } from "@/lib/time";
 
 // Every role the middleware lets onto /orders must be listed here, or the
@@ -1183,7 +1186,7 @@ async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true 
   const session = await requireRole(ORDER_MANAGER_ROLES);
   if (!reason.trim()) throw new ActionError("Cancellation reason is required");
 
-  await db.$transaction(async (tx) => {
+  const cascade = await db.$transaction(async (tx) => {
     // Status guard: terminal states can't be cancelled, and two concurrent
     // cancels can't both proceed. PAID is excluded too — a paid order must
     // have its payment reversed first (which demotes it to INVOICED), so the
@@ -1203,6 +1206,10 @@ async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true 
       }
       throw new ActionError(`Order is already ${order.status}`);
     }
+    const { code: orderCode } = (await tx.order.findUnique({
+      where: { id },
+      select: { code: true },
+    }))!;
 
     // Close any open downstream work so it drops off the store / kitchen /
     // delivery queues — otherwise a cancelled order still shows a "hand over
@@ -1286,16 +1293,83 @@ async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true 
       data: { status: DeliveryStatus.CANCELLED },
     });
 
+    // H7(a): open banquet requisitions for this event — cancel them (and any
+    // shortfall PO their lines spawned) so cutlery isn't picked for a dead
+    // event. Same store-close line handling cancelBanquetRequisition uses.
+    const openBanquetReqs = await tx.banquetRequisition.findMany({
+      where: {
+        orderId: id,
+        status: {
+          in: [BanquetRequisitionStatus.SUBMITTED, BanquetRequisitionStatus.PARTIALLY_ISSUED],
+        },
+      },
+      select: { id: true },
+    });
+    const banquet = await cancelBanquetRequisitionsWithPOs(
+      tx,
+      openBanquetReqs.map((r) => r.id),
+      session.user.id,
+      reason.trim(),
+    );
+
+    // H7(b): live vendor POs linked directly to this order — do NOT cancel
+    // (goods may already be inbound), just collect them to notify for review.
+    const orderPOs = await tx.vendorPO.findMany({
+      where: {
+        orderId: id,
+        status: {
+          notIn: [VendorPOStatus.CANCELLED, VendorPOStatus.CLOSED, VendorPOStatus.RECEIVED],
+        },
+      },
+      select: { poNo: true },
+    });
+
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
         action: "ORDER_CANCELLED",
         entity: "Order",
         entityId: id,
-        payloadHash: sha256Json({ reason, closedRequisitions: openReqs.length }),
+        payloadHash: sha256Json({
+          reason,
+          closedRequisitions: openReqs.length,
+          closedBanquetRequisitions: banquet.requisitionNos.length,
+          linkedPOsToReview: orderPOs.length,
+        }),
       },
     });
+    return {
+      orderCode,
+      banquetReqNos: banquet.requisitionNos,
+      // POs to review: order-linked (H7b) + banquet shortfall POs already in
+      // flight that couldn't be auto-cancelled (M17-style).
+      reviewPoNos: [...orderPOs.map((p) => p.poNo), ...banquet.reviewPoNos],
+    };
   });
+
+  // Best-effort fan-out — the cancel itself is already committed.
+  if (cascade.banquetReqNos.length > 0) {
+    deferAfterResponse("order-cancel:banquet-notify", () =>
+      notifyRoles([Role.STORE_KEEPER], {
+        kind: "GENERIC",
+        title: `Event ${cascade.orderCode} cancelled`,
+        body: `Event cancelled — disregard requisition ${cascade.banquetReqNos.join(", ")}.`,
+        link: "/banquet/requisitions",
+        dedupeKey: `order-cancel-banquet:${id}`,
+      }),
+    );
+  }
+  if (cascade.reviewPoNos.length > 0) {
+    deferAfterResponse("order-cancel:po-notify", () =>
+      notifyRoles([Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER], {
+        kind: "GENERIC",
+        title: `${cascade.orderCode} cancelled — review purchase order ${cascade.reviewPoNos.join(", ")}`,
+        body: `Order ${cascade.orderCode} cancelled — review linked purchase order ${cascade.reviewPoNos.join(", ")} before goods arrive.`,
+        link: "/procurement/purchase-orders",
+        dedupeKey: `order-cancel-po:${id}`,
+      }),
+    );
+  }
 
   revalidatePath(`/orders/${id}`);
   revalidatePath("/orders");
@@ -1303,6 +1377,8 @@ async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true 
   revalidatePath("/requisitions");
   revalidatePath("/kitchen");
   revalidatePath("/deliveries");
+  revalidatePath("/banquet/requisitions");
+  revalidatePath("/procurement/purchase-orders");
   return { ok: true };
 }
 

@@ -994,6 +994,13 @@ async function markCustomerInvoicePaidInner(input: MarkPaidInput): Promise<{ ok:
         where: { id: invoice.orderId },
         data: { status: OrderStatus.COMPLETED },
       });
+    } else {
+      // H5: consolidated folio invoice (orderId: null) — full settlement
+      // closes every member order it billed. Guarded INVOICED → COMPLETED.
+      await tx.order.updateMany({
+        where: { consolidatedInvoiceId: invoiceId, status: OrderStatus.INVOICED },
+        data: { status: OrderStatus.COMPLETED },
+      });
     }
     await tx.auditLog.create({
       data: {
@@ -1283,6 +1290,14 @@ export async function cancelCustomerInvoice(id: string, reason: string): Promise
           data: { status: OrderStatus.DELIVERED },
         });
         if (reverted.count > 0) revertedOrderId = invoice.orderId;
+      } else if (invoice.orderId === null) {
+        // H5: consolidated folio invoice — send every member order back to
+        // DELIVERED and clear the back-link so they can be re-billed. (Only
+        // ISSUED folios reach here; a paid/partial one is blocked above.)
+        await tx.order.updateMany({
+          where: { consolidatedInvoiceId: id, status: OrderStatus.INVOICED },
+          data: { status: OrderStatus.DELIVERED, consolidatedInvoiceId: null },
+        });
       }
 
       await tx.auditLog.create({
@@ -1701,10 +1716,20 @@ async function createConsolidatedInHouseInvoiceInner(
       }
     }
 
-    await tx.order.updateMany({
-      where: { id: { in: orders.map((o) => o.id) } },
-      data: { status: fullyPaid ? OrderStatus.COMPLETED : OrderStatus.INVOICED },
+    // H5 + M9: advance the members guarded on status DELIVERED (else an
+    // overlapping submission could double-bill) and back-link each to this
+    // consolidated invoice so pay/cancel/reverse can find them (the invoice
+    // itself stores orderId: null). Count must equal the orders we validated.
+    const advanced = await tx.order.updateMany({
+      where: { id: { in: orders.map((o) => o.id) }, status: OrderStatus.DELIVERED },
+      data: {
+        status: fullyPaid ? OrderStatus.COMPLETED : OrderStatus.INVOICED,
+        consolidatedInvoiceId: invoice.id,
+      },
     });
+    if (advanced.count !== orders.length) {
+      throw new ActionError("One of these orders was just billed elsewhere — refresh and try again.");
+    }
 
     await tx.auditLog.create({
       data: {

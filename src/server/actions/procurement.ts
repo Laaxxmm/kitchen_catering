@@ -1196,13 +1196,14 @@ async function createVendorBillInner(raw: unknown): Promise<{ ok: true; id: stri
 }
 
 /**
- * Edit a supplier bill that hasn't entered the match/approval pipeline —
- * DRAFT or PENDING_MATCH only. Matched / discrepancy / approved / paid
+ * Edit a supplier bill that hasn't been approved yet — DRAFT, PENDING_MATCH,
+ * or DISCREPANCY (a match that failed on a keying error, H6). Approved / paid
  * bills are financial records and stay immutable. Editable fields:
  * vendorBillNo, issue/due dates, notes and the lines (full replace, totals
  * recomputed via the same computation createVendorBill uses). Any previous
- * match result is stale after an edit, so the match fields are reset to
- * the same clean state createVendorBill initialises them with.
+ * match result is stale after an edit, so the match fields — and the status —
+ * are reset to the same clean DRAFT state createVendorBill initialises them
+ * with, which also lifts a DISCREPANCY bill out of its dead end.
  */
 export async function updateVendorBill(id: string, raw: unknown): Promise<ActionResult> {
   try {
@@ -1222,9 +1223,16 @@ async function updateVendorBillInner(id: string, raw: unknown): Promise<{ ok: tr
       select: { status: true, billNo: true },
     });
     if (!bill) throw new ActionError("Bill not found");
-    if (bill.status !== VendorBillStatus.DRAFT && bill.status !== VendorBillStatus.PENDING_MATCH) {
+    // H6: DISCREPANCY is editable too — a match that failed on a keying error
+    // was otherwise a dead end (no VOID, no delete). Editing clears the stale
+    // match result and drops the bill back to DRAFT so it can be re-matched.
+    if (
+      bill.status !== VendorBillStatus.DRAFT &&
+      bill.status !== VendorBillStatus.PENDING_MATCH &&
+      bill.status !== VendorBillStatus.DISCREPANCY
+    ) {
       throw new ActionError(
-        `${bill.billNo} is ${bill.status} — matched/approved/paid bills are financial records and can't be edited. Record a fresh bill or contact an admin.`,
+        `${bill.billNo} is ${bill.status} — approved/paid bills are financial records and can't be edited. Record a fresh bill or contact an admin.`,
       );
     }
 
@@ -1233,7 +1241,12 @@ async function updateVendorBillInner(id: string, raw: unknown): Promise<{ ok: tr
     // Status guard: someone running the 3-way match (or a payment) while
     // this edit is in flight loses the race with a clear message.
     const updated = await tx.vendorBill.updateMany({
-      where: { id, status: { in: [VendorBillStatus.DRAFT, VendorBillStatus.PENDING_MATCH] } },
+      where: {
+        id,
+        status: {
+          in: [VendorBillStatus.DRAFT, VendorBillStatus.PENDING_MATCH, VendorBillStatus.DISCREPANCY],
+        },
+      },
       data: {
         vendorBillNo: input.vendorBillNo ?? null,
         ...(input.issueDate ? { issueDate: new Date(input.issueDate) } : {}),
@@ -1242,8 +1255,10 @@ async function updateVendorBillInner(id: string, raw: unknown): Promise<{ ok: tr
         subtotal: subtotal.toDecimalPlaces(2).toString(),
         taxTotal: taxTotal.toDecimalPlaces(2).toString(),
         grandTotal: subtotal.plus(taxTotal).toDecimalPlaces(2).toString(),
-        // The lines changed, so any earlier match result is stale — reset
-        // to the same clean state a freshly created bill has.
+        // The lines changed, so any earlier match result is stale — reset to
+        // the same clean state a freshly created bill has (DRAFT), which also
+        // lifts a DISCREPANCY bill out of its dead end so it re-enters matching.
+        status: VendorBillStatus.DRAFT,
         matchedByUserId: null,
         matchedAt: null,
         discrepancyNote: null,

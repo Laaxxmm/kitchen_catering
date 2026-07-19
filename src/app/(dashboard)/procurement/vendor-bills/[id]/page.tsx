@@ -31,10 +31,13 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
   if (!bill) notFound();
   const role = session?.user?.role;
   const canMatch = bill.status === VendorBillStatus.DRAFT && !!bill.poId && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER || role === Role.ACCOUNTS);
-  // Edits allowed only pre-match — same finance desk as bill creation
-  // (BILL_WRITE_ROLES in the action; middleware gates the route).
+  // Edits allowed pre-approval — DRAFT/PENDING_MATCH, plus DISCREPANCY so a
+  // failed match from a keying error isn't a dead end (H6). Same finance desk
+  // as bill creation (BILL_WRITE_ROLES in the action; middleware gates route).
   const canEdit =
-    (bill.status === VendorBillStatus.DRAFT || bill.status === VendorBillStatus.PENDING_MATCH) &&
+    (bill.status === VendorBillStatus.DRAFT ||
+      bill.status === VendorBillStatus.PENDING_MATCH ||
+      bill.status === VendorBillStatus.DISCREPANCY) &&
     (role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS);
   const canApprove = (bill.status === VendorBillStatus.MATCHED || bill.status === VendorBillStatus.DISCREPANCY) && (role === Role.ADMIN || role === Role.MANAGER);
   const canPay = bill.status === VendorBillStatus.APPROVED && (role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS);

@@ -157,6 +157,13 @@ async function recordCustomerInvoicePaymentInner(raw: unknown): Promise<{ ok: tr
         where: { id: invoice.orderId },
         data: { status: OrderStatus.COMPLETED },
       });
+    } else if (fullyPaid && invoice.orderId === null) {
+      // H5: consolidated folio invoice — settlement closes every member order
+      // it billed. Guarded INVOICED → COMPLETED (partial leaves them INVOICED).
+      await tx.order.updateMany({
+        where: { consolidatedInvoiceId: invoice.id, status: OrderStatus.INVOICED },
+        data: { status: OrderStatus.COMPLETED },
+      });
     }
 
     await tx.auditLog.create({
@@ -254,6 +261,13 @@ async function reverseCustomerInvoicePaymentInner(raw: unknown): Promise<{ ok: t
           data: { status: OrderStatus.INVOICED },
         });
       }
+    } else if (invoice.orderId === null && !fullyPaid) {
+      // H5: consolidated folio invoice — a reversal below the full amount
+      // re-opens its members. Mirror the single-order path: COMPLETED → INVOICED.
+      await tx.order.updateMany({
+        where: { consolidatedInvoiceId: invoice.id, status: OrderStatus.COMPLETED },
+        data: { status: OrderStatus.INVOICED },
+      });
     }
 
     await tx.auditLog.create({

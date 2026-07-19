@@ -1010,23 +1010,28 @@ model Order {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  items               OrderItem[]
-  budgetLines         OrderBudgetLine[]
-  overheadAllocs      OrderOverheadAllocation[]
-  ingredientIssues    IngredientIssue[]
-  quote               Quote?                    @relation("QuoteConvertedOrder")
-  productionJobs      ProductionJob[]
-  deliveries          Delivery[]
-  invoices            CustomerInvoice[]
-  prs                 PurchaseRequisition[]
-  vendorPos           VendorPO[]                @relation("VendorPOToOrder")
-  timeEntries         TimeEntry[]               @relation("TimeEntryToOrder")
-  chefRequisitions    ChefRequisition[]
-  banquetIssues       BanquetIssue[]            @relation("BanquetIssueOrder")
-  banquetReturns      BanquetReturn[]           @relation("BanquetReturnOrder")
-  banquetRequisitions BanquetRequisition[]      @relation("BanquetRequisitionOrder")
-  staffAllocations    OrderStaffAllocation[]
-  leftoverReturns     OrderLeftoverReturn[]
+  items                 OrderItem[]
+  budgetLines           OrderBudgetLine[]
+  overheadAllocs        OrderOverheadAllocation[]
+  ingredientIssues      IngredientIssue[]
+  quote                 Quote?                    @relation("QuoteConvertedOrder")
+  productionJobs        ProductionJob[]
+  deliveries            Delivery[]
+  invoices              CustomerInvoice[]
+  prs                   PurchaseRequisition[]
+  vendorPos             VendorPO[]                @relation("VendorPOToOrder")
+  timeEntries           TimeEntry[]               @relation("TimeEntryToOrder")
+  chefRequisitions      ChefRequisition[]
+  banquetIssues         BanquetIssue[]            @relation("BanquetIssueOrder")
+  banquetReturns        BanquetReturn[]           @relation("BanquetReturnOrder")
+  banquetRequisitions   BanquetRequisition[]      @relation("BanquetRequisitionOrder")
+  // The consolidated in-house (folio) invoice that billed this order, when
+  // billed via the folio screen rather than per-order. Payment / cancel
+  // paths advance or revert member orders through this link.
+  consolidatedInvoiceId String?
+  consolidatedInvoice   CustomerInvoice?          @relation("ConsolidatedInvoiceOrders", fields: [consolidatedInvoiceId], references: [id])
+  staffAllocations      OrderStaffAllocation[]
+  leftoverReturns       OrderLeftoverReturn[]
 
   @@index([status])
   @@index([customerId])
@@ -1595,9 +1600,11 @@ model CustomerInvoice {
   emailedAt DateTime?
   emailedTo String?
 
-  lines        CustomerInvoiceLine[]
-  payments     CustomerInvoicePayment[]
-  eInvoiceLogs EInvoiceLog[]
+  lines              CustomerInvoiceLine[]
+  payments           CustomerInvoicePayment[]
+  eInvoiceLogs       EInvoiceLog[]
+  // Orders billed by this consolidated in-house invoice (folio).
+  consolidatedOrders Order[]                  @relation("ConsolidatedInvoiceOrders")
 
   @@index([orderId, issuedAt])
   @@index([status])

@@ -468,6 +468,9 @@ async function claimDeliveryInner(
 ): Promise<{ ok: true; id: string; deliveryNo: string }> {
   const session = await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
   const created = await db.$transaction(async (tx) => {
+    // M11: lock the order row first so two concurrent claims (or a claim +
+    // schedule) serialise — the loser sees the winner's delivery below.
+    await tx.$executeRaw`SELECT 1 FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
     const order = await tx.order.findUnique({
       where: { id: orderId },
       select: {
@@ -485,9 +488,11 @@ async function claimDeliveryInner(
     }
     const existing = await tx.delivery.findFirst({
       where: { orderId, status: { notIn: [DeliveryStatus.FAILED, DeliveryStatus.CANCELLED] } },
-      select: { id: true },
+      select: { deliveryNo: true },
     });
-    if (existing) throw new ActionError("This order has already been picked up.");
+    if (existing) {
+      throw new ActionError(`A delivery for this order already exists (${existing.deliveryNo}).`);
+    }
 
     const deliveryNo = await nextDeliveryNumber(tx);
     const delivery = await tx.delivery.create({
@@ -535,6 +540,9 @@ async function scheduleDeliveryInner(
   const input = DeliveryAssignInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {
+    // M11: lock the order row first so two concurrent schedules (or a schedule
+    // + self-claim) serialise — the loser sees the winner's delivery below.
+    await tx.$executeRaw`SELECT 1 FROM "Order" WHERE "id" = ${input.orderId} FOR UPDATE`;
     const order = await tx.order.findUnique({
       where: { id: input.orderId },
       select: { id: true, code: true, status: true, deliveryAddress: true, customer: { select: { contactName: true, phone: true } } },
@@ -542,6 +550,14 @@ async function scheduleDeliveryInner(
     if (!order) throw new ActionError("Order not found");
     if (order.status !== OrderStatus.READY) {
       throw new ActionError(`Cannot schedule delivery for order in status ${order.status}`);
+    }
+    // M11: refuse a duplicate — one live delivery per order.
+    const existing = await tx.delivery.findFirst({
+      where: { orderId: order.id, status: { notIn: [DeliveryStatus.FAILED, DeliveryStatus.CANCELLED] } },
+      select: { deliveryNo: true },
+    });
+    if (existing) {
+      throw new ActionError(`A delivery for this order already exists (${existing.deliveryNo}).`);
     }
 
     const deliveryNo = await nextDeliveryNumber(tx);
@@ -834,8 +850,11 @@ export async function failDelivery(id: string, raw: unknown): Promise<ActionResu
   try {
     const session = await requireRole(DRIVER_OR_MANAGER);
     const input = DeliveryFailureInput.parse(raw);
-    await db.$transaction(async (tx) => {
-      const delivery = await tx.delivery.findUnique({ where: { id }, select: { status: true, driverUserId: true } });
+    const outcome = await db.$transaction(async (tx) => {
+      const delivery = await tx.delivery.findUnique({
+        where: { id },
+        select: { status: true, driverUserId: true, orderId: true, order: { select: { code: true } } },
+      });
       if (!delivery) throw new ActionError("Delivery not found");
       if (
         delivery.status === DeliveryStatus.DELIVERED ||
@@ -862,6 +881,14 @@ export async function failDelivery(id: string, raw: unknown): Promise<ActionResu
       await tx.deliveryAttempt.create({
         data: { deliveryId: id, outcome: "OTHER", notes: input.reason },
       });
+      // H4: put the order back in the dispatch queue. Guarded OUT_FOR_DELIVERY
+      // → READY so it reappears in listReadyForDispatch / re-schedule. If the
+      // order already moved elsewhere (count 0) that's fine — the failed
+      // delivery record stands regardless.
+      const reverted = await tx.order.updateMany({
+        where: { id: delivery.orderId, status: OrderStatus.OUT_FOR_DELIVERY },
+        data: { status: OrderStatus.READY },
+      });
       await tx.auditLog.create({
         data: {
           userId: session.user.id,
@@ -871,8 +898,24 @@ export async function failDelivery(id: string, raw: unknown): Promise<ActionResu
           payloadHash: sha256Json({ reason: input.reason }),
         },
       });
+      return { orderId: delivery.orderId, orderCode: delivery.order.code, reverted: reverted.count > 0 };
     });
+    // Best-effort: tell dispatch + F&B the order is back in the queue.
+    if (outcome.reverted) {
+      deferAfterResponse("delivery-failed:notify", () =>
+        notifyRoles([Role.ADMIN, Role.MANAGER, Role.DELIVERY, Role.FNB_SERVICE], {
+          kind: "GENERIC",
+          title: `Delivery for ${outcome.orderCode} failed`,
+          body: `Delivery for ${outcome.orderCode} failed — ${input.reason}. The order is back in the dispatch queue.`,
+          link: `/deliveries/new?orderId=${outcome.orderId}`,
+          dedupeKey: `delivery-failed:${id}`,
+        }),
+      );
+    }
     revalidatePath(`/deliveries/${id}`);
+    revalidatePath("/deliveries");
+    revalidatePath("/dashboard");
+    revalidatePath(`/orders/${outcome.orderId}`);
     return { ok: true };
   } catch (err) {
     return actionFailure(err);

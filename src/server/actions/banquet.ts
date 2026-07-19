@@ -18,7 +18,11 @@ import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import { createNotification, notifyRoles } from "@/server/actions/notifications";
 import { deferAfterResponse } from "@/server/defer";
 import { nextBanquetRequisitionNumber } from "@/lib/sequences";
-import { lockBanquetItemRows, recomputeBanquetReqStatus } from "@/server/banquet-core";
+import {
+  cancelBanquetRequisitionsWithPOs,
+  lockBanquetItemRows,
+  recomputeBanquetReqStatus,
+} from "@/server/banquet-core";
 import { createVendorPOTx } from "@/server/procurement-core";
 import {
   BanquetItemInput,
@@ -1054,6 +1058,10 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
   const input = BanquetRequisitionAwaitingInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {
+    // M12: lock the line row before reading so two "Raise PO" taps serialise —
+    // the loser waits, then the status check / guarded flip below rejects it
+    // instead of spawning a second draft PO for the same shortfall.
+    await tx.$executeRaw`SELECT 1 FROM "BanquetRequisitionLine" WHERE "id" = ${input.requisitionLineId} FOR UPDATE`;
     const line = await tx.banquetRequisitionLine.findUnique({
       where: { id: input.requisitionLineId },
       include: {
@@ -1105,14 +1113,28 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
     const poLine = po.lines[0];
     if (!poLine) throw new ActionError("PO was created without lines — aborting");
 
-    await tx.banquetRequisitionLine.update({
-      where: { id: line.id },
+    // M12: guarded flip — only a still-open line moves. If a concurrent tap
+    // already sent it to procurement (count 0) we abort, rolling back the PO
+    // just created in this tx so no orphan draft is left behind.
+    const flipped = await tx.banquetRequisitionLine.updateMany({
+      where: {
+        id: line.id,
+        status: {
+          in: [
+            BanquetRequisitionLineStatus.PENDING,
+            BanquetRequisitionLineStatus.PARTIALLY_ISSUED,
+          ],
+        },
+      },
       data: {
         status: BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
         notes: input.reason ?? line.notes,
         vendorPOLineId: poLine.id,
       },
     });
+    if (flipped.count === 0) {
+      throw new ActionError("A purchase is already running for this line — refresh.");
+    }
 
     await recomputeBanquetReqStatus(tx, line.requisition.id, session.user.id);
 
@@ -1230,33 +1252,16 @@ async function cancelBanquetRequisitionInner(id: string, reason: string): Promis
       );
     }
 
-    await tx.banquetRequisitionLine.updateMany({
-      where: {
-        requisitionId: id,
-        status: {
-          in: [
-            BanquetRequisitionLineStatus.PENDING,
-            BanquetRequisitionLineStatus.PARTIALLY_ISSUED,
-            BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
-          ],
-        },
-      },
-      data: { status: BanquetRequisitionLineStatus.CANCELLED },
-    });
-    await tx.banquetRequisition.update({
-      where: { id },
-      data: { status: BanquetRequisitionStatus.CANCELLED, closedAt: new Date() },
-    });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "BANQUET_REQUISITION_CANCELLED",
-        entity: "BanquetRequisition",
-        entityId: id,
-        payloadHash: sha256Json({ reason: reason.trim() }),
-      },
-    });
-    return { requisitionNo: req.requisitionNo, createdById: req.createdById, isStoreClose };
+    // Cancel the open lines + header + audit, and handle any shortfall PO those
+    // lines spawned (M17): auto-cancel DRAFT/PENDING_APPROVAL POs, flag the rest
+    // for the store to review.
+    const po = await cancelBanquetRequisitionsWithPOs(tx, [id], session.user.id, reason.trim());
+    return {
+      requisitionNo: req.requisitionNo,
+      createdById: req.createdById,
+      isStoreClose,
+      reviewPoNos: po.reviewPoNos,
+    };
   });
 
   if (result.isStoreClose) {
@@ -1285,8 +1290,23 @@ async function cancelBanquetRequisitionInner(id: string, reason: string): Promis
     );
   }
 
+  // M17: a shortfall PO already in flight (approved/sent/part-received) wasn't
+  // auto-cancelled — goods may be moving. Ask the store to review it.
+  if (result.reviewPoNos.length > 0) {
+    deferAfterResponse("banquet-req-cancel:po-review", () =>
+      notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+        kind: "GENERIC",
+        title: `${result.requisitionNo} cancelled — review purchase order ${result.reviewPoNos.join(", ")}`,
+        body: `The requisition was cancelled but ${result.reviewPoNos.join(", ")} is already in progress — review it before goods arrive.`,
+        link: "/procurement/purchase-orders",
+        dedupeKey: `banquet-req-cancel-po:${id}`,
+      }),
+    );
+  }
+
   revalidatePath("/banquet/requisitions");
   revalidatePath(`/banquet/requisitions/${id}`);
+  revalidatePath("/procurement/purchase-orders");
   return { ok: true };
 }
 

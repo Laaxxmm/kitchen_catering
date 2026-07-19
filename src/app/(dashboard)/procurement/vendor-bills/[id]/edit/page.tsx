@@ -9,10 +9,11 @@ import { VendorBillForm } from "../../new/_components/VendorBillForm";
 export const dynamic = "force-dynamic";
 
 /**
- * Edit a supplier bill while it's still DRAFT / PENDING_MATCH — typo in the
- * vendor invoice number, wrong date, a line keyed in wrong. Once the bill is
- * matched/approved/paid it's a financial record; this page bounces back to
- * the detail view and the action refuses too.
+ * Edit a supplier bill before it's approved — DRAFT / PENDING_MATCH, or a
+ * DISCREPANCY bill whose match failed on a keying error (H6). Fixes a typo in
+ * the vendor invoice number, a wrong date, or a mis-keyed line. Once the bill
+ * is approved/paid it's a financial record; this page bounces back to the
+ * detail view and the action refuses too.
  */
 export default async function EditVendorBillPage({ params }: { params: Promise<{ id: string }> }) {
   // Same finance desk as bill creation (middleware gates the route too).
@@ -22,7 +23,9 @@ export default async function EditVendorBillPage({ params }: { params: Promise<{
   if (!bill) notFound();
 
   const editable =
-    bill.status === VendorBillStatus.DRAFT || bill.status === VendorBillStatus.PENDING_MATCH;
+    bill.status === VendorBillStatus.DRAFT ||
+    bill.status === VendorBillStatus.PENDING_MATCH ||
+    bill.status === VendorBillStatus.DISCREPANCY;
   if (!editable) redirect(`/procurement/vendor-bills/${id}`);
 
   async function save(input: {
