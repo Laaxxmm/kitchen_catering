@@ -13,6 +13,7 @@ import {
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { toDecimal } from "@/lib/money";
+import { STATUS_LABEL, humanizeStatus } from "@/lib/order-status";
 import { requireRole, requireSession } from "@/server/rbac";
 import {
   ActionError,
@@ -119,7 +120,7 @@ async function handToDeliveryInner(orderId: string): Promise<{ ok: true }> {
   if (order.status !== OrderStatus.READY) {
     // Still cooking — genuinely not ready.
     throw new ActionError(
-      `Order ${order.code} isn't ready to dispatch yet (it's ${order.status}).`,
+      `Order ${order.code} isn't ready to dispatch yet (it's ${STATUS_LABEL[order.status].toLowerCase()}).`,
     );
   }
   // Itemized handover: when the order's production job tracks per-dish
@@ -542,7 +543,7 @@ async function claimDeliveryInner(
     if (!order) throw new ActionError("Order not found");
     if (order.status !== OrderStatus.READY) {
       throw new ActionError(
-        `Order ${order.code} isn't ready for pickup yet (it's ${order.status}).`,
+        `Order ${order.code} isn't ready for pickup yet (it's ${STATUS_LABEL[order.status].toLowerCase()}).`,
       );
     }
     const existing = await tx.delivery.findFirst({
@@ -608,7 +609,7 @@ async function scheduleDeliveryInner(
     });
     if (!order) throw new ActionError("Order not found");
     if (order.status !== OrderStatus.READY) {
-      throw new ActionError(`Cannot schedule delivery for order in status ${order.status}`);
+      throw new ActionError(`Cannot schedule delivery for an order that's ${STATUS_LABEL[order.status].toLowerCase()}`);
     }
     // M11: refuse a duplicate — one live delivery per order.
     const existing = await tx.delivery.findFirst({
@@ -664,7 +665,7 @@ export async function dispatchDelivery(id: string): Promise<ActionResult> {
       });
       if (!delivery) throw new ActionError("Delivery not found");
       if (delivery.status !== DeliveryStatus.SCHEDULED) {
-        throw new ActionError(`Cannot dispatch a delivery in status ${delivery.status}`);
+        throw new ActionError(`Cannot dispatch a delivery that's ${humanizeStatus(delivery.status)}`);
       }
       // Driver can only dispatch their own.
       if (
@@ -716,7 +717,7 @@ export async function markDeliveryArrived(id: string): Promise<ActionResult> {
         delivery.status !== DeliveryStatus.DISPATCHED &&
         delivery.status !== DeliveryStatus.IN_TRANSIT
       ) {
-        throw new ActionError(`Cannot mark arrived from ${delivery.status}`);
+        throw new ActionError(`Cannot mark arrived from ${humanizeStatus(delivery.status)}`);
       }
       if (session.user.role === Role.DELIVERY && delivery.driverUserId !== session.user.id) {
         throw new ActionError("Drivers can only update their own deliveries");
@@ -787,7 +788,7 @@ async function confirmDeliveryOTPInner(id: string, raw: unknown): Promise<{ ok: 
       delivery.status === DeliveryStatus.FAILED ||
       delivery.status === DeliveryStatus.CANCELLED
     ) {
-      throw new ActionError(`Delivery is already ${delivery.status}`);
+      throw new ActionError(`Delivery is already ${humanizeStatus(delivery.status)}`);
     }
     if (session.user.role === Role.DELIVERY && delivery.driverUserId !== session.user.id) {
       throw new ActionError("Drivers can only confirm their own deliveries");
@@ -926,7 +927,7 @@ export async function failDelivery(id: string, raw: unknown): Promise<ActionResu
         delivery.status === DeliveryStatus.FAILED ||
         delivery.status === DeliveryStatus.CANCELLED
       ) {
-        throw new ActionError(`Delivery is already ${delivery.status}`);
+        throw new ActionError(`Delivery is already ${humanizeStatus(delivery.status)}`);
       }
       if (session.user.role === Role.DELIVERY && delivery.driverUserId !== session.user.id) {
         throw new ActionError("Drivers can only fail their own deliveries");

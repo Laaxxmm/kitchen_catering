@@ -24,7 +24,8 @@ import { deferAfterResponse } from "@/server/defer";
 import { isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
 import { nextCustomerInvoiceNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
-import { summarise } from "@/lib/gst";
+import { computeLine, summarise } from "@/lib/gst";
+import { STATUS_LABEL, humanizeStatus } from "@/lib/order-status";
 import { toDecimal } from "@/lib/money";
 import { indefineGstin, indefineCompanyName, indefineStateCode } from "@/lib/org";
 import { eInvoiceEnabled, getEInvoiceProvider } from "@/server/services/e-invoice/provider";
@@ -85,7 +86,7 @@ async function createCustomerInvoiceFromOrderInner(
     });
     if (!order) throw new ActionError("Order not found");
     if (order.status !== OrderStatus.DELIVERED) {
-      throw new ActionError(`Cannot invoice order in status ${order.status}`);
+      throw new ActionError(`Cannot invoice an order that's ${STATUS_LABEL[order.status].toLowerCase()}`);
     }
     // Guardrail: one non-cancelled TAX invoice per order. The auto-generated
     // PROFORMA (kind PROFORMA) is informational and must NOT block creating
@@ -346,12 +347,12 @@ async function createStandaloneCustomerInvoiceInner(
         poRef: raw.poRef ?? null,
         lines: {
           create: raw.lines.map((l, idx) => {
-            const q = new Decimal(l.quantity);
-            const u = new Decimal(l.unitPrice);
-            const d = new Decimal(l.discountPct ?? "0").div(100);
-            const g = new Decimal(l.gstRatePct ?? "0").div(100);
-            const sub = q.times(u).times(new Decimal(1).minus(d));
-            const tax = sub.times(g);
+            const { subtotal, tax, total } = computeLine({
+              quantity: l.quantity,
+              unitPrice: l.unitPrice,
+              discountPct: l.discountPct ?? "0",
+              gstRatePct: l.gstRatePct ?? "0",
+            });
             return {
               sortOrder: idx,
               description: l.description,
@@ -361,9 +362,9 @@ async function createStandaloneCustomerInvoiceInner(
               unitPrice: l.unitPrice,
               discountPct: l.discountPct ?? "0",
               gstRatePct: l.gstRatePct ?? "0",
-              lineSubtotal: sub.toDecimalPlaces(2).toString(),
-              lineTax: tax.toDecimalPlaces(2).toString(),
-              lineTotal: sub.plus(tax).toDecimalPlaces(2).toString(),
+              lineSubtotal: subtotal.toString(),
+              lineTax: tax.toString(),
+              lineTotal: total.toString(),
             };
           }),
         },
@@ -435,12 +436,12 @@ async function updateDraftInvoiceInner(id: string, input: EditInvoiceInput): Pro
     await tx.customerInvoiceLine.deleteMany({ where: { invoiceId: id } });
     await tx.customerInvoiceLine.createMany({
       data: input.lines.map((l, idx) => {
-        const q = new Decimal(l.quantity);
-        const u = new Decimal(l.unitPrice);
-        const d = new Decimal(l.discountPct ?? "0").div(100);
-        const g = new Decimal(l.gstRatePct ?? "0").div(100);
-        const sub = q.times(u).times(new Decimal(1).minus(d));
-        const tax = sub.times(g);
+        const { subtotal, tax, total } = computeLine({
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          discountPct: l.discountPct ?? "0",
+          gstRatePct: l.gstRatePct ?? "0",
+        });
         return {
           invoiceId: id,
           sortOrder: idx,
@@ -451,9 +452,9 @@ async function updateDraftInvoiceInner(id: string, input: EditInvoiceInput): Pro
           unitPrice: l.unitPrice,
           discountPct: l.discountPct ?? "0",
           gstRatePct: l.gstRatePct ?? "0",
-          lineSubtotal: sub.toDecimalPlaces(2).toString(),
-          lineTax: tax.toDecimalPlaces(2).toString(),
-          lineTotal: sub.plus(tax).toDecimalPlaces(2).toString(),
+          lineSubtotal: subtotal.toString(),
+          lineTax: tax.toString(),
+          lineTotal: total.toString(),
         };
       }),
     });
@@ -802,7 +803,7 @@ async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
       );
     }
     if (invoice.status !== CustomerInvoiceStatus.DRAFT) {
-      throw new ActionError(`Cannot issue an invoice in status ${invoice.status}`);
+      throw new ActionError(`Cannot issue an invoice that's ${humanizeStatus(invoice.status)}`);
     }
     // Status guard: a concurrent issue loses the race cleanly.
     const updated = await tx.customerInvoice.updateMany({
@@ -1367,7 +1368,7 @@ async function createConsolidatedInHouseInvoiceInner(
     const pos = orders[0].placeOfSupplyStateCode;
     for (const o of orders) {
       if (o.status !== OrderStatus.DELIVERED) {
-        throw new ActionError(`${o.code} isn't ready to bill yet (it's ${o.status.toLowerCase()}).`);
+        throw new ActionError(`${o.code} isn't ready to bill yet (it's ${STATUS_LABEL[o.status].toLowerCase()}).`);
       }
       if (!isImmediateChannel(o.channel)) {
         throw new ActionError(`${o.code} isn't an in-house order.`);

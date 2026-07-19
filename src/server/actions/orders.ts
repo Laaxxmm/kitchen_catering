@@ -36,7 +36,8 @@ import {
   OrderStoreApprovalInput,
   OrderUpdateInput,
 } from "@/lib/validators";
-import { REVISABLE_ORDER_STATUSES } from "@/lib/order-status";
+import { REVISABLE_ORDER_STATUSES, STATUS_LABEL } from "@/lib/order-status";
+import { computeLine as computeGstLine } from "@/lib/gst";
 import {
   ActionError,
   actionFailure,
@@ -223,18 +224,15 @@ interface ComputedLine {
 }
 
 function computeLine(portions: string, unitPrice: string, discountPct?: string, gstRatePct?: string): ComputedLine {
-  const p = toDecimal(portions);
-  const u = toDecimal(unitPrice);
-  const d = toDecimal(discountPct ?? "0").div(100);
-  const g = toDecimal(gstRatePct ?? "0").div(100);
-  const gross = p.times(u);
-  const subtotal = gross.times(new Decimal(1).minus(d));
-  const tax = subtotal.times(g);
-  return {
-    subtotal: subtotal.toDecimalPlaces(2),
-    tax: tax.toDecimalPlaces(2),
-    total: subtotal.plus(tax).toDecimalPlaces(2),
-  };
+  // Delegate to gst.computeLine so orders round line amounts the same way
+  // invoices, POs and bills do (per-line round then sum). "portions" is this
+  // domain's quantity.
+  return computeGstLine({
+    quantity: portions,
+    unitPrice,
+    discountPct: discountPct ?? "0",
+    gstRatePct: gstRatePct ?? "0",
+  });
 }
 
 // =====================================================================
@@ -475,7 +473,7 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
     });
     if (!order) throw new ActionError("Order not found");
     if (!REVISABLE_ORDER_STATUSES.includes(order.status)) {
-      throw new ActionError(`Too late — the order is ${order.status}`);
+      throw new ActionError(`Too late — the order is ${STATUS_LABEL[order.status].toLowerCase()}`);
     }
 
     // 24-hour rule: close to the event the kitchen has already planned and
@@ -624,7 +622,7 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
     if (updated.count === 0) {
       const current = await tx.order.findUnique({ where: { id }, select: { status: true } });
       throw new ActionError(
-        `Too late — the order is ${current?.status ?? "gone"}. Someone moved it while you were editing — refresh the page.`,
+        `Too late — the order is ${current ? STATUS_LABEL[current.status].toLowerCase() : "gone"}. Someone moved it while you were editing — refresh the page.`,
       );
     }
 
@@ -889,7 +887,7 @@ export async function adminApproveOrder(
         const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
         if (!order) throw new ActionError("Order not found");
         throw new ActionError(
-          `Order is not awaiting manager approval (current: ${order.status}) — someone may have just acted on it. Refresh the page.`,
+          `Order is not awaiting manager approval (current: ${STATUS_LABEL[order.status].toLowerCase()}) — someone may have just acted on it. Refresh the page.`,
         );
       }
       await tx.auditLog.create({
@@ -964,7 +962,7 @@ export async function chefApproveOrder(
         const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
         if (!order) throw new ActionError("Order not found");
         throw new ActionError(
-          `Order is not awaiting chef approval (current: ${order.status}) — refresh the page.`,
+          `Order is not awaiting chef approval (current: ${STATUS_LABEL[order.status].toLowerCase()}) — refresh the page.`,
         );
       }
       await tx.auditLog.create({
@@ -1053,7 +1051,7 @@ export async function managerApproveChefSuggestion(
         const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
         if (!order) throw new ActionError("Order not found");
         throw new ActionError(
-          `Order no longer has pending chef-proposed changes (current: ${order.status}) — someone may have just reviewed it. Refresh the page.`,
+          `Order no longer has pending chef-proposed changes (current: ${STATUS_LABEL[order.status].toLowerCase()}) — someone may have just reviewed it. Refresh the page.`,
         );
       }
       await tx.auditLog.create({
@@ -1258,7 +1256,7 @@ async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true 
       if (order.status === OrderStatus.PAID) {
         throw new ActionError("This order is fully paid — reverse the payment first, then cancel.");
       }
-      throw new ActionError(`Order is already ${order.status}`);
+      throw new ActionError(`Order is already ${STATUS_LABEL[order.status].toLowerCase()}`);
     }
     const { code: orderCode } = (await tx.order.findUnique({
       where: { id },
@@ -1611,7 +1609,7 @@ export async function markInHouseServed(orderId: string): Promise<ActionResult> 
       }
       if (order.status !== OrderStatus.READY) {
         throw new ActionError(
-          `Order ${order.code} isn't ready to serve yet (it's ${order.status}). It needs to be cooked first.`,
+          `Order ${order.code} isn't ready to serve yet (it's ${STATUS_LABEL[order.status].toLowerCase()}). It needs to be cooked first.`,
         );
       }
       const wantsFeedback = !order.feedbackToken && channelWantsFeedback(order.channel);
@@ -1690,7 +1688,7 @@ async function swapOrderItemDishInner(
     ];
     if (!SWAPPABLE.includes(order.status)) {
       throw new ActionError(
-        `Can't swap a dish once the order is ${order.status.toLowerCase()}.`,
+        `Can't swap a dish once the order is ${STATUS_LABEL[order.status].toLowerCase()}.`,
       );
     }
     const item = await tx.orderItem.findFirst({

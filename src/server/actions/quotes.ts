@@ -21,6 +21,7 @@ import { QuoteCreateInput, QuoteLineInput } from "@/lib/validators";
 import { nextOrderCode, nextQuoteNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { summarise } from "@/lib/gst";
+import { humanizeStatus } from "@/lib/order-status";
 import { indefineStateCode } from "@/lib/org";
 import { toDecimal, formatINR } from "@/lib/money";
 import { buildQuoteEmail, sendEmail } from "@/lib/email";
@@ -156,7 +157,7 @@ async function sendQuoteInner(id: string): Promise<{ ok: true }> {
     const q = await tx.quote.findUnique({ where: { id }, select: { status: true, lines: true } });
     if (!q) throw new ActionError("Quote not found");
     if (q.status !== QuoteStatus.DRAFT && q.status !== QuoteStatus.REVISED) {
-      throw new ActionError(`Only DRAFT / REVISED quotes can be sent (current: ${q.status})`);
+      throw new ActionError(`Only draft or revised quotes can be sent (current: ${humanizeStatus(q.status)})`);
     }
     if (q.lines.length === 0) throw new ActionError("Add at least one line before sending");
     // Status guard in the WHERE clause: a concurrent double-send loses the
@@ -322,7 +323,7 @@ async function acceptQuoteInner(id: string, note?: string): Promise<{ ok: true }
     const q = await tx.quote.findUnique({ where: { id }, select: { status: true } });
     if (!q) throw new ActionError("Quote not found");
     if (!ACCEPTABLE_STATUSES.includes(q.status)) {
-      throw new ActionError(`Cannot accept a quote in status ${q.status}`);
+      throw new ActionError(`Cannot accept a quote that's ${humanizeStatus(q.status)}`);
     }
     // Status guard: a concurrent transition loses the race with a clear
     // message instead of double-accepting.
@@ -368,7 +369,7 @@ async function markQuoteLostInner(id: string, reason: string): Promise<{ ok: tru
     const q = await tx.quote.findUnique({ where: { id }, select: { status: true } });
     if (!q) throw new ActionError("Quote not found");
     if (q.status === QuoteStatus.CONVERTED || q.status === QuoteStatus.LOST) {
-      throw new ActionError(`Quote is already ${q.status}`);
+      throw new ActionError(`Quote is already ${humanizeStatus(q.status)}`);
     }
     // Status guard: don't mark lost if someone converted/closed it meanwhile.
     const updated = await tx.quote.updateMany({
@@ -423,7 +424,7 @@ async function flagQuoteChangesRequestedInner(id: string, note: string): Promise
     const q = await tx.quote.findUnique({ where: { id }, select: { status: true } });
     if (!q) throw new ActionError("Quote not found");
     if (q.status !== QuoteStatus.SENT && q.status !== QuoteStatus.NEGOTIATING) {
-      throw new ActionError(`Cannot mark changes-requested from ${q.status}`);
+      throw new ActionError(`Cannot mark changes-requested from ${humanizeStatus(q.status)}`);
     }
     // Status guard: a concurrent transition loses the race cleanly.
     const updated = await tx.quote.updateMany({
@@ -673,7 +674,7 @@ async function convertQuoteToOrderInner(
     });
     if (!quote) throw new ActionError("Quote not found");
     if (quote.status !== QuoteStatus.ACCEPTED) {
-      throw new ActionError(`Only ACCEPTED quotes can be converted (current: ${quote.status})`);
+      throw new ActionError(`Only accepted quotes can be converted (current: ${humanizeStatus(quote.status)})`);
     }
     if (quote.orderId) {
       throw new ActionError("Quote already has an order linked");

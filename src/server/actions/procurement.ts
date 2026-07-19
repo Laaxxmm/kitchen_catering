@@ -31,7 +31,8 @@ import {
   VendorPOLinesUpdateInput,
   type VendorBillLineInputT,
 } from "@/lib/validators";
-import { summarise } from "@/lib/gst";
+import { computeLine, summarise } from "@/lib/gst";
+import { humanizeStatus } from "@/lib/order-status";
 import { indefineStateCode } from "@/lib/org";
 import { nextGRNNumber, nextVendorBillNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
@@ -170,7 +171,7 @@ async function updateVendorPOLinesInner(raw: unknown): Promise<{ ok: true }> {
     // them would sidestep the tiered approval. (The schema has no REJECTED
     // state; a rejected PO is CANCELLED, so DRAFT is the only editable one.)
     if (po.status !== VendorPOStatus.DRAFT) {
-      throw new ActionError(`Only draft POs can be edited — this one is ${po.status}.`);
+      throw new ActionError(`Only draft POs can be edited — this one is ${humanizeStatus(po.status)}.`);
     }
     const poLineIds = new Set(po.lines.map((l) => l.id));
     for (const l of input.lines) {
@@ -179,13 +180,16 @@ async function updateVendorPOLinesInner(raw: unknown): Promise<{ ok: true }> {
       }
     }
 
-    // Per-line amounts: identical math to createVendorPOTx.
+    // Per-line amounts: identical math to createVendorPOTx — both route
+    // through gst.computeLine (per-line round then sum) so the header
+    // summarise() and the stored line amounts share one rounding convention.
     for (const l of input.lines) {
-      const q = toDecimal(l.quantity);
-      const u = toDecimal(l.unitPrice);
-      const g = toDecimal(l.gstRatePct).div(100);
-      const sub = q.times(u);
-      const tax = sub.times(g);
+      const { subtotal, tax, total } = computeLine({
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        discountPct: "0",
+        gstRatePct: l.gstRatePct,
+      });
       await tx.vendorPOLine.update({
         where: { id: l.id },
         data: {
@@ -194,9 +198,9 @@ async function updateVendorPOLinesInner(raw: unknown): Promise<{ ok: true }> {
           quantity: l.quantity,
           unitPrice: l.unitPrice,
           gstRatePct: l.gstRatePct,
-          lineSubtotal: sub.toDecimalPlaces(2).toString(),
-          lineTax: tax.toDecimalPlaces(2).toString(),
-          lineTotal: sub.plus(tax).toDecimalPlaces(2).toString(),
+          lineSubtotal: subtotal.toString(),
+          lineTax: tax.toString(),
+          lineTotal: total.toString(),
         },
       });
     }
@@ -611,6 +615,33 @@ export async function cancelVendorPO(id: string, reason: string): Promise<Action
         }
       }
 
+      // Mirror the banquet un-strand for chef requisition lines (M16 link):
+      // flip the AWAITING_PROCUREMENT lines this dead PO was buying for back
+      // to PENDING (dropping the dangling PO-line link) and roll their parent
+      // requisition status back, so the store can re-raise procurement.
+      const chefReqLines = lineIds.length
+        ? await tx.chefRequisitionLine.findMany({
+            where: {
+              vendorPOLineId: { in: lineIds },
+              status: ChefRequisitionLineStatus.AWAITING_PROCUREMENT,
+            },
+            select: {
+              id: true,
+              requisitionId: true,
+              requisition: { select: { requisitionNo: true } },
+            },
+          })
+        : [];
+      if (chefReqLines.length) {
+        await tx.chefRequisitionLine.updateMany({
+          where: { id: { in: chefReqLines.map((l) => l.id) } },
+          data: { status: ChefRequisitionLineStatus.PENDING, vendorPOLineId: null },
+        });
+        for (const reqId of new Set(chefReqLines.map((l) => l.requisitionId))) {
+          await recomputeChefReqStatusTx(tx, reqId, session.user.id);
+        }
+      }
+
       await tx.auditLog.create({
         data: {
           userId: session.user.id,
@@ -620,12 +651,41 @@ export async function cancelVendorPO(id: string, reason: string): Promise<Action
           payloadHash: sha256Json({ reason }),
         },
       });
-      return [...new Set(reqLines.map((l) => l.requisitionId))];
+      const chefReqs = [
+        ...new Map(
+          chefReqLines.map((l) => [l.requisitionId, l.requisition.requisitionNo]),
+        ).entries(),
+      ].map(([reqId, requisitionNo]) => ({ reqId, requisitionNo }));
+      return {
+        banquetReqIds: [...new Set(reqLines.map((l) => l.requisitionId))],
+        chefReqs,
+      };
     });
     revalidatePath(`/procurement/purchase-orders/${id}`);
     revalidatePath("/procurement/purchase-orders");
     revalidatePath("/dashboard");
-    for (const reqId of affectedReqs) revalidatePath(`/banquet/requisitions/${reqId}`);
+    for (const reqId of affectedReqs.banquetReqIds) {
+      revalidatePath(`/banquet/requisitions/${reqId}`);
+    }
+    if (affectedReqs.chefReqs.length) {
+      for (const { reqId } of affectedReqs.chefReqs) revalidatePath(`/requisitions/${reqId}`);
+      revalidatePath("/requisitions");
+      revalidatePath("/queue/issuing");
+      // No cancellation notification existed to fold into (the banquet
+      // un-strand above is silent), so tell the store which requisitions
+      // dropped back to pending and need a fresh PO.
+      const crNumbers = affectedReqs.chefReqs.map((r) => r.requisitionNo);
+      const many = crNumbers.length > 1;
+      deferAfterResponse("po-cancel-chefreq:notify", () =>
+        notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+          kind: "GENERIC",
+          title: `Re-raise procurement for ${crNumbers.join(", ")}`,
+          body: `PO cancelled — ${many ? "requisitions" : "requisition"} ${crNumbers.join(", ")} ${many ? "are" : "is"} back to pending and ${many ? "need" : "needs"} a fresh PO.`,
+          link: "/requisitions",
+          dedupeKey: `po-cancel-chefreq:${id}`,
+        }),
+      );
+    }
     return { ok: true };
   } catch (err) {
     return actionFailure(err);
@@ -657,7 +717,7 @@ export async function recallVendorPOToDraft(id: string): Promise<ActionResult> {
       if (updated.count === 0) {
         const po = await tx.vendorPO.findUnique({ where: { id }, select: { status: true } });
         throw new ActionError(
-          `Only a PO awaiting approval can be recalled — this one is ${po?.status.toLowerCase() ?? "gone"}.`,
+          `Only a PO awaiting approval can be recalled — this one is ${po ? humanizeStatus(po.status) : "gone"}.`,
         );
       }
       await tx.auditLog.create({
@@ -1263,13 +1323,17 @@ function computeVendorBillLines(lines: VendorBillLineInputT[]) {
   let subtotal = new Decimal(0);
   let taxTotal = new Decimal(0);
   const linesData = lines.map((l, idx) => {
-    const q = toDecimal(l.quantity);
-    const u = toDecimal(l.unitPrice);
-    const g = toDecimal(l.gstRatePct ?? "0").div(100);
-    const sub = q.times(u);
-    const tax = sub.times(g);
-    subtotal = subtotal.plus(sub);
-    taxTotal = taxTotal.plus(tax);
+    // Per-line round then sum via gst.computeLine, so the header totals are
+    // the sum of the rounded lines (matching summarise / the PO convention)
+    // rather than a single rounding of the raw sum.
+    const { subtotal: lineSub, tax: lineTax, total: lineTotal } = computeLine({
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      discountPct: "0",
+      gstRatePct: l.gstRatePct ?? "0",
+    });
+    subtotal = subtotal.plus(lineSub);
+    taxTotal = taxTotal.plus(lineTax);
     return {
       sortOrder: idx,
       description: l.description,
@@ -1277,9 +1341,9 @@ function computeVendorBillLines(lines: VendorBillLineInputT[]) {
       unit: l.unit,
       unitPrice: l.unitPrice,
       gstRatePct: l.gstRatePct ?? "0",
-      lineSubtotal: sub.toDecimalPlaces(2).toString(),
-      lineTax: tax.toDecimalPlaces(2).toString(),
-      lineTotal: sub.plus(tax).toDecimalPlaces(2).toString(),
+      lineSubtotal: lineSub.toString(),
+      lineTax: lineTax.toString(),
+      lineTotal: lineTotal.toString(),
     };
   });
   return { linesData, subtotal, taxTotal };
@@ -1362,7 +1426,7 @@ async function updateVendorBillInner(id: string, raw: unknown): Promise<{ ok: tr
       bill.status !== VendorBillStatus.DISCREPANCY
     ) {
       throw new ActionError(
-        `${bill.billNo} is ${bill.status} — approved/paid bills are financial records and can't be edited. Record a fresh bill or contact an admin.`,
+        `${bill.billNo} is ${humanizeStatus(bill.status)} — approved/paid bills are financial records and can't be edited. Record a fresh bill or contact an admin.`,
       );
     }
 
@@ -1569,7 +1633,7 @@ export async function approveVendorBill(id: string): Promise<ActionResult> {
       const bill = await tx.vendorBill.findUnique({ where: { id }, select: { status: true } });
       if (!bill) throw new ActionError("Bill not found");
       if (bill.status !== VendorBillStatus.MATCHED && bill.status !== VendorBillStatus.DISCREPANCY) {
-        throw new ActionError(`Cannot approve a bill in status ${bill.status}`);
+        throw new ActionError(`Cannot approve a bill that's ${humanizeStatus(bill.status)}`);
       }
       // Status guard: a double-approve loses the race with a clear message.
       const updated = await tx.vendorBill.updateMany({

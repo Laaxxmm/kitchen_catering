@@ -68,6 +68,17 @@ export const STATUS_LABEL: Record<OrderStatus, string> = {
 };
 
 /**
+ * Humanise a raw enum value for user-facing text where no curated label map
+ * exists: "PENDING_MATCH" → "pending match". For OrderStatus prefer
+ * STATUS_LABEL above; this is the fallback for the other status enums
+ * (VendorPOStatus, VendorBillStatus, DeliveryStatus, QuoteStatus, …) so an
+ * error toast never shows a raw SCREAMING_SNAKE enum.
+ */
+export function humanizeStatus(value: string): string {
+  return value.toLowerCase().replace(/_/g, " ");
+}
+
+/**
  * Tone hint for status badges (positive / pending / alert / neutral).
  */
 export const STATUS_TONE: Record<OrderStatus, "neutral" | "pending" | "positive" | "alert"> = {

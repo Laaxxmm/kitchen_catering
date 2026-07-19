@@ -8,7 +8,7 @@ import {
   Role,
 } from "@prisma/client";
 import { db } from "@/server/db";
-import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
+import { INACTIVE_ORDER_STATUSES, STATUS_LABEL, humanizeStatus } from "@/lib/order-status";
 import {
   requireRole,
   requireSession,
@@ -72,7 +72,7 @@ async function createChefRequisitionInner(
       || order.status === OrderStatus.READY_FOR_PRODUCTION
       || order.status === OrderStatus.ISSUING;
     if (!ok) {
-      throw new ActionError(`Order status ${order.status} doesn't allow a new requisition`);
+      throw new ActionError(`This order is ${STATUS_LABEL[order.status].toLowerCase()} — a new requisition can't be raised`);
     }
 
     const requisitionNo = await nextChefRequisitionNumber(tx);
@@ -230,7 +230,7 @@ export async function markIngredientsAvailable(orderId: string, note?: string): 
       if (!order) throw new ActionError("Order not found");
       if (order.status !== OrderStatus.CHEF_REQUISITION_PENDING) {
         throw new ActionError(
-          `Order status ${order.status} doesn't allow skipping the requisition`,
+          `This order is ${STATUS_LABEL[order.status].toLowerCase()} — the requisition can't be skipped`,
         );
       }
       await tx.order.update({
@@ -461,7 +461,7 @@ async function issueChefRequisitionLineInner(raw: unknown): Promise<{ ok: true }
     }
     if (line.requisition.status !== ChefRequisitionStatus.SUBMITTED &&
         line.requisition.status !== ChefRequisitionStatus.PARTIALLY_ISSUED) {
-      throw new ActionError(`Cannot issue against requisition with status ${line.requisition.status}`);
+      throw new ActionError(`Cannot issue against a requisition that's ${humanizeStatus(line.requisition.status)}`);
     }
 
     // Lock the parent requisition (status recompute below) and the
@@ -689,7 +689,7 @@ async function cancelChefRequisitionInner(id: string, reason?: string): Promise<
       : [ChefRequisitionStatus.DRAFT, ChefRequisitionStatus.SUBMITTED];
     if (!closableStatuses.includes(req.status)) {
       throw new ActionError(
-        `This requisition is ${req.status} and can no longer be closed.`,
+        `This requisition is ${humanizeStatus(req.status)} and can no longer be closed.`,
       );
     }
     if (isCreator && req.lines.some((l) => toDecimal(l.issuedQty).gt(0))) {

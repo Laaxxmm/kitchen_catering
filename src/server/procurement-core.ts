@@ -1,7 +1,6 @@
 import { ChefRequisitionLineStatus, Prisma, ProcurementType, VendorPOStatus } from "@prisma/client";
-import { toDecimal } from "@/lib/money";
 import { indefineStateCode } from "@/lib/org";
-import { summarise } from "@/lib/gst";
+import { computeLine, summarise } from "@/lib/gst";
 import { nextVendorPONumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { ActionError } from "@/server/action-result";
@@ -84,11 +83,15 @@ export async function createVendorPOTx(
       notes: input.notes ?? null,
       lines: {
         create: input.lines.map((l, idx) => {
-          const q = toDecimal(l.quantity);
-          const u = toDecimal(l.unitPrice);
-          const g = toDecimal(l.gstRatePct?.trim() || "0").div(100);
-          const sub = q.times(u);
-          const tax = sub.times(g);
+          // Per-line round-then-sum via gst.computeLine — same convention the
+          // header summarise() uses, so stored line amounts and the header
+          // totals agree (and match an edited PO's lines byte-for-byte).
+          const { subtotal, tax, total } = computeLine({
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            discountPct: "0",
+            gstRatePct: l.gstRatePct?.trim() || "0",
+          });
           return {
             sortOrder: idx,
             ingredientId: l.ingredientId ?? null,
@@ -99,9 +102,9 @@ export async function createVendorPOTx(
             quantity: l.quantity,
             unitPrice: l.unitPrice,
             gstRatePct: l.gstRatePct?.trim() || "0",
-            lineSubtotal: sub.toDecimalPlaces(2).toString(),
-            lineTax: tax.toDecimalPlaces(2).toString(),
-            lineTotal: sub.plus(tax).toDecimalPlaces(2).toString(),
+            lineSubtotal: subtotal.toString(),
+            lineTax: tax.toString(),
+            lineTotal: total.toString(),
           };
         }),
       },
