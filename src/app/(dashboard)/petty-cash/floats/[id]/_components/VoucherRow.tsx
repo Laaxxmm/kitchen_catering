@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { DocumentUploader } from "@/components/ik/DocumentUploader";
 import { isNextNavigationError } from "@/lib/next-error";
-import type { ActionResult } from "@/lib/action-result";
+import type { ActionResult, ActionResultWith } from "@/lib/action-result";
 
 export interface VoucherEditInput {
   amount: string;
@@ -36,7 +36,7 @@ export interface VoucherRowData {
 
 interface Props {
   voucher: VoucherRowData;
-  onUpdate: (input: VoucherEditInput) => Promise<ActionResult>;
+  onUpdate: (input: VoucherEditInput) => Promise<ActionResultWith<{ warning?: string }>>;
   onDelete: (reason: string) => Promise<ActionResult>;
 }
 
@@ -59,7 +59,10 @@ export function VoucherRow({ voucher, onUpdate, onDelete }: Props) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
-  function run(fn: () => Promise<ActionResult>, successMessage: string) {
+  function run(
+    fn: () => Promise<ActionResultWith<{ warning?: string }>>,
+    successMessage: string,
+  ) {
     startTransition(async () => {
       try {
         const res = await fn();
@@ -68,6 +71,7 @@ export function VoucherRow({ voucher, onUpdate, onDelete }: Props) {
           return;
         }
         toast.success(successMessage);
+        if (res.warning) toast.warning(res.warning, { duration: 12000 });
         setPanel("none");
         setDeleteReason("");
         router.refresh();
@@ -125,17 +129,25 @@ export function VoucherRow({ voucher, onUpdate, onDelete }: Props) {
         <TableCell className="text-right font-mono">{voucher.amountLabel}</TableCell>
         <TableCell>{voucher.status}</TableCell>
         <TableCell className="whitespace-nowrap text-right">
-          {voucher.editable ? (
-            <span className="inline-flex items-center gap-2.5">
-              <button type="button" className={linkCls} onClick={() => toggle("edit")}>Edit</button>
-              <button type="button" className={linkCls} onClick={() => toggle("bill")}>Bill</button>
-              <button type="button" className="text-[12px] font-medium text-red-700 hover:underline" onClick={() => toggle("delete")}>
-                Delete
-              </button>
-            </span>
-          ) : (
-            <span className="text-[11px] uppercase tracking-wide text-ik-ink-3">—</span>
-          )}
+          <span className="inline-flex items-center gap-2.5">
+            <a
+              href={`/api/petty-cash/vouchers/${voucher.id}/pdf`}
+              target="_blank"
+              rel="noreferrer"
+              className={linkCls}
+            >
+              PDF
+            </a>
+            {voucher.editable && (
+              <>
+                <button type="button" className={linkCls} onClick={() => toggle("edit")}>Edit</button>
+                <button type="button" className={linkCls} onClick={() => toggle("bill")}>Bill</button>
+                <button type="button" className="text-[12px] font-medium text-red-700 hover:underline" onClick={() => toggle("delete")}>
+                  Delete
+                </button>
+              </>
+            )}
+          </span>
         </TableCell>
       </TableRow>
 

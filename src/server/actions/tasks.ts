@@ -121,7 +121,7 @@ export async function listTaskTemplates(opts: { activeOnly?: boolean } = {}) {
 
 // ─── Assigner: assign / edit / cancel ─────────────────────────────────
 
-export async function assignTask(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+export async function assignTask(raw: unknown): Promise<ActionResultWith<{ count: number }>> {
   try {
     return await assignTaskInner(raw);
   } catch (err) {
@@ -129,63 +129,78 @@ export async function assignTask(raw: unknown): Promise<ActionResultWith<{ id: s
   }
 }
 
-async function assignTaskInner(raw: unknown): Promise<{ ok: true; id: string }> {
+async function assignTaskInner(raw: unknown): Promise<{ ok: true; count: number }> {
   const session = await requireRole(ASSIGNER_ROLES);
   const input = TaskAssignInput.parse(raw);
 
-  // Verify assignee exists + is active.
-  const assignee = await db.user.findUnique({
-    where: { id: input.assignedToId },
-    select: { id: true, active: true },
+  // A user picked twice (double-click) shouldn't spawn two identical tasks.
+  const assigneeIds = [...new Set(input.assigneeIds)];
+
+  // Verify every assignee exists + is active before creating anything.
+  const found = await db.user.findMany({
+    where: { id: { in: assigneeIds }, active: true },
+    select: { id: true },
   });
-  if (!assignee || !assignee.active) {
-    throw new ActionError("Assignee not found or inactive");
+  if (found.length !== assigneeIds.length) {
+    throw new ActionError("One or more assignees were not found or are inactive");
   }
 
+  const title = input.title.trim();
+  const description = input.description?.trim() || null;
   const targetUtc = istToUtc(input.targetDate);
 
-  const task = await db.$transaction(async (tx) => {
-    const row = await tx.task.create({
-      data: {
-        title: input.title.trim(),
-        description: input.description?.trim() || null,
-        priority: input.priority,
-        targetDate: targetUtc,
-        assignedToId: input.assignedToId,
-        assignedById: session.user.id,
-        templateId: input.templateId || null,
-        status: TaskStatus.ASSIGNED,
-      },
-    });
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "TASK_ASSIGNED",
-        entity: "Task",
-        entityId: row.id,
-      },
-    });
-    return row;
+  // One task per assignee, all in a single transaction — either everyone
+  // gets the task or no one does. Each row is audited individually.
+  const created = await db.$transaction(async (tx) => {
+    const rows: { id: string; assignedToId: string }[] = [];
+    for (const assignedToId of assigneeIds) {
+      const row = await tx.task.create({
+        data: {
+          title,
+          description,
+          priority: input.priority,
+          targetDate: targetUtc,
+          assignedToId,
+          assignedById: session.user.id,
+          templateId: input.templateId || null,
+          status: TaskStatus.ASSIGNED,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "TASK_ASSIGNED",
+          entity: "Task",
+          entityId: row.id,
+        },
+      });
+      rows.push({ id: row.id, assignedToId });
+    }
+    return rows;
   });
 
-  // Notify the assignee that a new task is waiting for them — after the
-  // response, so the assign button doesn't wait on the insert. dedupe by
-  // task id so a redundant re-fire doesn't create duplicates.
+  // Notify each assignee that a new task is waiting — after the response, so
+  // the assign button doesn't wait on the inserts. dedupe by task id so a
+  // redundant re-fire doesn't create duplicates.
   deferAfterResponse("task-assign:notify", () =>
-    createNotification({
-      userId: input.assignedToId,
-      kind: "TASK_ASSIGNED",
-      title: `New task: ${input.title.trim().slice(0, 80)}`,
-      body: input.description?.slice(0, 200) ?? null,
-      link: `/tasks/${task.id}`,
-      dedupeKey: `task-assigned:${task.id}`,
-    }),
+    Promise.all(
+      created.map((row) =>
+        createNotification({
+          userId: row.assignedToId,
+          kind: "TASK_ASSIGNED",
+          title: `New task: ${title.slice(0, 80)}`,
+          body: description?.slice(0, 200) ?? null,
+          link: `/tasks/${row.id}`,
+          dedupeKey: `task-assigned:${row.id}`,
+        }),
+      ),
+    ),
   );
 
   revalidatePath("/tasks");
   revalidatePath("/tasks/admin");
   revalidatePath("/dashboard");
-  return { ok: true, id: task.id };
+  return { ok: true, count: created.length };
 }
 
 export async function updateTask(raw: unknown): Promise<ActionResult> {

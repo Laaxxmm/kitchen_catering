@@ -14,7 +14,7 @@ import {
   topUpPettyCash,
   updatePettyCashVoucher,
 } from "@/server/actions/petty-cash";
-import { formatINR } from "@/lib/money";
+import { formatINR, toDecimal } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
@@ -49,7 +49,14 @@ export default async function PettyCashFloatDetailPage({ params }: { params: Pro
       <PageHeader
         eyebrow="Petty cash"
         title={float.name}
-        description={`Custodian: ${float.custodian.name} · Current balance: ${formatINR(float.currentBalance)}`}
+        description={
+          <>
+            Custodian: {float.custodian.name} · Current balance:{" "}
+            <span className={toDecimal(float.currentBalance).lt(0) ? "font-medium text-alert" : ""}>
+              {formatINR(float.currentBalance)}
+            </span>
+          </>
+        }
         actions={<Link href="/petty-cash"><Button variant="outline">Back</Button></Link>}
       />
 

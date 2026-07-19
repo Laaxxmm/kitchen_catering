@@ -27,7 +27,7 @@ interface TaskTemplate {
 }
 
 interface FormValues {
-  assignedToId: string;
+  assigneeIds: string[];
   templateId: string;
   title: string;
   description: string;
@@ -55,7 +55,7 @@ export function AssignTaskForm({ users, templates }: Props) {
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } =
     useForm<FormValues>({
       defaultValues: {
-        assignedToId: "",
+        assigneeIds: [],
         templateId: "",
         title: "",
         description: "",
@@ -84,7 +84,7 @@ export function AssignTaskForm({ users, templates }: Props) {
     startTransition(async () => {
       try {
         const res = await assignTask({
-          assignedToId: values.assignedToId,
+          assigneeIds: values.assigneeIds,
           title: values.title.trim(),
           description: values.description.trim() || null,
           priority: values.priority,
@@ -95,9 +95,11 @@ export function AssignTaskForm({ users, templates }: Props) {
           toast.error(res.error);
           return;
         }
-        toast.success("Task assigned");
+        toast.success(
+          `Task assigned to ${res.count} ${res.count === 1 ? "person" : "people"}`,
+        );
         reset({
-          assignedToId: "",
+          assigneeIds: [],
           templateId: "",
           title: "",
           description: "",
@@ -122,21 +124,24 @@ export function AssignTaskForm({ users, templates }: Props) {
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-1.5">
-          <Label htmlFor="assignedToId">Assign to<span className="text-gold" aria-hidden> *</span></Label>
-          <select
-            id="assignedToId"
-            {...register("assignedToId", { required: true })}
-            className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
-          >
-            <option value="">— Pick a user —</option>
+          <Label>Assign to<span className="text-gold" aria-hidden> *</span></Label>
+          <div className="max-h-44 overflow-y-auto rounded-md border border-ik-rule bg-ik-card p-2">
             {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name} · {roleLabel(u.role)}
-              </option>
+              <label key={u.id} className="flex items-center gap-2 py-1 text-[13px]">
+                <input
+                  type="checkbox"
+                  value={u.id}
+                  {...register("assigneeIds", {
+                    validate: (v) => (Array.isArray(v) && v.length > 0) || "Pick at least one",
+                  })}
+                  className="h-4 w-4 accent-brand-500"
+                />
+                <span>{u.name} · {roleLabel(u.role)}</span>
+              </label>
             ))}
-          </select>
-          {errors.assignedToId && (
-            <span className="text-[11px] text-alert">Pick an assignee</span>
+          </div>
+          {errors.assigneeIds && (
+            <span className="text-[11px] text-alert">Pick at least one assignee</span>
           )}
         </div>
 

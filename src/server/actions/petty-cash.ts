@@ -13,7 +13,7 @@ import {
 } from "@/lib/validators";
 import { nextPettyCashVoucherNo } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
-import { toDecimal } from "@/lib/money";
+import { toDecimal, formatINR } from "@/lib/money";
 import {
   ActionError,
   actionFailure,
@@ -104,11 +104,27 @@ export async function getPettyCashFloat(id: string) {
   });
 }
 
+/**
+ * Single voucher with the fields the printable PDF needs (float name,
+ * recorded-by). Read-gated like the rest of petty cash (ANY_WRITE = the
+ * roles that can view a float). Returns null when not found.
+ */
+export async function getPettyCashVoucherForPdf(id: string) {
+  await requireRole(ANY_WRITE);
+  return db.pettyCashVoucher.findUnique({
+    where: { id },
+    include: {
+      float: { select: { name: true } },
+      createdBy: { select: { name: true } },
+    },
+  });
+}
+
 // ─── Voucher ─────────────────────────────────────────────────────────────
 
 export async function createPettyCashVoucher(
   raw: unknown,
-): Promise<ActionResultWith<{ id: string; voucherNo: string }>> {
+): Promise<ActionResultWith<{ id: string; voucherNo: string; warning?: string }>> {
   try {
     return await createPettyCashVoucherInner(raw);
   } catch (err) {
@@ -118,7 +134,7 @@ export async function createPettyCashVoucher(
 
 async function createPettyCashVoucherInner(
   raw: unknown,
-): Promise<{ ok: true; id: string; voucherNo: string }> {
+): Promise<{ ok: true; id: string; voucherNo: string; warning?: string }> {
   const session = await requireRole(ANY_WRITE);
   const input = PettyCashVoucherInput.parse(raw);
 
@@ -143,9 +159,10 @@ async function createPettyCashVoucherInner(
     const amount = toDecimal(input.amount);
     if (amount.lte(0)) throw new ActionError("Voucher amount must be positive");
     const remaining = toDecimal(float.currentBalance);
-    if (amount.gt(remaining)) {
-      throw new ActionError(`Insufficient float balance. ₹${remaining.toString()} available, ₹${amount.toString()} requested`);
-    }
+    // Floats are allowed to go negative (IOU situations — client confirmed,
+    // #30). The balance still moves atomically under lockFloatRow; we just
+    // no longer block the spend. A negative result is surfaced as a warning.
+    const newBalance = remaining.minus(amount).toDecimalPlaces(2);
 
     const voucherNo = await nextPettyCashVoucherNo(tx);
     const voucher = await tx.pettyCashVoucher.create({
@@ -164,7 +181,7 @@ async function createPettyCashVoucherInner(
 
     await tx.pettyCashFloat.update({
       where: { id: float.id },
-      data: { currentBalance: remaining.minus(amount).toDecimalPlaces(2).toString() },
+      data: { currentBalance: newBalance.toString() },
     });
 
     await tx.auditLog.create({
@@ -176,15 +193,25 @@ async function createPettyCashVoucherInner(
         payloadHash: sha256Json({ amount: input.amount, category: input.category, paidTo: input.paidTo }),
       },
     });
-    return voucher;
+    return { voucher, newBalance };
   });
 
   revalidatePath("/petty-cash");
   revalidatePath(`/petty-cash/floats/${input.floatId}`);
-  return { ok: true, id: result.id, voucherNo: result.voucherNo };
+  return {
+    ok: true,
+    id: result.voucher.id,
+    voucherNo: result.voucher.voucherNo,
+    ...(result.newBalance.lt(0)
+      ? { warning: `Float is now ${formatINR(result.newBalance)} — top it up` }
+      : {}),
+  };
 }
 
-export async function updatePettyCashVoucher(id: string, raw: unknown): Promise<ActionResult> {
+export async function updatePettyCashVoucher(
+  id: string,
+  raw: unknown,
+): Promise<ActionResultWith<{ warning?: string }>> {
   try {
     return await updatePettyCashVoucherInner(id, raw);
   } catch (err) {
@@ -192,13 +219,16 @@ export async function updatePettyCashVoucher(id: string, raw: unknown): Promise<
   }
 }
 
-async function updatePettyCashVoucherInner(id: string, raw: unknown): Promise<{ ok: true }> {
+async function updatePettyCashVoucherInner(
+  id: string,
+  raw: unknown,
+): Promise<{ ok: true; warning?: string }> {
   // Editing a posted voucher rewrites the cash trail, so it's gated like
   // reverse (finance desk), not like create (custodian).
   const session = await requireRole(PETTY_MANAGE);
   const input = PettyCashVoucherUpdateInput.parse(raw);
 
-  const floatId = await db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     // Resolve the parent float, then lock it BEFORE reading the voucher or
     // the balance — same discipline as reverse: without the lock a
     // concurrent movement and this edit both compute from a stale balance.
@@ -239,14 +269,11 @@ async function updatePettyCashVoucherInner(id: string, raw: unknown): Promise<{ 
     if (!float) throw new ActionError("Parent float missing");
 
     // Voucher = cash OUT: raising the amount lowers the balance by the
-    // difference, lowering it gives the difference back.
+    // difference, lowering it gives the difference back. The float may go
+    // negative (IOU situations — #30); we no longer block the edit, only
+    // warn when the result lands below zero.
     const balance = toDecimal(float.currentBalance);
-    const newBalance = balance.plus(oldAmount).minus(newAmount);
-    if (newBalance.lt(0)) {
-      throw new ActionError(
-        `Insufficient float balance. Changing this voucher from ₹${oldAmount.toString()} to ₹${newAmount.toString()} needs ₹${newAmount.minus(oldAmount).toString()} more, but only ₹${balance.toString()} is available (balance would go to ₹${newBalance.toDecimalPlaces(2).toString()}).`,
-      );
-    }
+    const newBalance = balance.plus(oldAmount).minus(newAmount).toDecimalPlaces(2);
 
     await tx.pettyCashVoucher.update({
       where: { id },
@@ -261,7 +288,7 @@ async function updatePettyCashVoucherInner(id: string, raw: unknown): Promise<{ 
     });
     await tx.pettyCashFloat.update({
       where: { id: voucher.floatId },
-      data: { currentBalance: newBalance.toDecimalPlaces(2).toString() },
+      data: { currentBalance: newBalance.toString() },
     });
     await tx.auditLog.create({
       data: {
@@ -288,12 +315,17 @@ async function updatePettyCashVoucherInner(id: string, raw: unknown): Promise<{ 
         }),
       },
     });
-    return voucher.floatId;
+    return { floatId: voucher.floatId, newBalance };
   });
 
   revalidatePath("/petty-cash");
-  revalidatePath(`/petty-cash/floats/${floatId}`);
-  return { ok: true };
+  revalidatePath(`/petty-cash/floats/${result.floatId}`);
+  return {
+    ok: true,
+    ...(result.newBalance.lt(0)
+      ? { warning: `Float is now ${formatINR(result.newBalance)} — top it up` }
+      : {}),
+  };
 }
 
 export async function deletePettyCashVoucher(id: string, reason: string): Promise<ActionResult> {

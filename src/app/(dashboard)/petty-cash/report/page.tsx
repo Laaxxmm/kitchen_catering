@@ -131,7 +131,7 @@ export default async function PettyCashReportPage({
               <div className="text-[11px] text-ik-ink-3">
                 <Link href={`/petty-cash/floats/${f.id}`} className="hover:underline">{f.name}</Link>
               </div>
-              <div className="font-mono text-[14px] text-ik-ink">{formatINR(f.currentBalance)}</div>
+              <div className={"font-mono text-[14px] " + (toDecimal(f.currentBalance).lt(0) ? "font-medium text-alert" : "text-ik-ink")}>{formatINR(f.currentBalance)}</div>
             </div>
           ))}
         </div>

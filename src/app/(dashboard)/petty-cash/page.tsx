@@ -65,6 +65,7 @@ export default async function PettyCashPage() {
           <TableBody>
             {floats.map((f) => {
               const low = isLow(f.openingBalance.toString(), f.currentBalance.toString());
+              const negative = toDecimal(f.currentBalance).lt(0);
               return (
                 <TableRow key={f.id}>
                   <TableCell>
@@ -73,7 +74,7 @@ export default async function PettyCashPage() {
                   </TableCell>
                   <TableCell>{f.custodian.name}</TableCell>
                   <TableCell className="text-right font-mono text-ik-ink-3">{formatINR(f.openingBalance)}</TableCell>
-                  <TableCell className={"text-right font-mono " + (low ? "text-amber-700" : "")}>{formatINR(f.currentBalance)}</TableCell>
+                  <TableCell className={"text-right font-mono " + (negative ? "font-medium text-alert" : low ? "text-amber-700" : "")}>{formatINR(f.currentBalance)}</TableCell>
                   <TableCell className="text-right">{f._count.vouchers}</TableCell>
                   <TableCell className="text-right">{f._count.topUps}</TableCell>
                 </TableRow>

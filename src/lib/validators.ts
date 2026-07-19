@@ -751,7 +751,11 @@ export const TaskTemplateInput = z.object({
 });
 
 export const TaskAssignInput = z.object({
-  assignedToId: z.string().min(1, "Pick an assignee"),
+  // One task is created per assignee. Single-assign is just an array of one.
+  assigneeIds: z
+    .array(z.string().min(1))
+    .min(1, "Pick at least one assignee")
+    .max(20, "At most 20 people per task"),
   title: z.string().min(2, "Title is required").max(160),
   description: z.string().max(4000).nullable().optional(),
   priority: z.nativeEnum(TaskPriority).default(TaskPriority.NORMAL),

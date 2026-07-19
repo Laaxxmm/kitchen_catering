@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isNextNavigationError } from "@/lib/next-error";
-import type { ActionResult } from "@/lib/action-result";
+import type { ActionResultWith } from "@/lib/action-result";
 
 interface Props {
   onSubmit: (input: {
@@ -16,7 +16,7 @@ interface Props {
     paidTo: string;
     reason: string;
     paidAt: string;
-  }) => Promise<ActionResult>;
+  }) => Promise<ActionResultWith<{ warning?: string }>>;
 }
 
 /** Current local clock as a `datetime-local` input value (YYYY-MM-DDTHH:mm). */
@@ -63,6 +63,7 @@ export function VoucherForm({ onSubmit }: Props) {
           return;
         }
         toast.success("Voucher recorded");
+        if (res.warning) toast.warning(res.warning, { duration: 12000 });
         setAmount("");
         setCategory("");
         setPaidTo("");
