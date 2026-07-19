@@ -5,6 +5,7 @@ import {
   ChefRequisitionLineStatus,
   ChefRequisitionStatus,
   OrderStatus,
+  Prisma,
   Role,
 } from "@prisma/client";
 import { db } from "@/server/db";
@@ -518,56 +519,11 @@ async function issueChefRequisitionLineInner(raw: unknown): Promise<{ ok: true }
       },
     });
 
-    // 4. Recompute requisition status from sibling lines
-    const siblings = await tx.chefRequisitionLine.findMany({
-      where: { requisitionId: line.requisition.id },
-      select: { id: true, status: true, requestedQty: true, issuedQty: true },
-    });
-    const allDone = siblings.every((s) =>
-      s.id === line.id
-        ? fullyIssued
-        : s.status === ChefRequisitionLineStatus.ISSUED || s.status === ChefRequisitionLineStatus.CANCELLED,
-    );
-    const reqStatus = allDone ? ChefRequisitionStatus.FULLY_ISSUED : ChefRequisitionStatus.PARTIALLY_ISSUED;
-    await tx.chefRequisition.update({
-      where: { id: line.requisition.id },
-      data: {
-        status: reqStatus,
-        lastFulfilledById: session.user.id,
-        closedAt: allDone ? new Date() : null,
-      },
-    });
-
-    // 5. If every requisition for the order is fully issued, advance the
-    //    order. Standalone (order-less) requisitions have nothing to advance —
-    //    fulfilling them just decrements stock. Lock the order first and only
-    //    then check sibling requisitions, so two issuers finishing different
-    //    requisitions at once can't both read "everything done" and race the
-    //    transition (the status guard on the update backstops that too).
-    const reqOrderId = line.requisition.orderId;
-    if (allDone && reqOrderId) {
-      await tx.$executeRaw`SELECT 1 FROM "Order" WHERE "id" = ${reqOrderId} FOR UPDATE`;
-      const allReqs = await tx.chefRequisition.findMany({
-        where: { orderId: reqOrderId },
-        select: { id: true, status: true },
-      });
-      const everyReqDone = allReqs.every((r) =>
-        r.id === line.requisition.id
-          ? true
-          : r.status === ChefRequisitionStatus.FULLY_ISSUED || r.status === ChefRequisitionStatus.CANCELLED,
-      );
-      if (everyReqDone) {
-        const advanced = await tx.order.updateMany({
-          where: { id: reqOrderId, status: { not: OrderStatus.READY_FOR_PRODUCTION } },
-          data: { status: OrderStatus.READY_FOR_PRODUCTION },
-        });
-        // Auto-create the production job. Idempotent on order; only the
-        // caller that actually advanced the order attempts it.
-        if (advanced.count > 0) {
-          await createProductionJobForOrder(tx, reqOrderId);
-        }
-      }
-    }
+    // 4–5. Recompute the requisition status from its sibling lines and, if
+    //      every line is now terminal (issued or cancelled), advance the
+    //      order to the kitchen board. Shared with the line-cancel action so
+    //      the two paths can never disagree on "done".
+    await recomputeReqAndAdvance(tx, line.requisition.id, line.requisition.orderId, session.user.id);
 
     await tx.auditLog.create({
       data: {
@@ -584,6 +540,177 @@ async function issueChefRequisitionLineInner(raw: unknown): Promise<{ ok: true }
   revalidatePath("/queue/issuing");
   revalidatePath("/inventory/ingredients");
   revalidatePath("/inventory/issues");
+  return { ok: true };
+}
+
+/**
+ * Recompute a requisition's status from its lines and, when every line is
+ * terminal (ISSUED or CANCELLED), advance the order to READY_FOR_PRODUCTION
+ * and create its production job. Assumes the caller already updated the
+ * triggering line's status and holds the requisition FOR UPDATE lock. Shared
+ * by the issue and line-cancel paths so a cancelled item counts as "done"
+ * identically — the order can't get stuck at issuance because one product
+ * won't be provided.
+ */
+async function recomputeReqAndAdvance(
+  tx: Prisma.TransactionClient,
+  requisitionId: string,
+  orderId: string | null,
+  userId: string,
+): Promise<{ allDone: boolean }> {
+  const siblings = await tx.chefRequisitionLine.findMany({
+    where: { requisitionId },
+    select: { status: true },
+  });
+  const allDone = siblings.every(
+    (s) =>
+      s.status === ChefRequisitionLineStatus.ISSUED ||
+      s.status === ChefRequisitionLineStatus.CANCELLED,
+  );
+  await tx.chefRequisition.update({
+    where: { id: requisitionId },
+    data: {
+      status: allDone ? ChefRequisitionStatus.FULLY_ISSUED : ChefRequisitionStatus.PARTIALLY_ISSUED,
+      lastFulfilledById: userId,
+      closedAt: allDone ? new Date() : null,
+    },
+  });
+  if (allDone && orderId) {
+    await tx.$executeRaw`SELECT 1 FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
+    const allReqs = await tx.chefRequisition.findMany({
+      where: { orderId },
+      select: { status: true },
+    });
+    const everyReqDone = allReqs.every(
+      (r) =>
+        r.status === ChefRequisitionStatus.FULLY_ISSUED ||
+        r.status === ChefRequisitionStatus.CANCELLED,
+    );
+    if (everyReqDone) {
+      const advanced = await tx.order.updateMany({
+        where: { id: orderId, status: { not: OrderStatus.READY_FOR_PRODUCTION } },
+        data: { status: OrderStatus.READY_FOR_PRODUCTION },
+      });
+      if (advanced.count > 0) {
+        await createProductionJobForOrder(tx, orderId);
+      }
+    }
+  }
+  return { allDone };
+}
+
+/**
+ * Store keeper cancels a single requisition line it can't provide (item
+ * discontinued, client dropped the dish, spoiled, etc.) with a mandatory
+ * reason. The line becomes CANCELLED — which counts as "done" — so the rest
+ * of the requisition still issues and the order proceeds to the kitchen
+ * instead of freezing at the issuance stage. The chef who raised it is told
+ * so they can adjust the dish. Already-issued qty on a part-issued line stays
+ * issued; the cancel just stops any remainder.
+ */
+export async function cancelChefRequisitionLine(
+  lineId: string,
+  reason: string,
+): Promise<ActionResult> {
+  try {
+    return await cancelChefRequisitionLineInner(lineId, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function cancelChefRequisitionLineInner(
+  lineId: string,
+  reason: string,
+): Promise<{ ok: true }> {
+  const session = await requireRole(REQUISITION_FULFIL_ROLES);
+  if (!reason?.trim()) throw new ActionError("A reason is required to cancel an item.");
+
+  const result = await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT 1 FROM "ChefRequisitionLine" WHERE "id" = ${lineId} FOR UPDATE`;
+    const line = await tx.chefRequisitionLine.findUnique({
+      where: { id: lineId },
+      include: {
+        ingredient: { select: { name: true } },
+        requisition: {
+          select: { id: true, status: true, orderId: true, requisitionNo: true, createdById: true },
+        },
+      },
+    });
+    if (!line) throw new ActionError("Requisition line not found");
+    if (line.status === ChefRequisitionLineStatus.ISSUED) {
+      throw new ActionError("This item is already fully issued — nothing to cancel.");
+    }
+    if (line.status === ChefRequisitionLineStatus.CANCELLED) {
+      throw new ActionError("This item is already cancelled.");
+    }
+    if (
+      line.requisition.status !== ChefRequisitionStatus.SUBMITTED &&
+      line.requisition.status !== ChefRequisitionStatus.PARTIALLY_ISSUED
+    ) {
+      throw new ActionError(
+        `Can't change a requisition that's ${humanizeStatus(line.requisition.status)}.`,
+      );
+    }
+
+    await tx.$executeRaw`SELECT 1 FROM "ChefRequisition" WHERE "id" = ${line.requisition.id} FOR UPDATE`;
+    await tx.chefRequisitionLine.update({
+      where: { id: lineId },
+      data: {
+        status: ChefRequisitionLineStatus.CANCELLED,
+        notes: `Cancelled by store: ${reason.trim()}`,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "CHEF_REQUISITION_LINE_CANCELLED",
+        entity: "ChefRequisitionLine",
+        entityId: lineId,
+        payloadHash: sha256Json({ reason: reason.trim(), ingredient: line.ingredient.name }),
+      },
+    });
+
+    const { allDone } = await recomputeReqAndAdvance(
+      tx,
+      line.requisition.id,
+      line.requisition.orderId,
+      session.user.id,
+    );
+
+    return {
+      reqId: line.requisition.id,
+      requisitionNo: line.requisition.requisitionNo,
+      ingredientName: line.ingredient.name,
+      orderId: line.requisition.orderId,
+      createdById: line.requisition.createdById,
+      reqClosed: allDone,
+    };
+  });
+
+  // Tell the chef an item won't come so they can adjust the dish, and note
+  // when this un-blocked the order to the kitchen.
+  deferAfterResponse("chef-line-cancel:notify", () =>
+    createNotification({
+      userId: result.createdById,
+      kind: "GENERIC",
+      title: `${result.ingredientName} cancelled on ${result.requisitionNo}`,
+      body:
+        `The store couldn't provide it — reason: ${reason.trim()}.` +
+        (result.reqClosed ? " The rest is issued and the order has moved to the kitchen." : ""),
+      link: `/requisitions/${result.reqId}`,
+      dedupeKey: `chef-line-cancel:${lineId}`,
+    }),
+  );
+
+  revalidatePath("/requisitions");
+  revalidatePath(`/requisitions/${result.reqId}`);
+  revalidatePath("/queue/issuing");
+  revalidatePath("/dashboard");
+  if (result.reqClosed && result.orderId) {
+    revalidatePath("/kitchen");
+    revalidatePath(`/orders/${result.orderId}`);
+  }
   return { ok: true };
 }
 

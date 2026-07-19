@@ -17,9 +17,10 @@ interface Props {
   status: ChefRequisitionLineStatus;
   onIssue: (lineId: string, qty: string) => Promise<ActionResult>;
   onSendToProcurement: (lineId: string, reason: string) => Promise<ActionResult>;
+  onCancel: (lineId: string, reason: string) => Promise<ActionResult>;
 }
 
-export function LineFulfilControls({ lineId, requestedQty, issuedQty, onHand, status, onIssue, onSendToProcurement }: Props) {
+export function LineFulfilControls({ lineId, requestedQty, issuedQty, onHand, status, onIssue, onSendToProcurement, onCancel }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [showPartial, setShowPartial] = useState(false);
@@ -155,6 +156,24 @@ export function LineFulfilControls({ lineId, requestedQty, issuedQty, onHand, st
             Out of stock — needs PO
           </Button>
         )}
+        {/* Can't-provide escape hatch: cancel this one item with a reason so
+            the rest of the requisition still issues and the order proceeds to
+            the kitchen instead of freezing here. */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          className="border-alert/40 text-alert hover:bg-alert-wash"
+          onClick={() => {
+            const reason = prompt(
+              "Cancel this item — why can't it be provided? (e.g. discontinued, client removed the dish)",
+            );
+            if (reason && reason.trim()) call(() => onCancel(lineId, reason.trim()));
+          }}
+        >
+          Cancel item
+        </Button>
       </div>
     </div>
   );

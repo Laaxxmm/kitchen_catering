@@ -12,6 +12,7 @@ import {
   getChefRequisition,
   issueChefRequisitionLine,
   removeChefRequisitionLine,
+  cancelChefRequisitionLine,
   sendChefRequisitionLineToProcurement,
   submitChefRequisition,
   updateChefRequisitionLineQty,
@@ -49,6 +50,10 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
   async function doSendToProcurement(lineId: string, reason: string) {
     "use server";
     return await sendChefRequisitionLineToProcurement({ lineId, reason });
+  }
+  async function doCancelLine(lineId: string, reason: string) {
+    "use server";
+    return await cancelChefRequisitionLine(lineId, reason);
   }
   async function doCancel(reason: string) {
     "use server";
@@ -180,6 +185,7 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
                     status={l.status}
                     onIssue={doIssue}
                     onSendToProcurement={doSendToProcurement}
+                    onCancel={doCancelLine}
                   />
                 </TableCell>
               )}
