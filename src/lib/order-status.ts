@@ -117,6 +117,7 @@ export const STAGE_FLOW: Array<{ status: OrderStatus; short: string }> = [
   { status: OrderStatus.DELIVERED, short: "Delivered" },
   { status: OrderStatus.INVOICED, short: "Invoiced" },
   { status: OrderStatus.PAID, short: "Paid" },
+  { status: OrderStatus.COMPLETED, short: "Completed" },
 ];
 
 /** Index of `status` in STAGE_FLOW, or -1 for off-path statuses. */

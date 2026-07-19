@@ -701,7 +701,11 @@ async function confirmDeliveryOTPInner(id: string, raw: unknown): Promise<{ ok: 
   const result = await db.$transaction(async (tx) => {
     const delivery = await tx.delivery.findUnique({ where: { id } });
     if (!delivery) throw new ActionError("Delivery not found");
-    if (delivery.status === DeliveryStatus.DELIVERED || delivery.status === DeliveryStatus.FAILED) {
+    if (
+      delivery.status === DeliveryStatus.DELIVERED ||
+      delivery.status === DeliveryStatus.FAILED ||
+      delivery.status === DeliveryStatus.CANCELLED
+    ) {
       throw new ActionError(`Delivery is already ${delivery.status}`);
     }
     if (session.user.role === Role.DELIVERY && delivery.driverUserId !== session.user.id) {
@@ -740,8 +744,13 @@ async function confirmDeliveryOTPInner(id: string, raw: unknown): Promise<{ ok: 
 
     // Status guard: a concurrent confirm/fail (double-tap, two devices)
     // loses the race and gets a clear message instead of double-writing.
+    // CANCELLED is excluded too — a delivery cancelled with its order (see
+    // cancelOrderInner) must not be confirmable from a stale driver screen.
     const updated = await tx.delivery.updateMany({
-      where: { id, status: { notIn: [DeliveryStatus.DELIVERED, DeliveryStatus.FAILED] } },
+      where: {
+        id,
+        status: { notIn: [DeliveryStatus.DELIVERED, DeliveryStatus.FAILED, DeliveryStatus.CANCELLED] },
+      },
       data: {
         status: DeliveryStatus.DELIVERED,
         deliveredAt: new Date(),
@@ -769,8 +778,16 @@ async function confirmDeliveryOTPInner(id: string, raw: unknown): Promise<{ ok: 
       fullOrder &&
       !fullOrder.feedbackToken &&
       channelWantsFeedback(fullOrder.channel);
-    await tx.order.update({
-      where: { id: delivery.orderId },
+    // Guarded order write: only an order that's actually out for delivery
+    // (or still READY, if it was confirmed without a separate dispatch tap)
+    // can become DELIVERED. A cancelled order matches zero rows and is
+    // refused — the delivery guard above already blocks a cancelled delivery,
+    // this covers a live delivery left on a cancelled order (pre-fix data).
+    const orderUpdated = await tx.order.updateMany({
+      where: {
+        id: delivery.orderId,
+        status: { in: [OrderStatus.READY, OrderStatus.OUT_FOR_DELIVERY] },
+      },
       data: {
         status: OrderStatus.DELIVERED,
         ...(wantsFeedback
@@ -781,6 +798,9 @@ async function confirmDeliveryOTPInner(id: string, raw: unknown): Promise<{ ok: 
           : {}),
       },
     });
+    if (orderUpdated.count === 0) {
+      throw new ActionError("This order was cancelled — nothing to deliver.");
+    }
     await tx.deliveryAttempt.create({
       data: { deliveryId: id, outcome: "OTP_MATCH" },
     });
@@ -817,15 +837,23 @@ export async function failDelivery(id: string, raw: unknown): Promise<ActionResu
     await db.$transaction(async (tx) => {
       const delivery = await tx.delivery.findUnique({ where: { id }, select: { status: true, driverUserId: true } });
       if (!delivery) throw new ActionError("Delivery not found");
-      if (delivery.status === DeliveryStatus.DELIVERED || delivery.status === DeliveryStatus.FAILED) {
+      if (
+        delivery.status === DeliveryStatus.DELIVERED ||
+        delivery.status === DeliveryStatus.FAILED ||
+        delivery.status === DeliveryStatus.CANCELLED
+      ) {
         throw new ActionError(`Delivery is already ${delivery.status}`);
       }
       if (session.user.role === Role.DELIVERY && delivery.driverUserId !== session.user.id) {
         throw new ActionError("Drivers can only fail their own deliveries");
       }
-      // Status guard: a concurrent confirm/fail loses the race cleanly.
+      // Status guard: a concurrent confirm/fail loses the race cleanly, and a
+      // delivery cancelled with its order can't be failed from a stale screen.
       const updated = await tx.delivery.updateMany({
-        where: { id, status: { notIn: [DeliveryStatus.DELIVERED, DeliveryStatus.FAILED] } },
+        where: {
+          id,
+          status: { notIn: [DeliveryStatus.DELIVERED, DeliveryStatus.FAILED, DeliveryStatus.CANCELLED] },
+        },
         data: { status: DeliveryStatus.FAILED, failureReason: input.reason },
       });
       if (updated.count === 0) {

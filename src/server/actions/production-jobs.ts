@@ -189,10 +189,15 @@ async function markProductionItemReadyInner(itemId: string): Promise<{ ok: true 
     if (!item) throw new ActionError("Production item not found");
     if (item.status === ProductionJobItemStatus.READY) return;
 
-    // Guarded transition: a concurrent double-tap that already flipped the
-    // item to READY matches zero rows (harmless no-op, same as above).
+    // Guarded transition: only a live (QUEUED / IN_PROGRESS) item can be
+    // marked ready. A concurrent double-tap (already READY) or a CANCELLED
+    // item — e.g. an item on a job whose order was cancelled — matches zero
+    // rows, so a stale kitchen tap can't resurrect a cancelled order.
     const updated = await tx.productionJobItem.updateMany({
-      where: { id: itemId, status: { not: ProductionJobItemStatus.READY } },
+      where: {
+        id: itemId,
+        status: { in: [ProductionJobItemStatus.QUEUED, ProductionJobItemStatus.IN_PROGRESS] },
+      },
       data: { status: ProductionJobItemStatus.READY, readyAt: new Date() },
     });
     if (updated.count === 0) return;
@@ -206,15 +211,38 @@ async function markProductionItemReadyInner(itemId: string): Promise<{ ok: true 
       s.id === item.id ? true : s.status === ProductionJobItemStatus.READY || s.status === ProductionJobItemStatus.CANCELLED,
     );
     if (allReady) {
-      const job = await tx.productionJob.update({
-        where: { id: item.jobId },
+      // Guarded cascade: only a live job (not one cancelled with its order)
+      // flips to READY, and the order only advances from a production state.
+      // This stops a stale last-item tap resurrecting a cancelled order.
+      const jobUpdated = await tx.productionJob.updateMany({
+        where: {
+          id: item.jobId,
+          status: {
+            in: [
+              ProductionJobStatus.QUEUED,
+              ProductionJobStatus.PREP,
+              ProductionJobStatus.COOKING,
+            ],
+          },
+        },
         data: { status: ProductionJobStatus.READY, actualReady: new Date() },
       });
-      // Cascade order: IN_PREP / READY_FOR_PRODUCTION -> READY
-      await tx.order.update({
-        where: { id: job.orderId },
-        data: { status: OrderStatus.READY },
-      });
+      if (jobUpdated.count > 0) {
+        const job = await tx.productionJob.findUnique({
+          where: { id: item.jobId },
+          select: { orderId: true },
+        });
+        if (job) {
+          // Cascade order: IN_PREP / READY_FOR_PRODUCTION -> READY
+          await tx.order.updateMany({
+            where: {
+              id: job.orderId,
+              status: { in: [OrderStatus.IN_PREP, OrderStatus.READY_FOR_PRODUCTION] },
+            },
+            data: { status: OrderStatus.READY },
+          });
+        }
+      }
     }
 
     await tx.auditLog.create({

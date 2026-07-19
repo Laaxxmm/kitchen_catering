@@ -131,9 +131,12 @@ async function recordCustomerInvoicePaymentInner(raw: unknown): Promise<{ ok: tr
     });
 
     if (fullyPaid && invoice.orderId) {
+      // Invoice fully settled → the order is done. COMPLETED is the terminal
+      // state; PAID is a legacy resting point handled by the manual "Close
+      // order" button for orders settled before this flip existed.
       await tx.order.update({
         where: { id: invoice.orderId },
-        data: { status: OrderStatus.PAID },
+        data: { status: OrderStatus.COMPLETED },
       });
     }
 
@@ -212,13 +215,17 @@ async function reverseCustomerInvoicePaymentInner(raw: unknown): Promise<{ ok: t
       },
     });
 
-    // If the order had auto-flipped to PAID, demote it.
+    // If the order had auto-flipped to PAID/COMPLETED on full settlement,
+    // demote it back to INVOICED now that a payment has been pulled.
     if (invoice.orderId && !fullyPaid) {
       const orderNow = await tx.order.findUnique({
         where: { id: invoice.orderId },
         select: { status: true },
       });
-      if (orderNow?.status === OrderStatus.PAID) {
+      if (
+        orderNow?.status === OrderStatus.PAID ||
+        orderNow?.status === OrderStatus.COMPLETED
+      ) {
         await tx.order.update({
           where: { id: invoice.orderId },
           data: { status: OrderStatus.INVOICED },

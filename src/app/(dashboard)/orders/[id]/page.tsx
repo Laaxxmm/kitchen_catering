@@ -11,6 +11,7 @@ import {
   adminApproveOrder,
   cancelOrder,
   chefApproveOrder,
+  closeOrder,
   getOrder,
   managerApproveChefSuggestion,
   submitOrder,
@@ -55,6 +56,13 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const isManager = role === Role.MANAGER || isAdmin;
   const isChef = role === Role.KITCHEN_HEAD || isAdmin;
   const isSales = role === Role.SALES || isAdmin || role === Role.MANAGER;
+  // F&B Service (role DELIVERY / FNB_SERVICE) takes in-house room orders and
+  // must be able to submit them too — otherwise their own drafts strand at
+  // DRAFT with no action (they aren't sales, so the submit button was hidden).
+  // submitOrder already admits these roles; only the button was gated wrong.
+  // Catering submits still belong to sales / manager / admin.
+  const isFnb = role === Role.DELIVERY || role === Role.FNB_SERVICE;
+  const canSubmit = isSales || (isFnb && immediate);
 
   // Feedback collection can be allocated once the order has been delivered.
   const feedbackEligible = (
@@ -163,6 +171,10 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     "use server";
     return await cancelOrder(id, reason);
   }
+  async function doClose() {
+    "use server";
+    return await closeOrder(id);
+  }
   async function doGenerateInvoice() {
     "use server";
     const result = await createCustomerInvoiceFromOrder(id);
@@ -210,7 +222,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             {!chefOnlyView && (
               <Link href={`/orders/${order.id}/pnl`}><Button variant="outline">P&amp;L</Button></Link>
             )}
-            {order.status === OrderStatus.DRAFT && isSales && (
+            {order.status === OrderStatus.DRAFT && canSubmit && (
               <ActionResultButton
                 action={doSubmit}
                 successMessage={immediate ? "Sent to the kitchen" : "Submitted for manager approval"}
@@ -591,6 +603,18 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             </div>
           </section>
 
+          {(isAdmin || isManager) && order.status === OrderStatus.PAID && (
+            <section className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+              <h3 className="mb-1 font-medium text-[14px] text-ik-ink">Close order</h3>
+              <p className="mb-3 text-ik-ink-2">
+                Payment is settled. Close the order to move it to Completed.
+              </p>
+              <ActionResultButton action={doClose} successMessage="Order closed">
+                Close order
+              </ActionResultButton>
+            </section>
+          )}
+
           {(isAdmin || isManager) &&
             order.status !== OrderStatus.CANCELLED &&
             order.status !== OrderStatus.PAID &&
@@ -634,6 +658,9 @@ function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisi
   const isManager = role === Role.MANAGER || isAdmin;
   const isChef = role === Role.KITCHEN_HEAD || isAdmin;
   const isSales = role === Role.SALES || isManager;
+  // F&B Service submits its own in-house (immediate) orders; catering submits
+  // stay with sales/manager/admin. Mirrors `canSubmit` on the page.
+  const canSubmit = isSales || ((role === Role.DELIVERY || role === Role.FNB_SERVICE) && immediate);
   // Who can mark an in-house order served: kitchen + F&B Service + management.
   const canServe = isAdmin || isManager || isChef || role === Role.FNB_SERVICE || role === Role.DELIVERY;
 
@@ -648,7 +675,7 @@ function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisi
         <>
           This is an in-house order (room service / à la carte / management), so it skips manager
           sign-off and goes straight to the chef when submitted from the header.{" "}
-          {!isSales && <span className="text-ik-ink-3">(Submit action is for sales / manager / admin.)</span>}
+          {!canSubmit && <span className="text-ik-ink-3">(Submit action is for sales / F&amp;B / manager / admin.)</span>}
         </>
       ) : (
         <>

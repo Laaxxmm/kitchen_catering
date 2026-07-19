@@ -235,10 +235,11 @@ async function createCustomerInvoiceFromOrderInner(
       });
     }
 
-    // Order advances DELIVERED → INVOICED (or PAID if fully settled at door).
+    // Order advances DELIVERED → INVOICED (or straight to COMPLETED — the
+    // terminal state — if fully settled at the door).
     await tx.order.update({
       where: { id: orderId },
-      data: { status: fullyPaidAtDelivery ? OrderStatus.PAID : OrderStatus.INVOICED },
+      data: { status: fullyPaidAtDelivery ? OrderStatus.COMPLETED : OrderStatus.INVOICED },
     });
 
     await tx.auditLog.create({
@@ -981,12 +982,12 @@ async function markCustomerInvoicePaidInner(input: MarkPaidInput): Promise<{ ok:
         },
       });
     }
-    // If the invoice belongs to an order, advance it to PAID too — the
-    // commercial transaction is complete.
+    // If the invoice belongs to an order, close it — the commercial
+    // transaction is complete. COMPLETED is the terminal order state.
     if (invoice.orderId) {
       await tx.order.update({
         where: { id: invoice.orderId },
-        data: { status: OrderStatus.PAID },
+        data: { status: OrderStatus.COMPLETED },
       });
     }
     await tx.auditLog.create({
@@ -1222,22 +1223,76 @@ export async function cancelCustomerInvoice(id: string, reason: string): Promise
   try {
     const session = await requireRole([Role.ADMIN, Role.MANAGER]);
     if (!reason.trim()) throw new ActionError("Reason required");
+    let revertedOrderId: string | null = null;
     await db.$transaction(async (tx) => {
-      await tx.customerInvoice.update({
+      const invoice = await tx.customerInvoice.findUnique({
         where: { id },
+        select: { status: true, kind: true, orderId: true, eInvoiceStatus: true },
+      });
+      if (!invoice) throw new ActionError("Invoice not found");
+      if (invoice.status === CustomerInvoiceStatus.CANCELLED) {
+        throw new ActionError("This invoice is already cancelled.");
+      }
+      // Money has landed against this invoice — cancelling would strand those
+      // payments (and a PAID order would point at a cancelled invoice).
+      // Reverse the payments first, which demotes the invoice to ISSUED.
+      if (
+        invoice.status === CustomerInvoiceStatus.PAID ||
+        invoice.status === CustomerInvoiceStatus.PARTIAL
+      ) {
+        throw new ActionError("Payments are recorded against this invoice — reverse them first.");
+      }
+      // A live e-invoice (IRN) must be cancelled with the GSP first, or the
+      // books and the IRP disagree. Mirrors cancelCustomerInvoiceEInvoice.
+      if (invoice.eInvoiceStatus === EInvoiceStatus.GENERATED) {
+        throw new ActionError(
+          "This invoice has a live e-invoice (IRN) — cancel the e-invoice first, then cancel the invoice.",
+        );
+      }
+
+      // Status guard: a concurrent payment/issue loses the race cleanly.
+      const cancelled = await tx.customerInvoice.updateMany({
+        where: {
+          id,
+          status: {
+            notIn: [
+              CustomerInvoiceStatus.CANCELLED,
+              CustomerInvoiceStatus.PAID,
+              CustomerInvoiceStatus.PARTIAL,
+            ],
+          },
+        },
         data: { status: CustomerInvoiceStatus.CANCELLED },
       });
+      if (cancelled.count === 0) {
+        throw new ActionError("This invoice just changed — refresh the page.");
+      }
+
+      // Re-invoicing needs the order back at DELIVERED (the "generate invoice"
+      // button only renders there), so revert it — this makes the duplicate-
+      // invoice advice "cancel it first to re-invoice" actually work. Guarded
+      // to only an INVOICED order so nothing further along is disturbed.
+      if (invoice.kind === CustomerInvoiceKind.ORDER && invoice.orderId) {
+        const reverted = await tx.order.updateMany({
+          where: { id: invoice.orderId, status: OrderStatus.INVOICED },
+          data: { status: OrderStatus.DELIVERED },
+        });
+        if (reverted.count > 0) revertedOrderId = invoice.orderId;
+      }
+
       await tx.auditLog.create({
         data: {
           userId: session.user.id,
           action: "CUSTOMER_INVOICE_CANCELLED",
           entity: "CustomerInvoice",
           entityId: id,
-          payloadHash: sha256Json({ reason }),
+          payloadHash: sha256Json({ reason, revertedOrderToDelivered: revertedOrderId !== null }),
         },
       });
     });
+    revalidatePath("/invoices");
     revalidatePath(`/invoices/${id}`);
+    if (revertedOrderId) revalidatePath(`/orders/${revertedOrderId}`);
     return { ok: true };
   } catch (err) {
     return actionFailure(err);
@@ -1643,7 +1698,7 @@ async function createConsolidatedInHouseInvoiceInner(
 
     await tx.order.updateMany({
       where: { id: { in: orders.map((o) => o.id) } },
-      data: { status: fullyPaid ? OrderStatus.PAID : OrderStatus.INVOICED },
+      data: { status: fullyPaid ? OrderStatus.COMPLETED : OrderStatus.INVOICED },
     });
 
     await tx.auditLog.create({

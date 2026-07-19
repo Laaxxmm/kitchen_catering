@@ -10,6 +10,7 @@ import {
   DeliveryStatus,
   OrderChannel,
   OrderStatus,
+  ProductionJobItemStatus,
   ProductionJobStatus,
   Role,
   TaskPriority,
@@ -1184,14 +1185,22 @@ async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true 
 
   await db.$transaction(async (tx) => {
     // Status guard: terminal states can't be cancelled, and two concurrent
-    // cancels can't both proceed.
+    // cancels can't both proceed. PAID is excluded too — a paid order must
+    // have its payment reversed first (which demotes it to INVOICED), so the
+    // money and the cancellation can't disagree.
     const updated = await tx.order.updateMany({
-      where: { id, status: { notIn: [OrderStatus.CANCELLED, OrderStatus.COMPLETED] } },
+      where: {
+        id,
+        status: { notIn: [OrderStatus.CANCELLED, OrderStatus.COMPLETED, OrderStatus.PAID] },
+      },
       data: { status: OrderStatus.CANCELLED, cancelledAt: new Date(), cancellationReason: reason },
     });
     if (updated.count === 0) {
       const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
       if (!order) throw new ActionError("Order not found");
+      if (order.status === OrderStatus.PAID) {
+        throw new ActionError("This order is fully paid — reverse the payment first, then cancel.");
+      }
       throw new ActionError(`Order is already ${order.status}`);
     }
 
@@ -1231,6 +1240,24 @@ async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true 
       await tx.chefRequisition.updateMany({
         where: { id: { in: reqIds } },
         data: { status: ChefRequisitionStatus.CANCELLED },
+      });
+    }
+
+    // Cancel the open production items first, then the jobs themselves.
+    // Leaving non-terminal items live would let a stale kitchen tap flip the
+    // last one to READY and cascade the cancelled order back to life
+    // (READY items are kept as history, matching how the job is cancelled).
+    const orderJobs = await tx.productionJob.findMany({
+      where: { orderId: id },
+      select: { id: true },
+    });
+    if (orderJobs.length > 0) {
+      await tx.productionJobItem.updateMany({
+        where: {
+          jobId: { in: orderJobs.map((j) => j.id) },
+          status: { in: [ProductionJobItemStatus.QUEUED, ProductionJobItemStatus.IN_PROGRESS] },
+        },
+        data: { status: ProductionJobItemStatus.CANCELLED },
       });
     }
 
@@ -1276,6 +1303,49 @@ async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true 
   revalidatePath("/requisitions");
   revalidatePath("/kitchen");
   revalidatePath("/deliveries");
+  return { ok: true };
+}
+
+/**
+ * Close a fully-paid order — flips PAID → COMPLETED (the terminal state).
+ * New orders auto-complete the moment their invoice settles; this is the
+ * manual path for orders that were left at PAID before the auto-flip
+ * existed, and doubles as an explicit "close it out" for admin/manager.
+ */
+export async function closeOrder(id: string): Promise<ActionResult> {
+  try {
+    return await closeOrderInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function closeOrderInner(id: string): Promise<{ ok: true }> {
+  const session = await requireRole(ORDER_MANAGER_ROLES);
+  await db.$transaction(async (tx) => {
+    // Guarded PAID → COMPLETED: only a fully-paid order can be closed, and a
+    // concurrent close/reversal loses the race cleanly.
+    const updated = await tx.order.updateMany({
+      where: { id, status: OrderStatus.PAID },
+      data: { status: OrderStatus.COMPLETED },
+    });
+    if (updated.count === 0) {
+      const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
+      if (!order) throw new ActionError("Order not found");
+      throw new ActionError("Only a fully-paid order can be closed — refresh the page.");
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "ORDER_CLOSED",
+        entity: "Order",
+        entityId: id,
+      },
+    });
+  });
+  revalidatePath(`/orders/${id}`);
+  revalidatePath("/orders");
+  revalidatePath("/dashboard");
   return { ok: true };
 }
 
