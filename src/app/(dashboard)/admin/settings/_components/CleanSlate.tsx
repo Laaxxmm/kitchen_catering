@@ -39,6 +39,10 @@ function ClearOrders() {
     startTransition(async () => {
       try {
         const s = await clearOrdersKeepFinance("CLEAR ORDERS");
+        if (!s.ok) {
+          toast.error(s.error);
+          return;
+        }
         toast.success(
           `Cleared ${s.orders} orders & ${s.deliveries} deliveries. Kept ${s.invoicesKept} invoices & ${s.vendorBillsKept} supplier bills.`,
         );
@@ -105,6 +109,10 @@ function FullReset() {
     startTransition(async () => {
       try {
         const s = await resetTransactionalData("RESET");
+        if (!s.ok) {
+          toast.error(s.error);
+          return;
+        }
         toast.success(
           `Clean slate done — cleared ${s.orders} orders & ${s.notifications} notifications. Document numbers restart at 0001.`,
         );

@@ -62,7 +62,7 @@ export function StaffTable({ staff }: { staff: Staff[] }) {
     }
     startTransition(async () => {
       try {
-        await upsertMaintenanceStaff(
+        const res = await upsertMaintenanceStaff(
           {
             name: name.trim(),
             phone: phone.trim() || null,
@@ -72,6 +72,10 @@ export function StaffTable({ staff }: { staff: Staff[] }) {
           },
           editing?.id
         );
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(editing?.id ? "Updated" : "Staff added");
         setEditing(null);
         router.refresh();
@@ -101,7 +105,11 @@ export function StaffTable({ staff }: { staff: Staff[] }) {
       return;
     startTransition(async () => {
       try {
-        await deleteMaintenanceStaff(s.id);
+        const res = await deleteMaintenanceStaff(s.id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Deleted");
         router.refresh();
       } catch (err) {
@@ -113,10 +121,14 @@ export function StaffTable({ staff }: { staff: Staff[] }) {
   function reactivate(s: Staff) {
     startTransition(async () => {
       try {
-        await upsertMaintenanceStaff(
+        const res = await upsertMaintenanceStaff(
           { name: s.name, phone: s.phone, category: s.category, notes: s.notes, active: true },
           s.id
         );
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Reactivated");
         router.refresh();
       } catch (err) {

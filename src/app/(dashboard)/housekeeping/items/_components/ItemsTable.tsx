@@ -74,7 +74,7 @@ export function ItemsTable({ items }: { items: Item[] }) {
     const isCreate = !editing?.id;
     startTransition(async () => {
       try {
-        await upsertHousekeepingItem(
+        const res = await upsertHousekeepingItem(
           {
             name: name.trim(),
             sku: sku.trim() || null,
@@ -87,6 +87,10 @@ export function ItemsTable({ items }: { items: Item[] }) {
           },
           editing?.id
         );
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(
           isCreate
             ? openingStock.trim()
@@ -126,7 +130,11 @@ export function ItemsTable({ items }: { items: Item[] }) {
       return;
     startTransition(async () => {
       try {
-        await deleteHousekeepingItem(it.id);
+        const res = await deleteHousekeepingItem(it.id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Deleted");
         router.refresh();
       } catch (err) {
@@ -139,7 +147,7 @@ export function ItemsTable({ items }: { items: Item[] }) {
   function reactivate(it: Item) {
     startTransition(async () => {
       try {
-        await upsertHousekeepingItem(
+        const res = await upsertHousekeepingItem(
           {
             name: it.name,
             sku: it.sku,
@@ -150,6 +158,10 @@ export function ItemsTable({ items }: { items: Item[] }) {
           },
           it.id
         );
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Reactivated");
         router.refresh();
       } catch (err) {

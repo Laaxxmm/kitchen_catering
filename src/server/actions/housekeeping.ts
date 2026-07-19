@@ -53,7 +53,18 @@ const READ_ROLES = [
 
 // ─── Rooms ────────────────────────────────────────────────────────────
 
-export async function upsertRoom(raw: unknown, id?: string) {
+export async function upsertRoom(
+  raw: unknown,
+  id?: string,
+): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await upsertRoomInner(raw, id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function upsertRoomInner(raw: unknown, id?: string): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = RoomInput.parse(raw);
 
@@ -100,7 +111,7 @@ export async function upsertRoom(raw: unknown, id?: string) {
   });
 
   revalidatePath("/housekeeping/rooms");
-  return { id: row.id };
+  return { ok: true, id: row.id };
 }
 
 export async function deactivateRoom(id: string) {
@@ -124,11 +135,19 @@ export async function deactivateRoom(id: string) {
  * would destroy historical records). Caller should fall back to
  * `deactivateRoom` in that case.
  */
-export async function deleteRoom(id: string) {
+export async function deleteRoom(id: string): Promise<ActionResult> {
+  try {
+    return await deleteRoomInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function deleteRoomInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const issues = await db.housekeepingIssue.count({ where: { roomId: id } });
   if (issues > 0) {
-    throw new Error(
+    throw new ActionError(
       `This room has ${issues} historical issue${issues === 1 ? "" : "s"}. Deactivate instead to keep the audit trail.`
     );
   }
@@ -144,6 +163,7 @@ export async function deleteRoom(id: string) {
     });
   });
   revalidatePath("/housekeeping/rooms");
+  return { ok: true };
 }
 
 export async function listRooms(opts: { activeOnly?: boolean } = {}) {
@@ -158,7 +178,21 @@ export async function listRooms(opts: { activeOnly?: boolean } = {}) {
 
 // ─── Housekeeping staff ───────────────────────────────────────────────
 
-export async function upsertHousekeepingStaff(raw: unknown, id?: string) {
+export async function upsertHousekeepingStaff(
+  raw: unknown,
+  id?: string,
+): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await upsertHousekeepingStaffInner(raw, id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function upsertHousekeepingStaffInner(
+  raw: unknown,
+  id?: string,
+): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = HousekeepingStaffInput.parse(raw);
 
@@ -203,7 +237,7 @@ export async function upsertHousekeepingStaff(raw: unknown, id?: string) {
   });
 
   revalidatePath("/housekeeping/staff");
-  return { id: row.id };
+  return { ok: true, id: row.id };
 }
 
 export async function deactivateHousekeepingStaff(id: string) {
@@ -222,11 +256,19 @@ export async function deactivateHousekeepingStaff(id: string) {
   revalidatePath("/housekeeping/staff");
 }
 
-export async function deleteHousekeepingStaff(id: string) {
+export async function deleteHousekeepingStaff(id: string): Promise<ActionResult> {
+  try {
+    return await deleteHousekeepingStaffInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function deleteHousekeepingStaffInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const issues = await db.housekeepingIssue.count({ where: { staffId: id } });
   if (issues > 0) {
-    throw new Error(
+    throw new ActionError(
       `This staff member has ${issues} historical issue${issues === 1 ? "" : "s"}. Deactivate instead to keep the audit trail.`
     );
   }
@@ -242,6 +284,7 @@ export async function deleteHousekeepingStaff(id: string) {
     });
   });
   revalidatePath("/housekeeping/staff");
+  return { ok: true };
 }
 
 export async function listHousekeepingStaff(opts: { activeOnly?: boolean } = {}) {
@@ -254,7 +297,21 @@ export async function listHousekeepingStaff(opts: { activeOnly?: boolean } = {})
 
 // ─── Items ────────────────────────────────────────────────────────────
 
-export async function upsertHousekeepingItem(raw: unknown, id?: string) {
+export async function upsertHousekeepingItem(
+  raw: unknown,
+  id?: string,
+): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await upsertHousekeepingItemInner(raw, id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function upsertHousekeepingItemInner(
+  raw: unknown,
+  id?: string,
+): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = HousekeepingItemInput.parse(raw);
 
@@ -333,7 +390,7 @@ export async function upsertHousekeepingItem(raw: unknown, id?: string) {
   revalidatePath("/housekeeping/items");
   revalidatePath("/housekeeping/receipts");
   revalidatePath("/housekeeping");
-  return { id: row.id };
+  return { ok: true, id: row.id };
 }
 
 export async function deactivateHousekeepingItem(id: string) {
@@ -357,7 +414,15 @@ export async function deactivateHousekeepingItem(id: string) {
  * issue lines (deleting would orphan history). The caller is responsible
  * for falling back to `deactivateHousekeepingItem` when this throws.
  */
-export async function deleteHousekeepingItem(id: string) {
+export async function deleteHousekeepingItem(id: string): Promise<ActionResult> {
+  try {
+    return await deleteHousekeepingItemInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function deleteHousekeepingItemInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const [receiptLines, issueLines] = await Promise.all([
     db.housekeepingReceiptLine.count({ where: { itemId: id } }),
@@ -367,7 +432,7 @@ export async function deleteHousekeepingItem(id: string) {
     const bits: string[] = [];
     if (receiptLines > 0) bits.push(`${receiptLines} receipt line${receiptLines === 1 ? "" : "s"}`);
     if (issueLines > 0) bits.push(`${issueLines} issue line${issueLines === 1 ? "" : "s"}`);
-    throw new Error(
+    throw new ActionError(
       `This item has history (${bits.join(" + ")}). Deactivate instead to keep the audit trail.`
     );
   }
@@ -384,6 +449,7 @@ export async function deleteHousekeepingItem(id: string) {
   });
   revalidatePath("/housekeeping/items");
   revalidatePath("/housekeeping");
+  return { ok: true };
 }
 
 export async function listHousekeepingItems(opts: { activeOnly?: boolean } = {}) {

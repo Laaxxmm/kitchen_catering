@@ -68,7 +68,21 @@ const READ_ROLES: Role[] = [...WRITE_ROLES, Role.STORE_KEEPER];
 
 // ─── Items ────────────────────────────────────────────────────────────
 
-export async function upsertBanquetItem(raw: unknown, id?: string) {
+export async function upsertBanquetItem(
+  raw: unknown,
+  id?: string,
+): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await upsertBanquetItemInner(raw, id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function upsertBanquetItemInner(
+  raw: unknown,
+  id?: string,
+): Promise<{ ok: true; id: string }> {
   // Store keeper may CREATE a new banquet item (they load/correct stock and
   // often add the SKU they're receiving), but editing the catalogue stays
   // with WRITE_ROLES — mirrors the kitchen pattern where SALES can add a dish
@@ -145,10 +159,18 @@ export async function upsertBanquetItem(raw: unknown, id?: string) {
 
   revalidatePath("/banquet/items");
   revalidatePath("/banquet");
-  return { id: row.id };
+  return { ok: true, id: row.id };
 }
 
-export async function deactivateBanquetItem(id: string) {
+export async function deactivateBanquetItem(id: string): Promise<ActionResult> {
+  try {
+    return await deactivateBanquetItemInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function deactivateBanquetItemInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   await db.$transaction(async (tx) => {
     await tx.banquetItem.update({ where: { id }, data: { active: false } });
@@ -162,23 +184,44 @@ export async function deactivateBanquetItem(id: string) {
     });
   });
   revalidatePath("/banquet/items");
+  return { ok: true };
 }
 
-export async function deleteBanquetItem(id: string) {
-  const session = await requireRole(WRITE_ROLES);
-  const [receiptLines, issueLines] = await Promise.all([
-    db.banquetReceiptLine.count({ where: { itemId: id } }),
-    db.banquetIssueLine.count({ where: { itemId: id } }),
-  ]);
-  if (receiptLines > 0 || issueLines > 0) {
-    const bits: string[] = [];
-    if (receiptLines > 0) bits.push(`${receiptLines} receipt line${receiptLines === 1 ? "" : "s"}`);
-    if (issueLines > 0) bits.push(`${issueLines} issue line${issueLines === 1 ? "" : "s"}`);
-    throw new Error(
-      `This item has history (${bits.join(" + ")}). Deactivate instead to keep the audit trail.`
-    );
+export async function deleteBanquetItem(id: string): Promise<ActionResult> {
+  try {
+    return await deleteBanquetItemInner(id);
+  } catch (err) {
+    return actionFailure(err);
   }
+}
+
+async function deleteBanquetItemInner(id: string): Promise<{ ok: true }> {
+  const session = await requireRole(WRITE_ROLES);
   await db.$transaction(async (tx) => {
+    // History guard runs INSIDE the tx so the counts and the delete see one
+    // consistent snapshot — a concurrent receipt / issue / requisition / PO
+    // can't slip in between the check and the delete. Four references block a
+    // hard delete: receipt + issue lines (audit trail), requisition lines
+    // (itemId is a RESTRICT FK — a raw delete would crash with P2003) and
+    // vendor-PO lines (banquetItemId is SET NULL — a live PO line would
+    // silently unlink from the item it's buying).
+    const [receiptLines, issueLines, requisitionLines, poLines] = await Promise.all([
+      tx.banquetReceiptLine.count({ where: { itemId: id } }),
+      tx.banquetIssueLine.count({ where: { itemId: id } }),
+      tx.banquetRequisitionLine.count({ where: { itemId: id } }),
+      tx.vendorPOLine.count({ where: { banquetItemId: id } }),
+    ]);
+    if (receiptLines > 0 || issueLines > 0 || requisitionLines > 0 || poLines > 0) {
+      const bits: string[] = [];
+      if (receiptLines > 0) bits.push(`${receiptLines} receipt line${receiptLines === 1 ? "" : "s"}`);
+      if (issueLines > 0) bits.push(`${issueLines} issue line${issueLines === 1 ? "" : "s"}`);
+      if (requisitionLines > 0)
+        bits.push(`${requisitionLines} requisition line${requisitionLines === 1 ? "" : "s"}`);
+      if (poLines > 0) bits.push(`${poLines} purchase-order line${poLines === 1 ? "" : "s"}`);
+      throw new ActionError(
+        `This item has history (${bits.join(" + ")}). Deactivate instead to keep the audit trail.`,
+      );
+    }
     await tx.banquetItem.delete({ where: { id } });
     await tx.auditLog.create({
       data: {
@@ -191,6 +234,7 @@ export async function deleteBanquetItem(id: string) {
   });
   revalidatePath("/banquet/items");
   revalidatePath("/banquet");
+  return { ok: true };
 }
 
 export async function listBanquetItems(opts: { activeOnly?: boolean } = {}) {

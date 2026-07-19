@@ -80,7 +80,7 @@ export function ItemsTable({
     const isCreate = !editing?.id;
     startTransition(async () => {
       try {
-        await upsertBanquetItem(
+        const res = await upsertBanquetItem(
           {
             name: name.trim(),
             sku: sku.trim() || null,
@@ -92,6 +92,10 @@ export function ItemsTable({
           },
           editing?.id
         );
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(
           isCreate
             ? openingStock.trim()
@@ -112,7 +116,11 @@ export function ItemsTable({
     if (!confirm("Deactivate this item?")) return;
     startTransition(async () => {
       try {
-        await deactivateBanquetItem(id);
+        const res = await deactivateBanquetItem(id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Deactivated");
         router.refresh();
       } catch (err) {
@@ -125,7 +133,11 @@ export function ItemsTable({
     if (!confirm(`Permanently delete "${it.name}"? Refused if it has history.`)) return;
     startTransition(async () => {
       try {
-        await deleteBanquetItem(it.id);
+        const res = await deleteBanquetItem(it.id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Deleted");
         router.refresh();
       } catch (err) {
@@ -137,7 +149,7 @@ export function ItemsTable({
   function reactivate(it: Item) {
     startTransition(async () => {
       try {
-        await upsertBanquetItem(
+        const res = await upsertBanquetItem(
           {
             name: it.name,
             sku: it.sku,
@@ -148,6 +160,10 @@ export function ItemsTable({
           },
           it.id
         );
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Reactivated");
         router.refresh();
       } catch (err) {

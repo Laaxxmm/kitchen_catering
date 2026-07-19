@@ -5,6 +5,11 @@ import { Role } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { sha256Json } from "@/lib/audit";
+import {
+  ActionError,
+  actionFailure,
+  type ActionResultWith,
+} from "@/server/action-result";
 
 // One-shot "clean slate" — wipes every transactional row so the team can
 // start fresh, while KEEPING master data (users, customers, dishes, recipes,
@@ -39,10 +44,22 @@ export interface ClearOrdersSummary {
   vendorBillsKept: number;
 }
 
-export async function resetTransactionalData(confirm: string): Promise<ResetSummary> {
+export async function resetTransactionalData(
+  confirm: string,
+): Promise<ActionResultWith<ResetSummary>> {
+  try {
+    return await resetTransactionalDataInner(confirm);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function resetTransactionalDataInner(
+  confirm: string,
+): Promise<{ ok: true } & ResetSummary> {
   const session = await requireRole([Role.ADMIN]);
   if (confirm !== CONFIRM_PHRASE) {
-    throw new Error(`Type ${CONFIRM_PHRASE} to confirm the clean slate.`);
+    throw new ActionError(`Type ${CONFIRM_PHRASE} to confirm the clean slate.`);
   }
 
   const summary = await db.$transaction(
@@ -179,7 +196,7 @@ export async function resetTransactionalData(confirm: string): Promise<ResetSumm
   revalidatePath("/invoices");
   revalidatePath("/notifications");
 
-  return summary;
+  return { ok: true, ...summary };
 }
 
 /**
@@ -202,10 +219,22 @@ export async function resetTransactionalData(confirm: string): Promise<ResetSumm
  *
  * ADMIN-only, gated behind typing "CLEAR ORDERS".
  */
-export async function clearOrdersKeepFinance(confirm: string): Promise<ClearOrdersSummary> {
+export async function clearOrdersKeepFinance(
+  confirm: string,
+): Promise<ActionResultWith<ClearOrdersSummary>> {
+  try {
+    return await clearOrdersKeepFinanceInner(confirm);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function clearOrdersKeepFinanceInner(
+  confirm: string,
+): Promise<{ ok: true } & ClearOrdersSummary> {
   const session = await requireRole([Role.ADMIN]);
   if (confirm !== CLEAR_ORDERS_PHRASE) {
-    throw new Error(`Type ${CLEAR_ORDERS_PHRASE} to confirm.`);
+    throw new ActionError(`Type ${CLEAR_ORDERS_PHRASE} to confirm.`);
   }
 
   const summary = await db.$transaction(
@@ -301,5 +330,5 @@ export async function clearOrdersKeepFinance(confirm: string): Promise<ClearOrde
   revalidatePath("/orders");
   revalidatePath("/notifications");
 
-  return summary;
+  return { ok: true, ...summary };
 }

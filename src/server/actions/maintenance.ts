@@ -15,6 +15,7 @@ import {
 import {
   ActionError,
   actionFailure,
+  type ActionResult,
   type ActionResultWith,
 } from "@/server/action-result";
 
@@ -45,7 +46,21 @@ const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.MAINTENANCE_MANAGER];
 
 // ─── Staff ────────────────────────────────────────────────────────────
 
-export async function upsertMaintenanceStaff(raw: unknown, id?: string) {
+export async function upsertMaintenanceStaff(
+  raw: unknown,
+  id?: string,
+): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await upsertMaintenanceStaffInner(raw, id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function upsertMaintenanceStaffInner(
+  raw: unknown,
+  id?: string,
+): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = MaintenanceStaffInput.parse(raw);
 
@@ -92,7 +107,7 @@ export async function upsertMaintenanceStaff(raw: unknown, id?: string) {
   });
 
   revalidatePath("/maintenance/staff");
-  return { id: row.id };
+  return { ok: true, id: row.id };
 }
 
 export async function deactivateMaintenanceStaff(id: string) {
@@ -111,11 +126,19 @@ export async function deactivateMaintenanceStaff(id: string) {
   revalidatePath("/maintenance/staff");
 }
 
-export async function deleteMaintenanceStaff(id: string) {
+export async function deleteMaintenanceStaff(id: string): Promise<ActionResult> {
+  try {
+    return await deleteMaintenanceStaffInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function deleteMaintenanceStaffInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const activities = await db.maintenanceActivity.count({ where: { staffId: id } });
   if (activities > 0) {
-    throw new Error(
+    throw new ActionError(
       `This staff member has ${activities} historical activit${activities === 1 ? "y" : "ies"}. Deactivate instead to keep the audit trail.`
     );
   }
@@ -131,6 +154,7 @@ export async function deleteMaintenanceStaff(id: string) {
     });
   });
   revalidatePath("/maintenance/staff");
+  return { ok: true };
 }
 
 export async function listMaintenanceStaff(opts: { activeOnly?: boolean } = {}) {
@@ -143,7 +167,21 @@ export async function listMaintenanceStaff(opts: { activeOnly?: boolean } = {}) 
 
 // ─── Items ────────────────────────────────────────────────────────────
 
-export async function upsertMaintenanceItem(raw: unknown, id?: string) {
+export async function upsertMaintenanceItem(
+  raw: unknown,
+  id?: string,
+): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await upsertMaintenanceItemInner(raw, id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function upsertMaintenanceItemInner(
+  raw: unknown,
+  id?: string,
+): Promise<{ ok: true; id: string }> {
   const session = await requireRole(WRITE_ROLES);
   const input = MaintenanceItemInput.parse(raw);
 
@@ -217,7 +255,7 @@ export async function upsertMaintenanceItem(raw: unknown, id?: string) {
   revalidatePath("/maintenance/items");
   revalidatePath("/maintenance/receipts");
   revalidatePath("/maintenance");
-  return { id: row.id };
+  return { ok: true, id: row.id };
 }
 
 export async function deactivateMaintenanceItem(id: string) {
@@ -236,7 +274,15 @@ export async function deactivateMaintenanceItem(id: string) {
   revalidatePath("/maintenance/items");
 }
 
-export async function deleteMaintenanceItem(id: string) {
+export async function deleteMaintenanceItem(id: string): Promise<ActionResult> {
+  try {
+    return await deleteMaintenanceItemInner(id);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function deleteMaintenanceItemInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   const [receiptLines, activityLines] = await Promise.all([
     db.maintenanceReceiptLine.count({ where: { itemId: id } }),
@@ -246,7 +292,7 @@ export async function deleteMaintenanceItem(id: string) {
     const bits: string[] = [];
     if (receiptLines > 0) bits.push(`${receiptLines} receipt line${receiptLines === 1 ? "" : "s"}`);
     if (activityLines > 0) bits.push(`${activityLines} activity line${activityLines === 1 ? "" : "s"}`);
-    throw new Error(
+    throw new ActionError(
       `This item has history (${bits.join(" + ")}). Deactivate instead to keep the audit trail.`
     );
   }
@@ -263,6 +309,7 @@ export async function deleteMaintenanceItem(id: string) {
   });
   revalidatePath("/maintenance/items");
   revalidatePath("/maintenance");
+  return { ok: true };
 }
 
 export async function listMaintenanceItems(opts: { activeOnly?: boolean; category?: MaintenanceCategory } = {}) {

@@ -70,7 +70,7 @@ export function RoomsTable({ rooms }: { rooms: Room[] }) {
     }
     startTransition(async () => {
       try {
-        await upsertRoom(
+        const res = await upsertRoom(
           {
             number: number.trim(),
             name: name.trim() || null,
@@ -80,6 +80,10 @@ export function RoomsTable({ rooms }: { rooms: Room[] }) {
           },
           editing?.id
         );
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(editing?.id ? "Updated" : "Room added");
         setEditing(null);
         router.refresh();
@@ -113,7 +117,11 @@ export function RoomsTable({ rooms }: { rooms: Room[] }) {
       return;
     startTransition(async () => {
       try {
-        await deleteRoom(r.id);
+        const res = await deleteRoom(r.id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Deleted");
         router.refresh();
       } catch (err) {
@@ -126,7 +134,7 @@ export function RoomsTable({ rooms }: { rooms: Room[] }) {
   function reactivate(r: Room) {
     startTransition(async () => {
       try {
-        await upsertRoom(
+        const res = await upsertRoom(
           {
             number: r.number,
             name: r.name,
@@ -136,6 +144,10 @@ export function RoomsTable({ rooms }: { rooms: Room[] }) {
           },
           r.id
         );
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Reactivated");
         router.refresh();
       } catch (err) {

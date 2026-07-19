@@ -74,7 +74,7 @@ export function ItemsTable({ items }: { items: Item[] }) {
     const isCreate = !editing?.id;
     startTransition(async () => {
       try {
-        await upsertMaintenanceItem(
+        const res = await upsertMaintenanceItem(
           {
             name: name.trim(),
             sku: sku.trim() || null,
@@ -86,6 +86,10 @@ export function ItemsTable({ items }: { items: Item[] }) {
           },
           editing?.id
         );
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success(
           isCreate
             ? openingStock.trim()
@@ -124,7 +128,11 @@ export function ItemsTable({ items }: { items: Item[] }) {
       return;
     startTransition(async () => {
       try {
-        await deleteMaintenanceItem(it.id);
+        const res = await deleteMaintenanceItem(it.id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Deleted");
         router.refresh();
       } catch (err) {
@@ -136,7 +144,7 @@ export function ItemsTable({ items }: { items: Item[] }) {
   function reactivate(it: Item) {
     startTransition(async () => {
       try {
-        await upsertMaintenanceItem(
+        const res = await upsertMaintenanceItem(
           {
             name: it.name,
             sku: it.sku,
@@ -147,6 +155,10 @@ export function ItemsTable({ items }: { items: Item[] }) {
           },
           it.id
         );
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Reactivated");
         router.refresh();
       } catch (err) {
