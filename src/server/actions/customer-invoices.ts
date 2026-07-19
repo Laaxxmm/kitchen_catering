@@ -956,13 +956,24 @@ async function markCustomerInvoicePaidInner(input: MarkPaidInput): Promise<{ ok:
       throw new ActionError("Issue the invoice first, then mark it paid");
     }
     const balance = new Decimal(invoice.grandTotal.toString()).minus(invoice.amountPaid.toString());
-    if (balance.lte(0)) {
-      // Numeric edge — flip the status flag and we're done.
-      await tx.customerInvoice.update({
-        where: { id: invoiceId },
-        data: { status: CustomerInvoiceStatus.PAID },
-      });
-    } else {
+    // H3: flip the status FIRST via a guarded update (only ISSUED/PARTIAL are
+    // eligible) so a double-click can't create two full-balance payment rows —
+    // the loser matches zero rows and aborts. amountPaid is settled here too
+    // when there's a balance; the numeric-edge case (balance ≤ 0) only flips.
+    const flipped = await tx.customerInvoice.updateMany({
+      where: {
+        id: invoiceId,
+        status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] },
+      },
+      data: {
+        status: CustomerInvoiceStatus.PAID,
+        ...(balance.gt(0) ? { amountPaid: invoice.grandTotal.toString() } : {}),
+      },
+    });
+    if (flipped.count === 0) {
+      throw new ActionError("Already marked paid — refresh the page.");
+    }
+    if (balance.gt(0)) {
       await tx.customerInvoicePayment.create({
         data: {
           invoiceId,
@@ -974,16 +985,10 @@ async function markCustomerInvoicePaidInner(input: MarkPaidInput): Promise<{ ok:
           notes: input.notes ?? null,
         },
       });
-      await tx.customerInvoice.update({
-        where: { id: invoiceId },
-        data: {
-          amountPaid: invoice.grandTotal.toString(),
-          status: CustomerInvoiceStatus.PAID,
-        },
-      });
     }
     // If the invoice belongs to an order, close it — the commercial
     // transaction is complete. COMPLETED is the terminal order state.
+    // (Wave 1 behaviour — preserved exactly.)
     if (invoice.orderId) {
       await tx.order.update({
         where: { id: invoice.orderId },

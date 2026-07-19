@@ -24,8 +24,24 @@ import {
 } from "@/lib/validators";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
+import type { Prisma } from "@prisma/client";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
+
+/**
+ * FOR UPDATE row locks. A payment record/reversal reads the sum of live
+ * payment rows, recomputes amountPaid + status, then writes back. Without
+ * the lock two concurrent recordings read the same prior-payments snapshot,
+ * both slip the over-recording guard, and the last write wins with a wrong
+ * amountPaid. The lock serialises them: the second caller waits, then reads
+ * the committed state.
+ */
+async function lockCustomerInvoiceRow(tx: Prisma.TransactionClient, id: string) {
+  await tx.$executeRaw`SELECT 1 FROM "CustomerInvoice" WHERE "id" = ${id} FOR UPDATE`;
+}
+async function lockVendorBillRow(tx: Prisma.TransactionClient, id: string) {
+  await tx.$executeRaw`SELECT 1 FROM "VendorBill" WHERE "id" = ${id} FOR UPDATE`;
+}
 
 function methodCanonical(m: string | PaymentMethod): PaymentMethod {
   return m as PaymentMethod;
@@ -56,6 +72,9 @@ async function recordCustomerInvoicePaymentInner(raw: unknown): Promise<{ ok: tr
   if (toDecimal(input.amount).lte(0)) throw new ActionError("Amount must be positive");
 
   const result = await db.$transaction(async (tx) => {
+    // H2: lock the invoice before reading payment sums so concurrent
+    // recordings serialise (else both slip the over-recording guard below).
+    await lockCustomerInvoiceRow(tx, input.invoiceId);
     const invoice = await tx.customerInvoice.findUnique({
       where: { id: input.invoiceId },
       select: {
@@ -178,6 +197,10 @@ async function reverseCustomerInvoicePaymentInner(raw: unknown): Promise<{ ok: t
     if (!payment) throw new ActionError("Payment not found");
     if (payment.reversedAt) throw new ActionError("Payment is already reversed");
 
+    // H2: lock the parent invoice before mutating payments + recomputing, so
+    // a concurrent record/reverse on the same invoice can't race the sum.
+    await lockCustomerInvoiceRow(tx, payment.invoiceId);
+
     await tx.customerInvoicePayment.update({
       where: { id: payment.id },
       data: {
@@ -280,6 +303,9 @@ async function recordVendorBillPaymentInner(raw: unknown): Promise<{ ok: true; i
   if (toDecimal(input.amount).lte(0)) throw new ActionError("Amount must be positive");
 
   const result = await db.$transaction(async (tx) => {
+    // H2: lock the bill before reading payment sums so concurrent recordings
+    // serialise and the over-payment guard below can't be slipped.
+    await lockVendorBillRow(tx, input.billId);
     const bill = await tx.vendorBill.findUnique({
       where: { id: input.billId },
       select: { id: true, status: true, grandTotal: true },
@@ -287,6 +313,17 @@ async function recordVendorBillPaymentInner(raw: unknown): Promise<{ ok: true; i
     if (!bill) throw new ActionError("Bill not found");
     if (bill.status !== VendorBillStatus.APPROVED && bill.status !== VendorBillStatus.MATCHED) {
       throw new ActionError(`Cannot pay a bill in status ${bill.status}`);
+    }
+    // H2: over-payment guard (was missing on the vendor side) — mirror the
+    // customer-invoice guard. Sum live payments, refuse anything over balance.
+    const priorRows = await tx.vendorBillPayment.findMany({
+      where: { vendorBillId: bill.id, reversedAt: null },
+      select: { amount: true },
+    });
+    const priorPaid = priorRows.reduce((s, r) => s.plus(toDecimal(r.amount)), new Decimal(0));
+    const outstanding = toDecimal(bill.grandTotal).minus(priorPaid);
+    if (toDecimal(input.amount).gt(outstanding)) {
+      throw new ActionError(`That's more than the outstanding balance (₹${outstanding.toFixed(2)}).`);
     }
     const payment = await tx.vendorBillPayment.create({
       data: {
@@ -352,6 +389,8 @@ async function reverseVendorBillPaymentInner(raw: unknown): Promise<{ ok: true }
     });
     if (!payment) throw new ActionError("Payment not found");
     if (payment.reversedAt) throw new ActionError("Payment already reversed");
+    // H2: lock the parent bill before mutating payments + recomputing.
+    await lockVendorBillRow(tx, payment.vendorBillId);
     await tx.vendorBillPayment.update({
       where: { id: payment.id },
       data: {

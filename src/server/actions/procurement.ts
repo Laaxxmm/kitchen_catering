@@ -716,6 +716,18 @@ function unitsMatch(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
+/**
+ * Row-lock an ingredient for the rest of the transaction (local mirror of
+ * inventory.ts lockIngredientRow — kept local so this "use server" module
+ * doesn't import an action out of another "use server" module). GRN stock
+ * posting reads onHandQty/avgUnitCost, computes a moving average and writes
+ * back; without the lock two concurrent GRNs read the same snapshot and one
+ * update is silently lost (corrupting stock + average cost).
+ */
+async function lockIngredientRow(tx: Prisma.TransactionClient, id: string) {
+  await tx.$executeRaw`SELECT 1 FROM "Ingredient" WHERE "id" = ${id} FOR UPDATE`;
+}
+
 async function createGRNInner(
   raw: unknown,
 ): Promise<{ ok: true; id: string; grnNo: string; warnings?: string[] }> {
@@ -760,6 +772,36 @@ async function createGRNInner(
       po.status === VendorPOStatus.PARTIALLY_RECEIVED;
     if (!ok) throw new ActionError("PO must be approved/sent before receiving goods");
 
+    // M7: lock every PO line this GRN receives against (sorted, FOR UPDATE)
+    // and re-read receivedQty under the lock. The include snapshot is stale —
+    // two concurrent GRNs against the same PO would otherwise both read the
+    // pre-receipt receivedQty, both pass the over-receive check, and push
+    // received past ordered.
+    const touchedLineIds = [...new Set(input.lines.map((li) => li.poLineId))].sort();
+    for (const lineId of touchedLineIds) {
+      await tx.$executeRaw`SELECT 1 FROM "VendorPOLine" WHERE "id" = ${lineId} FOR UPDATE`;
+    }
+    const lockedLines = await tx.vendorPOLine.findMany({
+      where: { id: { in: touchedLineIds } },
+      select: { id: true, receivedQty: true },
+    });
+    const receivedQtyById = new Map(lockedLines.map((l) => [l.id, l.receivedQty]));
+
+    // H1: lock every ingredient this GRN will post stock to, up front and in
+    // a stable (sorted) order — concurrent GRNs touching the same ingredients
+    // can't deadlock and can't lose each other's moving-average update. The
+    // catalogue snapshot is re-read under the lock at the compute site below.
+    const ingredientLockIds = new Set<string>();
+    for (const li of input.lines) {
+      const pl = po.lines.find((l) => l.id === li.poLineId);
+      if (pl?.ingredientId && toDecimal(li.acceptedQty).gt(0)) {
+        ingredientLockIds.add(pl.ingredientId);
+      }
+    }
+    for (const ingId of [...ingredientLockIds].sort()) {
+      await lockIngredientRow(tx, ingId);
+    }
+
     const grnNo = await nextGRNNumber(tx);
     const grn = await tx.gRN.create({
       data: {
@@ -777,7 +819,10 @@ async function createGRNInner(
       const poLine = po.lines.find((l) => l.id === lineInput.poLineId);
       if (!poLine) throw new ActionError("PO line not found");
 
-      const orderedRemaining = toDecimal(poLine.quantity).minus(toDecimal(poLine.receivedQty));
+      // M7: use the receivedQty re-read under the row lock, not the stale
+      // include snapshot (fallback keeps a non-PO line failing the find below).
+      const freshReceivedQty = receivedQtyById.get(poLine.id) ?? poLine.receivedQty;
+      const orderedRemaining = toDecimal(poLine.quantity).minus(toDecimal(freshReceivedQty));
       const accepted = toDecimal(lineInput.acceptedQty);
       const rejected = toDecimal(lineInput.rejectedQty ?? "0");
       if (accepted.plus(rejected).gt(orderedRemaining)) {
@@ -819,7 +864,12 @@ async function createGRNInner(
           `GRN ${grnNo}: ${poLine.ingredient.name} received in ${poLine.unit.trim()} but the catalogue tracks ${poLine.ingredient.unit.trim()} — stock NOT auto-updated; correct it via stock count / receipt and then issue.`,
         );
       } else if (accepted.gt(0) && poLine.ingredientId && poLine.ingredient) {
-        const ing = poLine.ingredient;
+        // H1: re-read onHandQty/avgUnitCost under the row lock taken above —
+        // the PO-include snapshot (poLine.ingredient) is stale by now.
+        const ing = await tx.ingredient.findUniqueOrThrow({
+          where: { id: poLine.ingredientId },
+          select: { id: true, onHandQty: true, avgUnitCost: true },
+        });
         const { qty: newQty, avgUnitCost: newAvg } = newMovingAverage({
           onHandQty: ing.onHandQty,
           avgUnitCost: ing.avgUnitCost,
@@ -945,10 +995,12 @@ async function createGRNInner(
         });
       }
 
-      // Update PO line receivedQty
+      // Update PO line receivedQty. L4: pass a Decimal, not a JS float, so the
+      // increment stays exact (the row is locked above, but atomic increment
+      // is simplest and correct).
       await tx.vendorPOLine.update({
         where: { id: poLine.id },
-        data: { receivedQty: { increment: accepted.toNumber() } },
+        data: { receivedQty: { increment: new Prisma.Decimal(accepted.toString()) } },
       });
     }
 
@@ -1270,6 +1322,19 @@ async function matchVendorBillInner(
     if (!bill) throw new ActionError("Bill not found");
     if (!bill.po) throw new ActionError("Bill has no linked PO — can't 3-way match");
 
+    // M10: matching is only for bills still in the pre-approval pipeline.
+    // Re-running it against an APPROVED/PAID (or OVERDUE) bill would demote a
+    // settled record back to MATCHED/DISCREPANCY — refuse it.
+    const MATCHABLE: VendorBillStatus[] = [
+      VendorBillStatus.DRAFT,
+      VendorBillStatus.PENDING_MATCH,
+      VendorBillStatus.MATCHED,
+      VendorBillStatus.DISCREPANCY,
+    ];
+    if (!MATCHABLE.includes(bill.status)) {
+      throw new ActionError("This bill is already approved/paid — matching is locked.");
+    }
+
     const discrepancies: Discrepancy[] = [];
 
     for (const billLine of bill.lines) {
@@ -1323,8 +1388,10 @@ async function matchVendorBillInner(
     }
 
     const matched = discrepancies.length === 0;
-    await tx.vendorBill.update({
-      where: { id },
+    // M10: guard the write too — an approve/pay racing this match loses
+    // cleanly (zero rows) instead of clobbering the settled status.
+    const updated = await tx.vendorBill.updateMany({
+      where: { id, status: { in: MATCHABLE } },
       data: {
         status: matched ? VendorBillStatus.MATCHED : VendorBillStatus.DISCREPANCY,
         matchedByUserId: matched ? session.user.id : null,
@@ -1332,6 +1399,9 @@ async function matchVendorBillInner(
         discrepancyNote: matched ? null : JSON.stringify(discrepancies),
       },
     });
+    if (updated.count === 0) {
+      throw new ActionError("This bill just changed status — refresh the page.");
+    }
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -1424,6 +1494,29 @@ async function markVendorBillPaidInner(input: {
       throw new ActionError("Run the 3-way match (or save the bill) before marking it paid");
     }
     const balance = toDecimal(bill.grandTotal).minus(toDecimal(bill.amountPaid));
+    // H3: flip the status FIRST via a guarded update (eligible = anything the
+    // pre-checks above didn't reject) so a double-click can't create two
+    // full-balance payment rows — the loser matches zero rows and aborts.
+    const flipped = await tx.vendorBill.updateMany({
+      where: {
+        id,
+        status: {
+          notIn: [
+            VendorBillStatus.PAID,
+            VendorBillStatus.DRAFT,
+            VendorBillStatus.PENDING_MATCH,
+          ],
+        },
+      },
+      data: {
+        amountPaid: bill.grandTotal.toString(),
+        status: VendorBillStatus.PAID,
+        paidAt: paidAtDate,
+      },
+    });
+    if (flipped.count === 0) {
+      throw new ActionError("Already marked paid — refresh the page.");
+    }
     if (balance.gt(0)) {
       await tx.vendorBillPayment.create({
         data: {
@@ -1437,14 +1530,6 @@ async function markVendorBillPaidInner(input: {
         },
       });
     }
-    await tx.vendorBill.update({
-      where: { id },
-      data: {
-        amountPaid: bill.grandTotal.toString(),
-        status: VendorBillStatus.PAID,
-        paidAt: paidAtDate,
-      },
-    });
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
