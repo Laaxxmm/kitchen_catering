@@ -46,7 +46,7 @@ export function StoreUpcoming({ orders }: { orders: UpcomingStoreOrder[] }) {
     );
   }
   return (
-    <CappedList items={orders} className="grid gap-3 sm:grid-cols-2" keyOf={(o) => o.id}>
+    <CappedList items={orders} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" keyOf={(o) => o.id}>
       {(o) => (
         <li className="relative overflow-hidden rounded-lg border border-ik-rule bg-ik-card transition hover:shadow-[0_3px_18px_rgba(20,25,20,0.07)]">
           <Link href={`/orders/${o.id}`} className="flex h-full flex-col gap-2.5 p-4">

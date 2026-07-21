@@ -91,11 +91,18 @@ export function StoreBoard({
     { key: "stock", label: "My purchase orders", hint: "Buy & receive", count: pos.length },
   ];
 
-  // Newest request first — the lists arrive createdAt-desc from the server,
-  // so keep that order (an event-date sort buried brand-new general requests
-  // that have no event date). POs still surface action-needed first.
-  const chefSorted = chefReqs;
-  const fnbSorted = fnbReqs;
+  // Urgent first: order-linked requests by soonest event date (overdue floats
+  // up), then order-less general requests newest-first — so a dated job due
+  // soon always sits above undated general stock-ups. POs surface
+  // action-needed first.
+  const byUrgency = <T extends { eventDate: string | null; createdAt: string }>(a: T, b: T) => {
+    if (a.eventDate && b.eventDate) return a.eventDate.localeCompare(b.eventDate);
+    if (a.eventDate) return -1;
+    if (b.eventDate) return 1;
+    return b.createdAt.localeCompare(a.createdAt);
+  };
+  const chefSorted = [...chefReqs].sort(byUrgency);
+  const fnbSorted = [...fnbReqs].sort(byUrgency);
   const posSorted = [...pos].sort(
     (a, b) => Number(PO_NEEDS_ACTION.has(b.status)) - Number(PO_NEEDS_ACTION.has(a.status)),
   );
@@ -110,7 +117,7 @@ export function StoreBoard({
       <WorkTabs tabs={tabs} emptyHint="Nothing in {tab} right now.">
         {(active) =>
           active === "fulfil" ? (
-            <CappedList items={chefSorted} className="grid gap-3 sm:grid-cols-2" keyOf={(r) => r.id}>
+            <CappedList items={chefSorted} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" keyOf={(r) => r.id}>
               {(r) => (
                 <ReqCard
                   key={r.id}
@@ -124,7 +131,7 @@ export function StoreBoard({
               )}
             </CappedList>
           ) : active === "fnb" ? (
-            <CappedList items={fnbSorted} className="grid gap-3 sm:grid-cols-2" keyOf={(r) => r.id}>
+            <CappedList items={fnbSorted} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" keyOf={(r) => r.id}>
               {(r) => (
                 <ReqCard
                   key={r.id}
@@ -138,7 +145,7 @@ export function StoreBoard({
               )}
             </CappedList>
           ) : (
-            <CappedList items={posSorted} className="grid gap-3 sm:grid-cols-2" keyOf={(p) => p.id}>
+            <CappedList items={posSorted} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" keyOf={(p) => p.id}>
               {(p) => {
                 const act = PO_NEEDS_ACTION.has(p.status);
                 const a = act

@@ -300,13 +300,14 @@ export default async function DashboardPage({
               needs to stock for, scoped by the pills. Read-only; cards open
               the order. Kept distinct from the action board above. */}
           <section className="rounded-lg border border-ik-rule bg-ik-paper-alt/40 p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 className="text-[14px] font-semibold text-ik-ink">Upcoming orders</h2>
-                <p className="text-[12px] text-ik-ink-3">
-                  Confirmed catering orders to pre-arrange stock for.
-                </p>
-              </div>
+            <div className="mb-2">
+              <h2 className="text-[14px] font-semibold text-ik-ink">Upcoming orders</h2>
+              <p className="text-[12px] text-ik-ink-3">
+                Confirmed catering orders to pre-arrange stock for.
+              </p>
+            </div>
+            {/* Day filter up top — pick the window, then read the cards below. */}
+            <div className="mb-3 border-b border-ik-rule pb-3">
               <EventScopePills basePath="/dashboard" scope={scope} date={sp.date} counts={pillCounts} />
             </div>
             <StoreUpcoming orders={upcoming} />
