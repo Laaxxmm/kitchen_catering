@@ -22,7 +22,8 @@ import { sha256Json } from "@/lib/audit";
 import { formatIST } from "@/lib/time";
 import { ActionError, actionFailure, type ActionResult } from "@/server/action-result";
 import { deferAfterResponse } from "@/server/defer";
-import { notifyRoles } from "@/server/notification-core";
+import { createNotification, notifyRoles } from "@/server/notification-core";
+import { isImmediateChannel } from "@/lib/order-channels";
 
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD, Role.STORE_KEEPER, Role.SALES, Role.ACCOUNTS,
@@ -171,6 +172,81 @@ async function startProductionItemInner(itemId: string): Promise<{ ok: true }> {
   return { ok: true };
 }
 
+// ─── In-house "cooked — ready to serve" ping ───────────────────────────────
+// IMMEDIATE channels (room service / à la carte / management) are served on
+// the premises with NO driver dispatch step, so the delivery "ready to
+// dispatch" fan-out never fires for them. Instead, when cooking completes
+// (order → READY), the F&B team who raised it needs a "cooked — ready to
+// serve" nudge. This is mutually exclusive with scheduleHandoverNotify:
+// dispatch/handover is only reachable for event-delivery channels (the chef
+// work-screen shows the HandoverChecklist / handToDelivery only when
+// !isImmediateChannel), so a given order fires exactly one of the two.
+
+/** Everything the post-commit "cooked — ready to serve" ping needs. */
+interface CookedServePayload {
+  orderId: string;
+  code: string;
+  roomNumber: string | null;
+  tableNumber: string | null;
+  createdById: string;
+  customerName: string;
+}
+
+/**
+ * Inside the caller's tx, right after a guarded order→READY flip actually
+ * fired (count > 0): return the ping payload iff the order is an in-house
+ * IMMEDIATE channel. Event-delivery channels get the dispatch fan-out at
+ * handover instead, so this returns null for them — keeping the two
+ * notifications mutually exclusive per order.
+ */
+async function collectCookedServe(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+): Promise<CookedServePayload | null> {
+  const order = await tx.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true, code: true, channel: true, roomNumber: true, tableNumber: true,
+      createdById: true, customer: { select: { name: true } },
+    },
+  });
+  if (!order || !isImmediateChannel(order.channel)) return null;
+  return {
+    orderId: order.id,
+    code: order.code,
+    roomNumber: order.roomNumber,
+    tableNumber: order.tableNumber,
+    createdById: order.createdById,
+    customerName: order.customer.name,
+  };
+}
+
+/**
+ * Post-commit fan-out for an in-house order that's just been cooked. Pings the
+ * F&B team (DELIVERY + retired FNB_SERVICE alias) plus whoever raised it, once
+ * each (dedupeKey), so they carry it to the room/table. No driver step here.
+ */
+function notifyImmediateOrderCooked(n: CookedServePayload): void {
+  const where = n.roomNumber
+    ? ` · Room ${n.roomNumber}`
+    : n.tableNumber
+      ? ` · Table ${n.tableNumber}`
+      : "";
+  const payload = {
+    kind: "GENERIC" as const,
+    title: `Order ${n.code} is cooked — ready to serve`,
+    body: `${n.customerName}${where} — cooked and ready to serve.`,
+    link: `/orders/${n.orderId}`,
+    dedupeKey: `order-cooked-serve:${n.orderId}`,
+  };
+  deferAfterResponse("order-cooked:notify", async () => {
+    await notifyRoles([Role.DELIVERY, Role.FNB_SERVICE], payload);
+    // The specific person who raised it. dedupeKey (@@unique userId+dedupeKey)
+    // means no double if they're also a DELIVERY/FNB_SERVICE user.
+    if (n.createdById) await createNotification({ userId: n.createdById, ...payload });
+  });
+}
+
 export async function markProductionItemReady(itemId: string): Promise<ActionResult> {
   try {
     return await markProductionItemReadyInner(itemId);
@@ -181,6 +257,7 @@ export async function markProductionItemReady(itemId: string): Promise<ActionRes
 
 async function markProductionItemReadyInner(itemId: string): Promise<{ ok: true }> {
   const session = await requireRole([...ORDER_KITCHEN_ROLES, Role.MANAGER]);
+  let cooked: CookedServePayload | null = null;
   await db.$transaction(async (tx) => {
     const item = await tx.productionJobItem.findUnique({
       where: { id: itemId },
@@ -234,13 +311,14 @@ async function markProductionItemReadyInner(itemId: string): Promise<{ ok: true 
         });
         if (job) {
           // Cascade order: IN_PREP / READY_FOR_PRODUCTION -> READY
-          await tx.order.updateMany({
+          const orderFlip = await tx.order.updateMany({
             where: {
               id: job.orderId,
               status: { in: [OrderStatus.IN_PREP, OrderStatus.READY_FOR_PRODUCTION] },
             },
             data: { status: OrderStatus.READY },
           });
+          if (orderFlip.count > 0) cooked = await collectCookedServe(tx, job.orderId);
         }
       }
     }
@@ -254,6 +332,7 @@ async function markProductionItemReadyInner(itemId: string): Promise<{ ok: true 
       },
     });
   });
+  if (cooked) notifyImmediateOrderCooked(cooked);
   revalidatePath("/kitchen");
   revalidatePath("/orders");
   return { ok: true };
@@ -590,6 +669,7 @@ export async function markOrderCooked(orderId: string): Promise<ActionResult> {
 
 async function markOrderCookedInner(orderId: string): Promise<{ ok: true }> {
   const session = await requireRole([...ORDER_KITCHEN_ROLES, Role.MANAGER]);
+  let cooked: CookedServePayload | null = null;
   await db.$transaction(async (tx) => {
     // Status guard in the WHERE clause — see startCookingOrder.
     const updated = await tx.order.updateMany({
@@ -606,6 +686,7 @@ async function markOrderCookedInner(orderId: string): Promise<{ ok: true }> {
         `Cannot mark ready from status ${order.status} — refresh the page.`,
       );
     }
+    cooked = await collectCookedServe(tx, orderId);
     const job = await tx.productionJob.findFirst({ where: { orderId } });
     if (job) {
       await tx.productionJobItem.updateMany({
@@ -626,6 +707,7 @@ async function markOrderCookedInner(orderId: string): Promise<{ ok: true }> {
       },
     });
   });
+  if (cooked) notifyImmediateOrderCooked(cooked);
   revalidatePath("/dashboard");
   revalidatePath("/kitchen");
   revalidatePath("/orders");
