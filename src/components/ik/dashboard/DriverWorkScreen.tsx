@@ -177,7 +177,7 @@ export function DriverWorkScreen({ eventPrep, pickups, deliveries, upcoming = []
         groups.prep.length === 0 ? (
           <Empty label={activeTab.label} />
         ) : (
-          <CappedList items={groups.prep} className="grid gap-2.5" keyOf={(o) => o.id}>
+          <CappedList items={groups.prep} className="grid gap-3 sm:grid-cols-2" keyOf={(o) => o.id}>
             {(o, i) => <EventPrepCard order={o} highlight={!o.prepReadyAt && i === 0} />}
           </CappedList>
         )
@@ -185,7 +185,7 @@ export function DriverWorkScreen({ eventPrep, pickups, deliveries, upcoming = []
         groups.pickup.length === 0 ? (
           <Empty label={activeTab.label} />
         ) : (
-          <CappedList items={groups.pickup} className="grid gap-2.5" keyOf={(o) => o.id}>
+          <CappedList items={groups.pickup} className="grid gap-3 sm:grid-cols-2" keyOf={(o) => o.id}>
             {(o, i) => <PickupCard order={o} highlight={i === 0} />}
           </CappedList>
         )
@@ -194,7 +194,7 @@ export function DriverWorkScreen({ eventPrep, pickups, deliveries, upcoming = []
           const list = active === "dispatch" ? groups.dispatch : groups.out;
           if (list.length === 0) return <Empty label={activeTab.label} />;
           return (
-            <CappedList items={list} className="grid gap-2.5" keyOf={(d) => d.id}>
+            <CappedList items={list} className="grid gap-3 sm:grid-cols-2" keyOf={(d) => d.id}>
               {(d, i) => <DeliveryCard delivery={d} highlight={i === 0} />}
             </CappedList>
           );

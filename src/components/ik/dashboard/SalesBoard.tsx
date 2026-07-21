@@ -118,7 +118,7 @@ export function SalesBoard({ orders }: { orders: SalesOrder[] }) {
   return (
     <WorkTabs tabs={tabs} emptyHint="Nothing in {tab} right now.">
       {(active) => (
-        <CappedList items={groups[active]} className="grid gap-2.5" keyOf={(o) => o.id}>
+        <CappedList items={groups[active]} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" keyOf={(o) => o.id}>
           {(o, i) => <SalesCard order={o} highlight={i === 0 && active === "draft"} />}
         </CappedList>
       )}

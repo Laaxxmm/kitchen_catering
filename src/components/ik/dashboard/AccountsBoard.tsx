@@ -42,7 +42,7 @@ export function AccountsBoard({ receivables, payables }: { receivables: Receivab
     <WorkTabs tabs={tabs} emptyHint="Nothing in {tab} right now.">
       {(active) =>
         active === "collect" ? (
-          <CappedList items={recSorted} className="grid gap-2.5" keyOf={(r) => r.id}>
+          <CappedList items={recSorted} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" keyOf={(r) => r.id}>
             {(r) => (
               <li key={r.id} className="rounded-md border border-ik-rule bg-ik-card p-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -66,7 +66,7 @@ export function AccountsBoard({ receivables, payables }: { receivables: Receivab
             )}
           </CappedList>
         ) : (
-          <CappedList items={paySorted} className="grid gap-2.5" keyOf={(p) => p.id}>
+          <CappedList items={paySorted} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" keyOf={(p) => p.id}>
             {(p) => (
               <li key={p.id} className="rounded-md border border-ik-rule bg-ik-card p-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">

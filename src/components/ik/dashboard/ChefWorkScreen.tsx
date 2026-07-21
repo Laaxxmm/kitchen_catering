@@ -169,7 +169,7 @@ export function ChefWorkScreen({ orders }: Props) {
           Nothing in <strong>{activeTab.label}</strong> right now.
         </div>
       ) : (
-        <CappedList items={activeOrders} limit={6} className="grid gap-2.5" keyOf={(o) => o.id}>
+        <CappedList items={activeOrders} limit={6} className="grid gap-3 sm:grid-cols-2" keyOf={(o) => o.id}>
           {(o, i) => <ChefOrderCard order={o} highlight={i === 0} />}
         </CappedList>
       )}
