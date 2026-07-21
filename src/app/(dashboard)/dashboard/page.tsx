@@ -18,9 +18,10 @@ import { DriverWorkScreen } from "@/components/ik/dashboard/DriverWorkScreen";
 import { listReadyForDispatch, listMyActiveDeliveries, listEventPrepQueue, listUpcomingEventOrders } from "@/server/actions/deliveries";
 import { SalesBoard } from "@/components/ik/dashboard/SalesBoard";
 import { StoreBoard } from "@/components/ik/dashboard/StoreBoard";
+import { StoreUpcoming } from "@/components/ik/dashboard/StoreUpcoming";
 import { ManagerApprovalsBoard } from "@/components/ik/dashboard/ManagerApprovalsBoard";
 import { AccountsBoard } from "@/components/ik/dashboard/AccountsBoard";
-import { listOrders } from "@/server/actions/orders";
+import { listOrders, listUpcomingOrdersForStore } from "@/server/actions/orders";
 import { listChefRequisitions } from "@/server/actions/chef-requisitions";
 import { listVendorPOs, listVendorBills } from "@/server/actions/procurement";
 import { listBanquetRequisitions } from "@/server/actions/banquet";
@@ -211,7 +212,18 @@ export default async function DashboardPage({
   // requests, grouped in tabs. Issuing is line-level so cards open the
   // fulfilment page.
   if (isStore) {
-    const [chefReqs, fnbReqs, pos] = await Promise.all([
+    // #5: event-date scope for the "Upcoming orders" planning view — same
+    // ?scope=/?date= contract as the chef / F&B branches. Defaults to "all"
+    // (the whole forward book) since the store plans ahead, not just today.
+    const sp = await searchParams;
+    const scope: EventDateScope =
+      sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date)
+        ? "date"
+        : sp.scope === "today" || sp.scope === "tomorrow" || sp.scope === "week"
+          ? sp.scope
+          : "all";
+    const window = istScopeWindow(scope, sp.date);
+    const [chefReqs, fnbReqs, pos, upcoming, allUpcoming] = await Promise.all([
       listChefRequisitions({
         status: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED],
         activeOrderOnly: true,
@@ -232,7 +244,21 @@ export default async function DashboardPage({
           VendorPOStatus.PARTIALLY_RECEIVED,
         ],
       }),
+      // Windowed forward view for the cards + unscoped list for pill counts
+      // (mirrors the chef branch), so "This week (5)" shows at a glance.
+      listUpcomingOrdersForStore(window ?? undefined),
+      listUpcomingOrdersForStore(),
     ]);
+    const inWindow = (iso: string, w: { from: Date; toExclusive: Date }) => {
+      const t = new Date(iso).getTime();
+      return t >= w.from.getTime() && t < w.toExclusive.getTime();
+    };
+    const pillCounts = {
+      today: allUpcoming.filter((o) => inWindow(o.eventDate, istDayWindow())).length,
+      tomorrow: allUpcoming.filter((o) => inWindow(o.eventDate, istDayWindow(new Date(), 1))).length,
+      week: allUpcoming.filter((o) => inWindow(o.eventDate, istWeekWindow())).length,
+      all: allUpcoming.length,
+    };
     return (
       <>
         <LauncherGreeting
@@ -270,6 +296,21 @@ export default async function DashboardPage({
               total: p.grandTotal.toString(),
             }))}
           />
+          {/* #5: forward planning view — confirmed orders the store still
+              needs to stock for, scoped by the pills. Read-only; cards open
+              the order. Kept distinct from the action board above. */}
+          <section className="rounded-lg border border-ik-rule bg-ik-paper-alt/40 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-[14px] font-semibold text-ik-ink">Upcoming orders</h2>
+                <p className="text-[12px] text-ik-ink-3">
+                  Confirmed catering orders to pre-arrange stock for.
+                </p>
+              </div>
+              <EventScopePills basePath="/dashboard" scope={scope} date={sp.date} counts={pillCounts} />
+            </div>
+            <StoreUpcoming orders={upcoming} />
+          </section>
         </div>
       </>
     );

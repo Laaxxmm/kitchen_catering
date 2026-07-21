@@ -6,7 +6,6 @@ import {
   StyleSheet,
   renderToBuffer,
 } from "@react-pdf/renderer";
-import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { amountInWords } from "@/lib/amount-in-words";
 import { getSetting } from "@/lib/settings";
@@ -17,150 +16,156 @@ import {
 } from "@/lib/org";
 import type { InvoiceBankDetailsT } from "@/lib/validators";
 
-const BRAND = "#0F6E56";
-const INK = "#1F2A24";
-const INK_2 = "#516056";
-const INK_3 = "#8C988F";
-const RULE = "#D9DDD7";
-const PAPER = "#FAFAF6";
+const INK = "#000";
+const RULE = "#000";
+const HEAD_FILL = "#EFEFEF";
+
+// Plain Indian-grouped money, 2dp, NO rupee glyph — @react-pdf's built-in
+// Helvetica has no U+20B9, so the symbol would render as tofu. The "Rupees …
+// Only" line makes the currency explicit.
+const INR = new Intl.NumberFormat("en-IN", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+const money = (v: string | number) => INR.format(Number(v));
+// Trim trailing zeros on rate percentages: 2.5 not 2.50, 9 not 9.00.
+const pct = (v: number) => String(Number(v.toFixed(2)));
+
+/**
+ * Reformat the stored invoice number to the client's printed style.
+ * "INV-26-27-0111" → "111/2026-27". Display-only — the stored value and
+ * numbering are untouched. Unknown formats pass through verbatim.
+ */
+function displayInvoiceNo(stored: string): string {
+  const m = stored.trim().match(/^INV-(\d{2})-(\d{2})-(\d+)$/);
+  if (!m) return stored;
+  const [, fy1, fy2, serial] = m;
+  return `${parseInt(serial, 10)}/20${fy1}-${fy2}`;
+}
 
 const s = StyleSheet.create({
   page: {
-    padding: 36,
-    fontSize: 10,
+    paddingVertical: 28,
+    paddingHorizontal: 30,
+    fontSize: 9,
     color: INK,
     fontFamily: "Helvetica",
-    backgroundColor: PAPER,
-  },
-  // Header
-  headerRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 18,
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: RULE,
-  },
-  brandBlock: { flexDirection: "row", alignItems: "center", gap: 8 },
-  brandMark: {
-    width: 32,
-    height: 32,
-    borderRadius: 6,
-    backgroundColor: BRAND,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  brandMarkText: { color: "#fff", fontSize: 16, fontFamily: "Helvetica-Bold" },
-  brandName: { fontSize: 13, fontFamily: "Helvetica-Bold", color: INK },
-  brandTag: { fontSize: 8, color: INK_3, letterSpacing: 1 },
-  invoiceTitleBlock: { alignItems: "flex-end" },
-  invoiceTitle: {
-    fontSize: 9,
-    color: INK_3,
-    letterSpacing: 1.5,
-    textTransform: "uppercase",
-    marginBottom: 2,
-  },
-  invoiceNo: { fontSize: 14, fontFamily: "Helvetica-Bold" },
-  invoiceMeta: { fontSize: 9, color: INK_2 },
-  // Address blocks
-  addrRow: { flexDirection: "row", gap: 14, marginBottom: 14 },
-  addrCol: {
-    flex: 1,
-    padding: 8,
-    borderWidth: 1,
-    borderColor: RULE,
-    borderRadius: 4,
     backgroundColor: "#fff",
   },
-  addrLabel: {
-    fontSize: 8,
-    color: INK_3,
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    marginBottom: 4,
+  frame: { borderWidth: 1, borderColor: RULE },
+
+  // Title + company (centered)
+  title: {
+    fontSize: 15,
+    fontFamily: "Helvetica-Bold",
+    textAlign: "center",
+    marginTop: 8,
+    marginBottom: 6,
   },
-  addrName: { fontSize: 11, fontFamily: "Helvetica-Bold", marginBottom: 2 },
-  addrLine: { fontSize: 9, color: INK_2, marginBottom: 2 },
-  // Table
-  table: { borderWidth: 1, borderColor: RULE, borderRadius: 4, backgroundColor: "#fff" },
-  thead: {
+  company: {
+    fontSize: 12,
+    fontFamily: "Helvetica-Bold",
+    textAlign: "center",
+  },
+  companyLine: { fontSize: 9, textAlign: "center", marginTop: 2 },
+  proformaNote: {
+    fontSize: 8,
+    textAlign: "center",
+    marginTop: 3,
+    marginBottom: 2,
+    fontFamily: "Helvetica-Oblique",
+  },
+
+  // GSTIN / date / inv-no strip
+  strip: {
     flexDirection: "row",
-    paddingVertical: 6,
+    justifyContent: "space-between",
+    borderTopWidth: 1,
+    borderTopColor: RULE,
+    borderBottomWidth: 1,
+    borderBottomColor: RULE,
+    marginTop: 8,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+  },
+  stripLeft: { fontSize: 9, fontFamily: "Helvetica-Bold" },
+  stripRight: { alignItems: "flex-end" },
+  stripMeta: { fontSize: 9 },
+
+  // TO block
+  toBlock: { paddingVertical: 6, paddingHorizontal: 8 },
+  toLabel: { fontSize: 8, fontFamily: "Helvetica-Bold", marginBottom: 2 },
+  toName: { fontSize: 10, fontFamily: "Helvetica-Bold" },
+  toLine: { fontSize: 9, marginTop: 1 },
+
+  // Items table
+  table: { borderTopWidth: 1, borderTopColor: RULE },
+  row: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: RULE },
+  headRow: { backgroundColor: HEAD_FILL },
+  cell: {
+    paddingVertical: 4,
+    paddingHorizontal: 5,
+    borderRightWidth: 1,
+    borderRightColor: RULE,
+    fontSize: 9,
+  },
+  cellLast: { borderRightWidth: 0 },
+  headText: { fontFamily: "Helvetica-Bold", fontSize: 8.5 },
+  right: { textAlign: "right" },
+  cDate: { width: "15%" },
+  cParticular: { width: "34%" },
+  cPax: { width: "12%" },
+  cRate: { width: "13%" },
+  cDays: { width: "11%" },
+  cAmt: { width: "15%" },
+
+  // Totals
+  totalsWrap: { flexDirection: "row", justifyContent: "flex-end" },
+  totalsBox: { width: "45%" },
+  totalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 3,
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: RULE,
-    backgroundColor: "#F4F4EE",
   },
-  th: {
-    fontSize: 8,
-    color: INK_3,
-    letterSpacing: 1,
-    textTransform: "uppercase",
+  totalLabel: { fontSize: 9 },
+  totalValue: { fontSize: 9, textAlign: "right" },
+  grandLabel: { fontSize: 10, fontFamily: "Helvetica-Bold" },
+  grandValue: { fontSize: 10, fontFamily: "Helvetica-Bold", textAlign: "right" },
+
+  words: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    fontSize: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: RULE,
+  },
+  wordsLabel: { fontFamily: "Helvetica-Bold" },
+
+  // Bank block
+  bankWrap: { paddingVertical: 6, paddingHorizontal: 8 },
+  bankHeading: { fontSize: 9, fontFamily: "Helvetica-Bold", marginBottom: 4 },
+  bankTable: { borderWidth: 1, borderColor: RULE, width: "70%" },
+  bankRow: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: RULE },
+  bankRowLast: { borderBottomWidth: 0 },
+  bankKey: {
+    width: "40%",
+    paddingVertical: 3,
+    paddingHorizontal: 5,
+    borderRightWidth: 1,
+    borderRightColor: RULE,
+    fontSize: 9,
     fontFamily: "Helvetica-Bold",
   },
-  trow: {
-    flexDirection: "row",
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: RULE,
-  },
-  td: { fontSize: 9, color: INK },
-  right: { textAlign: "right" },
-  c_desc: { flex: 4 },
-  c_qty: { flex: 1.2, textAlign: "right" },
-  c_unit: { flex: 0.8 },
-  c_rate: { flex: 1.2, textAlign: "right" },
-  c_gst: { flex: 0.8, textAlign: "right" },
-  c_total: { flex: 1.5, textAlign: "right" },
-  // Totals
-  totalsRow: { flexDirection: "row", marginTop: 12 },
-  totalsLeft: { flex: 1, paddingRight: 12 },
-  totalsRight: { width: 200 },
-  totalsItem: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 },
-  totalsLabel: { fontSize: 9, color: INK_3 },
-  totalsValue: { fontSize: 10, color: INK },
-  grand: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 6,
-    marginTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: RULE,
-  },
-  grandLabel: { fontSize: 10, color: INK, fontFamily: "Helvetica-Bold" },
-  grandValue: { fontSize: 12, color: BRAND, fontFamily: "Helvetica-Bold" },
-  inWords: { fontSize: 8.5, fontStyle: "italic", color: INK_2, marginTop: 4 },
-  // Bank + footer
-  bankBlock: {
-    marginTop: 16,
-    padding: 8,
-    backgroundColor: "#fff",
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: RULE,
-  },
-  bankLabel: {
-    fontSize: 8,
-    color: INK_3,
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    marginBottom: 4,
-  },
-  footer: {
-    position: "absolute",
-    bottom: 24,
-    left: 36,
-    right: 36,
-    fontSize: 7.5,
-    color: INK_3,
-    textAlign: "center",
-    paddingTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: RULE,
-  },
+  bankVal: { paddingVertical: 3, paddingHorizontal: 5, fontSize: 9 },
+  bankFree: { fontSize: 9 },
+
+  // Footer
+  footer: { paddingTop: 10, paddingHorizontal: 8, paddingBottom: 14 },
+  footerText: { fontSize: 9 },
+  signSpace: { height: 46 },
 });
 
 interface InvoiceLine {
@@ -172,194 +177,196 @@ interface InvoiceLine {
   lineTotal: string | number;
 }
 
+interface BankFields {
+  bankName?: string;
+  accountName?: string;
+  accountNumber?: string;
+  ifsc?: string;
+  freeText?: string; // legacy INDEFINE_BANK_DETAILS fallback
+}
+
 interface InvoicePDFData {
   invoiceNo: string;
+  kind?: string | null;
   issuedAt?: Date | null;
-  dueAt?: Date | null;
-  orderCode?: string | null;
-  placeOfSupplyStateCode: string;
-  irn?: string | null;
-  ackNo?: string | null;
-  ackDate?: Date | null;
 
-  seller: {
-    name: string;
-    gstin: string;
-    address: string;
-    bankDetails: string;
-  };
-  customer: {
-    name: string;
-    gstin?: string | null;
-    address: string;
-    stateCode: string;
-  };
+  seller: { name: string; gstin: string; address: string; bank: BankFields };
+  contact: { email?: string; phone?: string; mobile?: string };
+  customer: { name: string; address: string };
 
   lines: InvoiceLine[];
   subtotal: string | number;
   cgst: string | number;
   sgst: string | number;
   igst: string | number;
-  taxTotal: string | number;
   grandTotal: string | number;
-  amountPaid: string | number;
-  notes?: string | null;
-  terms?: string | null;
+}
+
+function nonEmptyLines(addr: string): string[] {
+  return addr
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
 }
 
 function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
-  const isIntraState = Number(data.cgst) > 0 || Number(data.sgst) > 0;
+  const isProforma = data.kind === "PROFORMA";
+  const subtotal = Number(data.subtotal);
+  const cgst = Number(data.cgst);
+  const sgst = Number(data.sgst);
+  const igst = Number(data.igst);
+  const isIntraState = cgst > 0 || sgst > 0;
+  // Effective (blended across rates) tax percentage, derived from amounts.
+  const rateOf = (tax: number) => (subtotal > 0 ? (tax / subtotal) * 100 : 0);
+
+  const dateStr = data.issuedAt ? formatIST(data.issuedAt, "dd.MM.yyyy") : "";
+  const b = data.seller.bank;
+  const bankRows = [
+    ["Bank Name", b.bankName],
+    ["Account Name", b.accountName],
+    ["Account No", b.accountNumber],
+    ["IFSC Code", b.ifsc],
+  ].filter(([, v]) => Boolean(v)) as [string, string][];
+  const hasBank = bankRows.length > 0 || Boolean(b.freeText);
+
   return (
-    <Document title={`Invoice ${data.invoiceNo}`} author={data.seller.name}>
+    <Document title={`${isProforma ? "Proforma" : "Tax"} Invoice ${data.invoiceNo}`} author={data.seller.name}>
       <Page size="A4" style={s.page}>
-        {/* Header */}
-        <View style={s.headerRow}>
-          <View style={s.brandBlock}>
-            <View style={s.brandMark}>
-              <Text style={s.brandMarkText}>IK</Text>
-            </View>
-            <View>
-              <Text style={s.brandName}>{data.seller.name}</Text>
-              <Text style={s.brandTag}>CATERING OPERATIONS</Text>
-            </View>
-          </View>
-          <View style={s.invoiceTitleBlock}>
-            <Text style={s.invoiceTitle}>Tax invoice</Text>
-            <Text style={s.invoiceNo}>{data.invoiceNo}</Text>
-            {data.issuedAt && (
-              <Text style={s.invoiceMeta}>Issued {formatIST(data.issuedAt, "dd MMM yyyy")}</Text>
-            )}
-            {data.dueAt && (
-              <Text style={s.invoiceMeta}>Due {formatIST(data.dueAt, "dd MMM yyyy")}</Text>
-            )}
-            {data.orderCode && (
-              <Text style={s.invoiceMeta}>Order {data.orderCode}</Text>
-            )}
-          </View>
-        </View>
-
-        {/* Address blocks */}
-        <View style={s.addrRow}>
-          <View style={s.addrCol}>
-            <Text style={s.addrLabel}>From</Text>
-            <Text style={s.addrName}>{data.seller.name}</Text>
-            <Text style={s.addrLine}>{data.seller.address}</Text>
-            <Text style={s.addrLine}>GSTIN: {data.seller.gstin}</Text>
-          </View>
-          <View style={s.addrCol}>
-            <Text style={s.addrLabel}>Bill to</Text>
-            <Text style={s.addrName}>{data.customer.name}</Text>
-            <Text style={s.addrLine}>{data.customer.address}</Text>
-            {data.customer.gstin && (
-              <Text style={s.addrLine}>GSTIN: {data.customer.gstin}</Text>
-            )}
-            <Text style={s.addrLine}>State code: {data.customer.stateCode}</Text>
-          </View>
-          <View style={s.addrCol}>
-            <Text style={s.addrLabel}>Place of supply</Text>
-            <Text style={s.addrName}>State {data.placeOfSupplyStateCode}</Text>
-            <Text style={s.addrLine}>
-              {isIntraState ? "Intra-state · CGST + SGST" : "Inter-state · IGST"}
-            </Text>
-            {data.irn && (
-              <>
-                <Text style={[s.addrLabel, { marginTop: 6 }]}>E-invoice</Text>
-                <Text style={[s.addrLine, { fontSize: 7 }]}>IRN {data.irn.slice(0, 32)}…</Text>
-                {data.ackNo && <Text style={s.addrLine}>Ack {data.ackNo}</Text>}
-              </>
-            )}
-          </View>
-        </View>
-
-        {/* Items table */}
-        <View style={s.table}>
-          <View style={s.thead}>
-            <Text style={[s.th, s.c_desc]}>Description</Text>
-            <Text style={[s.th, s.c_qty]}>Qty</Text>
-            <Text style={[s.th, s.c_unit]}>Unit</Text>
-            <Text style={[s.th, s.c_rate]}>Rate ₹</Text>
-            <Text style={[s.th, s.c_gst]}>GST %</Text>
-            <Text style={[s.th, s.c_total]}>Amount ₹</Text>
-          </View>
-          {data.lines.map((l, idx) => (
-            <View key={idx} style={s.trow}>
-              <Text style={[s.td, s.c_desc]}>{l.description}</Text>
-              <Text style={[s.td, s.c_qty]}>{String(l.quantity)}</Text>
-              <Text style={[s.td, s.c_unit]}>{l.unit}</Text>
-              <Text style={[s.td, s.c_rate]}>{String(l.unitPrice)}</Text>
-              <Text style={[s.td, s.c_gst]}>{String(l.gstRatePct)}</Text>
-              <Text style={[s.td, s.c_total]}>{String(l.lineTotal)}</Text>
-            </View>
+        <View style={s.frame}>
+          {/* Title + centered company block */}
+          <Text style={s.title}>{isProforma ? "Proforma Invoice" : "Tax Invoice"}</Text>
+          {isProforma && (
+            <Text style={s.proformaNote}>PROFORMA — not a tax invoice</Text>
+          )}
+          <Text style={s.company}>{data.seller.name}</Text>
+          {nonEmptyLines(data.seller.address).map((l, i) => (
+            <Text key={i} style={s.companyLine}>{l}</Text>
           ))}
-        </View>
-
-        {/* Totals */}
-        <View style={s.totalsRow}>
-          <View style={s.totalsLeft}>
-            {data.notes && (
-              <>
-                <Text style={s.totalsLabel}>Notes</Text>
-                <Text style={[s.td, { marginBottom: 6 }]}>{data.notes}</Text>
-              </>
-            )}
-            {data.terms && (
-              <>
-                <Text style={s.totalsLabel}>Terms</Text>
-                <Text style={s.td}>{data.terms}</Text>
-              </>
-            )}
-          </View>
-          <View style={s.totalsRight}>
-            <View style={s.totalsItem}>
-              <Text style={s.totalsLabel}>Subtotal</Text>
-              <Text style={s.totalsValue}>{String(data.subtotal)}</Text>
-            </View>
-            {Number(data.cgst) > 0 && (
-              <View style={s.totalsItem}>
-                <Text style={s.totalsLabel}>CGST</Text>
-                <Text style={s.totalsValue}>{String(data.cgst)}</Text>
-              </View>
-            )}
-            {Number(data.sgst) > 0 && (
-              <View style={s.totalsItem}>
-                <Text style={s.totalsLabel}>SGST</Text>
-                <Text style={s.totalsValue}>{String(data.sgst)}</Text>
-              </View>
-            )}
-            {Number(data.igst) > 0 && (
-              <View style={s.totalsItem}>
-                <Text style={s.totalsLabel}>IGST</Text>
-                <Text style={s.totalsValue}>{String(data.igst)}</Text>
-              </View>
-            )}
-            <View style={s.grand}>
-              <Text style={s.grandLabel}>Grand total</Text>
-              <Text style={s.grandValue}>{formatINR(data.grandTotal)}</Text>
-            </View>
-            {Number(data.amountPaid) > 0 && (
-              <View style={s.totalsItem}>
-                <Text style={[s.totalsLabel, { color: "#3B6D11" }]}>Paid</Text>
-                <Text style={[s.totalsValue, { color: "#3B6D11" }]}>{String(data.amountPaid)}</Text>
-              </View>
-            )}
-            <Text style={s.inWords}>
-              In words: {amountInWords(data.grandTotal)}
+          {data.contact.email && (
+            <Text style={s.companyLine}>Email : {data.contact.email}</Text>
+          )}
+          {(data.contact.phone || data.contact.mobile) && (
+            <Text style={s.companyLine}>
+              {[data.contact.phone && `Ph: ${data.contact.phone}`, data.contact.mobile && `Mob: ${data.contact.mobile}`]
+                .filter(Boolean)
+                .join("   ")}
             </Text>
+          )}
+
+          {/* GSTIN / Date / Inv No strip */}
+          <View style={s.strip}>
+            <Text style={s.stripLeft}>GSTIN : {data.seller.gstin}</Text>
+            <View style={s.stripRight}>
+              <Text style={s.stripMeta}>Date : {dateStr}</Text>
+              <Text style={s.stripMeta}>Inv No: {displayInvoiceNo(data.invoiceNo)}</Text>
+            </View>
+          </View>
+
+          {/* TO block */}
+          <View style={s.toBlock}>
+            <Text style={s.toLabel}>TO</Text>
+            <Text style={s.toName}>{data.customer.name}</Text>
+            {nonEmptyLines(data.customer.address).map((l, i) => (
+              <Text key={i} style={s.toLine}>{l}</Text>
+            ))}
+          </View>
+
+          {/* Line-items table */}
+          <View style={s.table}>
+            <View style={[s.row, s.headRow]}>
+              <Text style={[s.cell, s.cDate, s.headText]}>Date</Text>
+              <Text style={[s.cell, s.cParticular, s.headText]}>Particular</Text>
+              <Text style={[s.cell, s.cPax, s.headText, s.right]}>No of Pax</Text>
+              <Text style={[s.cell, s.cRate, s.headText, s.right]}>Rate</Text>
+              <Text style={[s.cell, s.cDays, s.headText, s.right]}>No Of Days</Text>
+              <Text style={[s.cell, s.cAmt, s.cellLast, s.headText, s.right]}>Taxable Amt</Text>
+            </View>
+            {data.lines.map((l, i) => {
+              const pax = Number(l.quantity);
+              const days = 1; // no distinct day-count field on a line; template default
+              const taxable = pax * days * Number(l.unitPrice);
+              return (
+                <View key={i} style={s.row}>
+                  <Text style={[s.cell, s.cDate]}>{dateStr}</Text>
+                  <Text style={[s.cell, s.cParticular]}>{l.description}</Text>
+                  <Text style={[s.cell, s.cPax, s.right]}>{String(l.quantity)}</Text>
+                  <Text style={[s.cell, s.cRate, s.right]}>{money(l.unitPrice)}</Text>
+                  <Text style={[s.cell, s.cDays, s.right]}>{days}</Text>
+                  <Text style={[s.cell, s.cAmt, s.cellLast, s.right]}>{money(taxable)}</Text>
+                </View>
+              );
+            })}
+          </View>
+
+          {/* Totals (right-aligned) */}
+          <View style={s.totalsWrap}>
+            <View style={s.totalsBox}>
+              <View style={s.totalRow}>
+                <Text style={s.totalLabel}>Total</Text>
+                <Text style={s.totalValue}>{money(subtotal)}</Text>
+              </View>
+              {isIntraState ? (
+                <>
+                  <View style={s.totalRow}>
+                    <Text style={s.totalLabel}>Cgst @{pct(rateOf(cgst))}%</Text>
+                    <Text style={s.totalValue}>{money(cgst)}</Text>
+                  </View>
+                  <View style={s.totalRow}>
+                    <Text style={s.totalLabel}>Sgst @{pct(rateOf(sgst))}%</Text>
+                    <Text style={s.totalValue}>{money(sgst)}</Text>
+                  </View>
+                </>
+              ) : (
+                igst > 0 && (
+                  <View style={s.totalRow}>
+                    <Text style={s.totalLabel}>Igst @{pct(rateOf(igst))}%</Text>
+                    <Text style={s.totalValue}>{money(igst)}</Text>
+                  </View>
+                )
+              )}
+              <View style={s.totalRow}>
+                <Text style={s.grandLabel}>Grand Total</Text>
+                <Text style={s.grandValue}>{money(data.grandTotal)}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Amount in words */}
+          <Text style={s.words}>
+            <Text style={s.wordsLabel}>Rupees in Words: </Text>
+            {amountInWords(data.grandTotal)}
+          </Text>
+
+          {/* Bank details — omitted entirely when nothing is configured */}
+          {hasBank && (
+            <View style={s.bankWrap} wrap={false}>
+              <Text style={s.bankHeading}>For Online payment details furnished below</Text>
+              {bankRows.length > 0 ? (
+                <View style={s.bankTable}>
+                  {bankRows.map(([k, v], i) => (
+                    <View
+                      key={k}
+                      style={[s.bankRow, i === bankRows.length - 1 ? s.bankRowLast : {}]}
+                    >
+                      <Text style={s.bankKey}>{k}</Text>
+                      <Text style={s.bankVal}>{v}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                nonEmptyLines(b.freeText ?? "").map((l, i) => (
+                  <Text key={i} style={s.bankFree}>{l}</Text>
+                ))
+              )}
+            </View>
+          )}
+
+          {/* Footer — leave whitespace for the physical stamp/sign */}
+          <View style={s.footer}>
+            <Text style={s.footerText}>Thanking You</Text>
+            <View style={s.signSpace} />
           </View>
         </View>
-
-        {/* Payment details — only when bank details are actually configured */}
-        {data.seller.bankDetails && (
-          <View style={s.bankBlock} wrap={false}>
-            <Text style={s.bankLabel}>Payment details</Text>
-            <Text style={s.td}>{data.seller.bankDetails}</Text>
-          </View>
-        )}
-
-        {/* Footer */}
-        <Text style={s.footer} fixed>
-          {data.seller.name} · {data.seller.gstin} · Generated by Greenpath catering operations
-        </Text>
       </Page>
     </Document>
   );
@@ -367,10 +374,11 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
 
 /**
  * Render a CustomerInvoice (with its lines) to a PDF Buffer.
- * Pulls seller-side fields from src/lib/org.ts.
+ * Seller-side fields come from src/lib/org.ts; contact + bank from config.
  */
 export async function renderCustomerInvoicePDF(input: {
   invoiceNo: string;
+  kind?: string | null;
   issuedAt?: Date | null;
   dueAt?: Date | null;
   orderCode?: string | null;
@@ -404,54 +412,46 @@ export async function renderCustomerInvoicePDF(input: {
   notes?: string | null;
   terms?: string | null;
 }): Promise<Buffer> {
-  // Admin-maintained bank details (Admin → Settings → Invoice bank details).
-  // Falls back to an explicit INDEFINE_BANK_DETAILS env override for
-  // deployments configured before the setting existed. When neither is set
-  // the Payment-details box is omitted — no placeholder account numbers.
-  const bank = await getSetting<InvoiceBankDetailsT>("invoice.bankDetails");
-  const bankLines = bank
-    ? [
-        bank.accountName && `Account name: ${bank.accountName}`,
-        bank.accountNumber && `A/C no: ${bank.accountNumber}`,
-        bank.ifsc && `IFSC: ${bank.ifsc}`,
-        bank.bankBranch && `Bank & branch: ${bank.bankBranch}`,
-        bank.upiId && `UPI: ${bank.upiId}`,
-      ].filter((l): l is string => Boolean(l))
-    : [];
-  const bankDetails =
-    bankLines.length > 0 ? bankLines.join("\n") : (process.env.INDEFINE_BANK_DETAILS ?? "");
+  // Structured bank details (Admin → Settings → Invoice bank details). Legacy
+  // free-text INDEFINE_BANK_DETAILS is still honoured as a fallback. When
+  // neither is set the whole bank block is omitted — no placeholder rows.
+  const bankSetting = await getSetting<InvoiceBankDetailsT>("invoice.bankDetails");
+  const bank: BankFields = {
+    bankName: bankSetting?.bankBranch || undefined,
+    accountName: bankSetting?.accountName || undefined,
+    accountNumber: bankSetting?.accountNumber || undefined,
+    ifsc: bankSetting?.ifsc || undefined,
+    freeText: process.env.INDEFINE_BANK_DETAILS || undefined,
+  };
 
   const data: InvoicePDFData = {
     invoiceNo: input.invoiceNo,
+    kind: input.kind,
     issuedAt: input.issuedAt,
-    dueAt: input.dueAt,
-    orderCode: input.orderCode,
-    placeOfSupplyStateCode: input.placeOfSupplyStateCode,
-    irn: input.irn,
-    ackNo: input.ackNo,
-    ackDate: input.ackDate,
     seller: {
       name: indefineCompanyName(),
       gstin: indefineGstin(),
       address: indefineAddress(),
-      bankDetails,
+      bank,
+    },
+    // Contact lines come from env config (org.ts holds no contact fields).
+    // Set INDEFINE_EMAIL / INDEFINE_PHONE / INDEFINE_MOBILE to show them;
+    // unset lines are simply omitted — no hardcoded business data.
+    contact: {
+      email: process.env.INDEFINE_EMAIL || undefined,
+      phone: process.env.INDEFINE_PHONE || undefined,
+      mobile: process.env.INDEFINE_MOBILE || undefined,
     },
     customer: {
       name: input.customer.name,
-      gstin: input.customer.gstin,
       address: input.customer.billingAddress,
-      stateCode: input.customer.stateCode,
     },
     lines: input.lines,
     subtotal: input.subtotal,
     cgst: input.cgst,
     sgst: input.sgst,
     igst: input.igst,
-    taxTotal: input.taxTotal,
     grandTotal: input.grandTotal,
-    amountPaid: input.amountPaid,
-    notes: input.notes,
-    terms: input.terms,
   };
   return renderToBuffer(<CustomerInvoiceDocument data={data} />);
 }

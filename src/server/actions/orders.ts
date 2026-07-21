@@ -53,7 +53,7 @@ import { getOrCreateHouseCustomerId } from "@/lib/house-customer";
 import { createNotification, notifyRoles } from "@/server/notification-core";
 import { deferAfterResponse } from "@/server/defer";
 import { cancelBanquetRequisitionsWithPOs } from "@/server/banquet-core";
-import { formatIST, istToUtc } from "@/lib/time";
+import { formatIST, istToUtc, type DateWindow } from "@/lib/time";
 
 // Every role the middleware lets onto /orders must be listed here, or the
 // page's listOrders call throws and the whole route crashes for that role.
@@ -1874,6 +1874,70 @@ export async function listOrders(filter: OrderFilter = {}) {
     orderBy: { createdAt: "desc" },
     take: 200,
   });
+}
+
+/**
+ * Confirmed catering orders the store still needs to stock for — chef has
+ * accepted the order (CHEF_APPROVED) through to cooked (READY), before it's
+ * dispatched. Excludes DRAFT / pending-approval (not yet confirmed) and
+ * OUT_FOR_DELIVERY onward + terminal states (nothing left to stock). Single
+ * source for the "confirmed but not yet delivered" window the store plans
+ * against.
+ */
+const STORE_UPCOMING_STATUSES: OrderStatus[] = [
+  OrderStatus.CHEF_APPROVED,
+  OrderStatus.CHEF_REQUISITION_PENDING,
+  OrderStatus.ISSUING,
+  OrderStatus.READY_FOR_PRODUCTION,
+  OrderStatus.IN_PREP,
+  OrderStatus.READY,
+];
+
+/**
+ * #5: read-only forward view for the store keeper — every confirmed order
+ * (see STORE_UPCOMING_STATUSES) whose event falls in the optional half-open
+ * eventDate `window` (resolve with istScopeWindow; omit for the whole forward
+ * book), nearest event first, so the store can pre-arrange stock.
+ * `requisitionRaised` flags whether the chef has already put the order into
+ * the store's requisition queue — what's actionable now vs. still coming.
+ * Gated on READ_ROLES (STORE_KEEPER included), mirroring listOrders.
+ */
+export async function listUpcomingOrdersForStore(window?: DateWindow) {
+  await requireRole(READ_ROLES);
+  const rows = await db.order.findMany({
+    where: {
+      status: { in: STORE_UPCOMING_STATUSES },
+      ...(window ? { eventDate: { gte: window.from, lt: window.toExclusive } } : {}),
+    },
+    select: {
+      id: true,
+      code: true,
+      channel: true,
+      status: true,
+      headcount: true,
+      eventDate: true,
+      customer: { select: { name: true } },
+      // A live (non-cancelled) requisition means it's already in the store's
+      // queue — one is enough to answer the boolean.
+      chefRequisitions: {
+        where: { status: { not: ChefRequisitionStatus.CANCELLED } },
+        select: { id: true },
+        take: 1,
+      },
+    },
+    orderBy: { eventDate: "asc" },
+    take: 100,
+  });
+  return rows.map((o) => ({
+    id: o.id,
+    code: o.code,
+    channel: o.channel,
+    status: o.status,
+    headcount: o.headcount,
+    eventDate: o.eventDate.toISOString(),
+    customerName: o.customer.name,
+    requisitionRaised: o.chefRequisitions.length > 0,
+  }));
 }
 
 export async function getOrder(id: string) {

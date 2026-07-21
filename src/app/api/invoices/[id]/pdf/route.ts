@@ -16,6 +16,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const buf = await renderCustomerInvoicePDF({
     invoiceNo: inv.invoiceNo,
+    kind: inv.kind,
     issuedAt: inv.issuedAt,
     dueAt: inv.dueAt,
     orderCode: inv.order?.code ?? null,

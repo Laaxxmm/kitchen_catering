@@ -176,6 +176,7 @@ export async function createProformaInvoiceForOrderCore(orderId: string) {
       if (!fullInvoice) throw new Error("Just-created proforma vanished");
       const pdf = await renderCustomerInvoicePDF({
         invoiceNo: fullInvoice.invoiceNo,
+        kind: fullInvoice.kind,
         issuedAt: fullInvoice.issuedAt,
         dueAt: fullInvoice.dueAt,
         orderCode: fullInvoice.order?.code ?? null,

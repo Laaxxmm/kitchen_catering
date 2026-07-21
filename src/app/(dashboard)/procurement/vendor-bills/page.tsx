@@ -59,6 +59,7 @@ export default async function VendorBillsPage({
               <TableHead>Vendor bill #</TableHead>
               <TableHead>Vendor</TableHead>
               <TableHead>PO</TableHead>
+              <TableHead>Order</TableHead>
               <TableHead className="text-right">Grand total</TableHead>
               <TableHead className="text-right">Paid</TableHead>
               <TableHead>Status</TableHead>
@@ -85,6 +86,7 @@ export default async function VendorBillsPage({
                     </Link>
                   </TableCell>
                   <TableCell className="font-mono text-[12px]">{b.po?.poNo ?? "—"}</TableCell>
+                  <TableCell className="font-mono text-[12px]">{b.po?.order?.code ?? "—"}</TableCell>
                   <TableCell className="text-right font-mono">{formatINR(b.grandTotal)}</TableCell>
                   <TableCell className="text-right font-mono">{formatINR(b.amountPaid)}</TableCell>
                   <TableCell><StatusBadge status={b.status} /></TableCell>

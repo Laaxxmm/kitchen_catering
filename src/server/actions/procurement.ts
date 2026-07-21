@@ -1852,7 +1852,7 @@ export async function listVendorBills(opts: { status?: VendorBillStatus[]; vendo
     },
     include: {
       vendor: { select: { id: true, name: true, code: true } },
-      po: { select: { poNo: true } },
+      po: { select: { poNo: true, order: { select: { code: true } } } },
     },
     orderBy: { issueDate: "desc" },
     take: 200,
@@ -1865,7 +1865,7 @@ export async function getVendorBill(id: string) {
     where: { id },
     include: {
       vendor: true,
-      po: { include: { lines: true } },
+      po: { include: { lines: true, order: { select: { id: true, code: true, customer: { select: { name: true } } } } } },
       matchedBy: { select: { name: true } },
       lines: { orderBy: { sortOrder: "asc" } },
       payments: { where: { reversedAt: null }, orderBy: { paidAt: "desc" } },

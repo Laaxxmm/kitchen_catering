@@ -104,6 +104,12 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
         {bill.issueDate && <span className="text-ik-ink-3">Issued {formatIST(bill.issueDate, "yyyy-MM-dd")}</span>}
         {bill.dueDate && <span className="text-ik-ink-3">Due {formatIST(bill.dueDate, "yyyy-MM-dd")}</span>}
         {bill.po && <span className="text-ik-ink-3">PO <Link href={`/procurement/purchase-orders/${bill.po.id}`} className="font-mono text-brand hover:underline">{bill.po.poNo ?? bill.poId}</Link></span>}
+        {bill.po?.order && (
+          <span className="text-ik-ink-3">
+            For order <Link href={`/orders/${bill.po.order.id}`} className="font-mono text-brand hover:underline">{bill.po.order.code}</Link>
+            {" · "}{bill.po.order.customer.name}
+          </span>
+        )}
       </div>
 
       {discrepancies.length > 0 && (
