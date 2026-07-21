@@ -705,10 +705,14 @@ async function notifyOrderRevised(
       },
       select: { id: true },
     });
+    const increased = oldPax != null && newPax > oldPax;
     const body =
       note +
       (openRequisition
         ? " Review the ingredient requisition — quantities were planned for the old headcount."
+        : "") +
+      (increased
+        ? " You may need more ingredients — raise a top-up requisition for the extra."
         : "");
     // STORE_KEEPER included (#6/#19): the store preps against requisitions
     // that a revision may have just invalidated.

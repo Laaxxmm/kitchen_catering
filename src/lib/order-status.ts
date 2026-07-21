@@ -34,6 +34,19 @@ export const REVISABLE_ORDER_STATUSES: OrderStatus[] = [
 ];
 
 /**
+ * Statuses in which a chef requisition — including a top-up after an upward
+ * pax revision — can still be raised against an order. Shared between
+ * createChefRequisition's guard and the order-page buttons so the UI can
+ * never offer an action the action would reject (nor hide one it allows).
+ */
+export const REQUISITION_ELIGIBLE_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.CHEF_REQUISITION_PENDING,
+  OrderStatus.ISSUING,
+  OrderStatus.READY_FOR_PRODUCTION,
+  OrderStatus.IN_PREP,
+];
+
+/**
  * Human-friendly labels for OrderStatus. The DB enum values are
  * code-friendly (PENDING_CHEF_APPROVAL); the UI should show plain English
  * (Awaiting chef approval). Single source of truth so admin / manager /

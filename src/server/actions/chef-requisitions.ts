@@ -9,7 +9,12 @@ import {
   Role,
 } from "@prisma/client";
 import { db } from "@/server/db";
-import { INACTIVE_ORDER_STATUSES, STATUS_LABEL, humanizeStatus } from "@/lib/order-status";
+import {
+  INACTIVE_ORDER_STATUSES,
+  REQUISITION_ELIGIBLE_ORDER_STATUSES,
+  STATUS_LABEL,
+  humanizeStatus,
+} from "@/lib/order-status";
 import {
   requireRole,
   requireSession,
@@ -68,11 +73,7 @@ async function createChefRequisitionInner(
       select: { status: true },
     });
     if (!order) throw new ActionError("Order not found");
-    const ok = order.status === OrderStatus.CHEF_REQUISITION_PENDING
-      || order.status === OrderStatus.IN_PREP
-      || order.status === OrderStatus.READY_FOR_PRODUCTION
-      || order.status === OrderStatus.ISSUING;
-    if (!ok) {
+    if (!REQUISITION_ELIGIBLE_ORDER_STATUSES.includes(order.status)) {
       throw new ActionError(`This order is ${STATUS_LABEL[order.status].toLowerCase()} — a new requisition can't be raised`);
     }
 
@@ -587,8 +588,16 @@ async function recomputeReqAndAdvance(
         r.status === ChefRequisitionStatus.CANCELLED,
     );
     if (everyReqDone) {
+      // No-regress: only advance an order still in the pre-cook issuing phase.
+      // A top-up requisition fully issued while the order is already
+      // READY_FOR_PRODUCTION / IN_PREP (or beyond) must NOT knock it back to
+      // READY_FOR_PRODUCTION — that would re-create a production job. The extra
+      // stock is simply issued; the order's status is left untouched.
       const advanced = await tx.order.updateMany({
-        where: { id: orderId, status: { not: OrderStatus.READY_FOR_PRODUCTION } },
+        where: {
+          id: orderId,
+          status: { in: [OrderStatus.CHEF_REQUISITION_PENDING, OrderStatus.ISSUING] },
+        },
         data: { status: OrderStatus.READY_FOR_PRODUCTION },
       });
       if (advanced.count > 0) {

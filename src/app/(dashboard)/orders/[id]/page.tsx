@@ -21,7 +21,7 @@ import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoic
 import { listDishes } from "@/server/actions/dishes";
 import { listAssignableUsers } from "@/server/actions/users";
 import { isEventDeliveryChannel, isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
-import { REVISABLE_ORDER_STATUSES } from "@/lib/order-status";
+import { REQUISITION_ELIGIBLE_ORDER_STATUSES, REVISABLE_ORDER_STATUSES } from "@/lib/order-status";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
@@ -532,9 +532,15 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                 ))}
               </ul>
             )}
-            {order.status === OrderStatus.CHEF_REQUISITION_PENDING && (role === Role.KITCHEN_HEAD || isAdmin) && (
+            {/* Chef/admin can raise a requisition through the whole issuing +
+                cooking window, not just at CHEF_REQUISITION_PENDING — a top-up
+                is needed when a revision bumps pax after issuing/cooking began.
+                Label reflects whether this is the first or an additional one. */}
+            {isChef && REQUISITION_ELIGIBLE_ORDER_STATUSES.includes(order.status) && (
               <Link href={`/orders/${order.id}/requisition`} className="mt-2 inline-block">
-                <Button size="sm">Raise requisition</Button>
+                <Button size="sm">
+                  {order.chefRequisitions.length > 0 ? "Raise another requisition" : "Raise requisition"}
+                </Button>
               </Link>
             )}
           </section>
@@ -925,6 +931,21 @@ function OrderNextStep({ status, orderId, orderCode, role, immediate, hasRequisi
     <div className={"mb-6 rounded-md border p-3 text-[13px] " + palette}>
       <div className="font-medium">{title}</div>
       <div className="mt-1">{body}</div>
+      {/* Top-up requisition — once past CHEF_REQUISITION_PENDING (which has its
+          own button above) but still in an eligible state, let the chef raise
+          another requisition for extra ingredients after an upward revision. */}
+      {isChef &&
+        status !== OrderStatus.CHEF_REQUISITION_PENDING &&
+        REQUISITION_ELIGIBLE_ORDER_STATUSES.includes(status) && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Link href={`/orders/${orderId}/requisition`}>
+              <Button size="sm" variant="outline">Raise another requisition</Button>
+            </Link>
+            <span className="text-[11.5px] text-ik-ink-3">
+              Need more after a revision? Raise a top-up requisition for the extra.
+            </span>
+          </div>
+        )}
     </div>
   );
 }
