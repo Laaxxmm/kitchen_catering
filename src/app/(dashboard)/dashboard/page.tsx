@@ -117,7 +117,7 @@ export default async function DashboardPage({
           subtitle="Every order that needs you, with the next action on the card — accept, get ingredients, cook, hand to delivery."
           actions={<Link href="/requisitions/new"><Button variant="outline">New stock request</Button></Link>}
         />
-        <div className="grid gap-5">
+        <div className="grid grid-cols-1 gap-5">
           <MyTasksPanel />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <EventScopePills basePath="/dashboard" scope={scope} date={sp.date} counts={pillCounts} />
@@ -191,7 +191,7 @@ export default async function DashboardPage({
             </div>
           }
         />
-        <div className="grid gap-5">
+        <div className="grid grid-cols-1 gap-5">
           <MyTasksPanel />
           <SalesBoard
             orders={orders.map((o) => ({
@@ -265,7 +265,7 @@ export default async function DashboardPage({
           firstName={firstName}
           subtitle="Requests from the kitchen and the F&B team, and the purchase orders you've raised. Open a request to issue line by line."
         />
-        <div className="grid gap-5">
+        <div className="grid grid-cols-1 gap-5">
           <MyTasksPanel />
           <StoreBoard
             chefReqs={chefReqs.map((r) => ({
@@ -361,7 +361,7 @@ export default async function DashboardPage({
             </div>
           }
         />
-        <div className="grid gap-5">
+        <div className="grid grid-cols-1 gap-5">
           <MyTasksPanel />
           <AccountsBoard
             receivables={receivables.map((r) => ({ ...r, outstanding: r.outstanding.toFixed(2) }))}
@@ -401,7 +401,7 @@ export default async function DashboardPage({
             </div>
           }
         />
-        <div className="grid gap-5">
+        <div className="grid grid-cols-1 gap-5">
           <MyTasksPanel />
           <LogBoard rows={rows} unit="issues" />
           <HousekeepingPanel />
@@ -435,7 +435,7 @@ export default async function DashboardPage({
             </div>
           }
         />
-        <div className="grid gap-5">
+        <div className="grid grid-cols-1 gap-5">
           <MyTasksPanel />
           <LogBoard rows={rows} unit="activities" />
           <MaintenancePanel />
@@ -460,7 +460,7 @@ export default async function DashboardPage({
             </div>
           }
         />
-        <div className="grid gap-5">
+        <div className="grid grid-cols-1 gap-5">
           <MyTasksPanel />
           <BanquetPanel />
         </div>
@@ -529,7 +529,7 @@ export default async function DashboardPage({
             </div>
           }
         />
-        <div className="grid gap-5">
+        <div className="grid grid-cols-1 gap-5">
           <MyTasksPanel />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <EventScopePills basePath="/dashboard" scope={scope} date={sp.date} counts={pillCounts} />
@@ -646,7 +646,11 @@ export default async function DashboardPage({
   ];
 
   return (
-    <div className="grid gap-5">
+    // grid-cols-1 is load-bearing: it sizes the single track as
+    // minmax(0, 1fr). A bare `grid` gives an auto track, whose max is
+    // max-content — so one wide child (a long approvals row, a wide table)
+    // stretches the track and drags every other section off-screen with it.
+    <div className="grid grid-cols-1 gap-5">
       {/* 1 ─ Greeting (compact) */}
       <LauncherGreeting firstName={firstName} />
 

@@ -62,9 +62,9 @@ const CHANNEL_LABEL: Record<OrderChannel, string> = {
 /**
  * Manager's approvals in one place — orders awaiting commercial sign-off,
  * chef-proposed order changes, and purchase orders — each with approve/reject
- * inline. Within a tab the cards lay out in a horizontal scroll row so a long
- * queue stays compact instead of pushing the page down. Nothing here gets
- * missed: the order gate sits first since the kitchen waits on it.
+ * inline. Within a tab the cards lay out in a wrapping grid, so a long queue
+ * grows downwards and stays on screen. Nothing here gets missed: the order
+ * gate sits first since the kitchen waits on it.
  */
 export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseOrders, viewerIsAdmin = false }: Props) {
   const total = ordersToApprove.length + orderChanges.length + purchaseOrders.length;
@@ -88,20 +88,20 @@ export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseO
         {(active) => {
           if (active === "orders") {
             return (
-              <CappedList items={ordersSorted} className={SCROLL_ROW} keyOf={(o) => o.id}>
+              <CappedList items={ordersSorted} className={CARD_GRID} keyOf={(o) => o.id}>
                 {(o) => <OrderApprovalCard order={o} />}
               </CappedList>
             );
           }
           if (active === "changes") {
             return (
-              <CappedList items={changesSorted} className={SCROLL_ROW} keyOf={(o) => o.id}>
+              <CappedList items={changesSorted} className={CARD_GRID} keyOf={(o) => o.id}>
                 {(o) => <OrderChangeCard change={o} />}
               </CappedList>
             );
           }
           return (
-            <CappedList items={purchaseOrders} className={SCROLL_ROW} keyOf={(p) => p.id}>
+            <CappedList items={purchaseOrders} className={CARD_GRID} keyOf={(p) => p.id}>
               {(p) => <PurchaseOrderCard po={p} viewerIsAdmin={viewerIsAdmin} />}
             </CappedList>
           );
@@ -111,9 +111,13 @@ export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseO
   );
 }
 
-// Horizontal scroll row — cards sit side by side and scroll sideways rather
-// than stacking, so a tall approval queue doesn't dominate the dashboard.
-const SCROLL_ROW = "flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin]";
+// Wrapping card grid — same language as the store / accounts boards. This
+// was a fixed-width horizontal scroll row, but a long queue then sized the
+// dashboard's auto grid track to its own max-content width (7 × 290px), so
+// the whole page overflowed sideways instead of the row scrolling on its
+// own. Wrapping means the queue can't outgrow the viewport, and the manager
+// never has to scroll sideways to find an approval.
+const CARD_GRID = "grid gap-3 sm:grid-cols-2 xl:grid-cols-3";
 
 function useApprove() {
   const router = useRouter();
@@ -138,7 +142,7 @@ function useApprove() {
   return { pending, run };
 }
 
-const CARD = "flex w-[290px] shrink-0 flex-col rounded-md p-3";
+const CARD = "flex flex-col rounded-md p-3";
 
 function OrderApprovalCard({ order }: { order: OrderToApprove }) {
   const { pending, run } = useApprove();
