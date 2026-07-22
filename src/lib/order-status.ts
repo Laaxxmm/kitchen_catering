@@ -34,6 +34,29 @@ export const REVISABLE_ORDER_STATUSES: OrderStatus[] = [
 ];
 
 /**
+ * Statuses an admin/manager may force straight to DELIVERED. The event
+ * really happened — food went out and the client was served — but the app
+ * was left mid-flow (a requisition never finished issuing, nobody tapped
+ * "ready", a delivery was never closed). Everything from chef sign-off to
+ * out-for-delivery qualifies.
+ *
+ * Deliberately excludes the approval stages: an order nobody ever approved
+ * was never a real event, so it should be cancelled, not billed. Terminal
+ * and already-billable states are excluded too — from DELIVERED onwards
+ * there is nothing to force. Shared between forceDeliverOrder's guard and
+ * the order page so the UI can't offer what the action would reject.
+ */
+export const FORCE_DELIVERABLE_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.CHEF_APPROVED,
+  OrderStatus.CHEF_REQUISITION_PENDING,
+  OrderStatus.ISSUING,
+  OrderStatus.READY_FOR_PRODUCTION,
+  OrderStatus.IN_PREP,
+  OrderStatus.READY,
+  OrderStatus.OUT_FOR_DELIVERY,
+];
+
+/**
  * Statuses in which a chef requisition — including a top-up after an upward
  * pax revision — can still be raised against an order. Shared between
  * createChefRequisition's guard and the order-page buttons so the UI can

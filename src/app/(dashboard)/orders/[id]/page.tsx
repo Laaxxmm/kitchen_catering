@@ -12,6 +12,7 @@ import {
   cancelOrder,
   chefApproveOrder,
   closeOrder,
+  forceDeliverOrder,
   getOrder,
   managerApproveChefSuggestion,
   submitOrder,
@@ -21,7 +22,11 @@ import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoic
 import { listDishes } from "@/server/actions/dishes";
 import { listAssignableUsers } from "@/server/actions/users";
 import { isEventDeliveryChannel, isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
-import { REQUISITION_ELIGIBLE_ORDER_STATUSES, REVISABLE_ORDER_STATUSES } from "@/lib/order-status";
+import {
+  FORCE_DELIVERABLE_ORDER_STATUSES,
+  REQUISITION_ELIGIBLE_ORDER_STATUSES,
+  REVISABLE_ORDER_STATUSES,
+} from "@/lib/order-status";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
@@ -184,6 +189,10 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   async function doClose() {
     "use server";
     return await closeOrder(id);
+  }
+  async function doForceDeliver(reason: string) {
+    "use server";
+    return await forceDeliverOrder(id, reason);
   }
   async function doGenerateInvoice() {
     "use server";
@@ -637,6 +646,22 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             </section>
           )}
 
+          {/* Admin/manager escape hatch for an order the team actually
+              completed while the paperwork stalled mid-flow. Skips the
+              remaining steps straight to Delivered so it can be invoiced,
+              and closes the open store/kitchen work behind it. */}
+          {(isAdmin || isManager) && FORCE_DELIVERABLE_ORDER_STATUSES.includes(order.status) && (
+            <ActionReasonForm
+              action={doForceDeliver}
+              heading="Mark as delivered (override)"
+              description="Use when the event was cooked and served but the order stalled here. Jumps it to Delivered so you can raise the invoice, and clears any open store or kitchen work for it."
+              placeholder="Why is this being forced through?"
+              submitLabel="Mark delivered"
+              successMessage="Order marked delivered — you can invoice it now"
+              tone="warning"
+            />
+          )}
+
           {(isAdmin || isManager) &&
             order.status !== OrderStatus.CANCELLED &&
             order.status !== OrderStatus.PAID &&
@@ -644,6 +669,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               <ActionReasonForm
                 action={doCancel}
                 heading="Cancel order"
+                description="Stops the event and closes any open store, kitchen and delivery work for it."
                 submitLabel="Cancel order"
                 successMessage="Order cancelled"
               />

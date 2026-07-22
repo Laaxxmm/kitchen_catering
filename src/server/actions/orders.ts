@@ -11,6 +11,7 @@ import {
   DeliveryStatus,
   OrderChannel,
   OrderStatus,
+  Prisma,
   ProductionJobItemStatus,
   ProductionJobStatus,
   Role,
@@ -36,7 +37,11 @@ import {
   OrderStoreApprovalInput,
   OrderUpdateInput,
 } from "@/lib/validators";
-import { REVISABLE_ORDER_STATUSES, STATUS_LABEL } from "@/lib/order-status";
+import {
+  FORCE_DELIVERABLE_ORDER_STATUSES,
+  REVISABLE_ORDER_STATUSES,
+  STATUS_LABEL,
+} from "@/lib/order-status";
 import { computeLine as computeGstLine } from "@/lib/gst";
 import {
   ActionError,
@@ -1230,6 +1235,145 @@ export async function managerOverrideStoreRejection(id: string, raw: unknown): P
   }
 }
 
+/**
+ * Close every open piece of downstream work hanging off an order —
+ * requisitions, production jobs + their items, deliveries, banquet
+ * requisitions (and the shortfall POs they spawned). Shared by
+ * {@link cancelOrder} and {@link forceDeliverOrder}: both end the order's
+ * live workflow, so both must clear the store / kitchen / delivery queues.
+ * Otherwise a dead order still shows a "hand over ingredients" request or a
+ * job to cook. Live vendor POs are collected, never cancelled — goods may
+ * already be inbound, so a human reviews them.
+ *
+ * Already-issued stock is not reversed; that's a manual stock-adjustment
+ * decision, separate from clearing the work queue.
+ */
+async function closeOpenOrderWork(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  userId: string,
+  reason: string,
+): Promise<{ closedRequisitions: number; banquetReqNos: string[]; reviewPoNos: string[] }> {
+    // Close any open downstream work so it drops off the store / kitchen /
+    // delivery queues — otherwise a cancelled order still shows a "hand over
+    // ingredients" request, a production job to cook, or a live delivery.
+    // (Already-issued stock isn't auto-reversed — that's a manual stock
+    // adjustment decision, separate from clearing the work queue.)
+    const openReqs = await tx.chefRequisition.findMany({
+      where: {
+        orderId,
+        status: {
+          in: [
+            ChefRequisitionStatus.DRAFT,
+            ChefRequisitionStatus.SUBMITTED,
+            ChefRequisitionStatus.PARTIALLY_ISSUED,
+          ],
+        },
+      },
+      select: { id: true },
+    });
+    if (openReqs.length > 0) {
+      const reqIds = openReqs.map((r) => r.id);
+      await tx.chefRequisitionLine.updateMany({
+        where: {
+          requisitionId: { in: reqIds },
+          status: {
+            in: [
+              ChefRequisitionLineStatus.PENDING,
+              ChefRequisitionLineStatus.PARTIALLY_ISSUED,
+              ChefRequisitionLineStatus.AWAITING_PROCUREMENT,
+            ],
+          },
+        },
+        data: { status: ChefRequisitionLineStatus.CANCELLED },
+      });
+      await tx.chefRequisition.updateMany({
+        where: { id: { in: reqIds } },
+        data: { status: ChefRequisitionStatus.CANCELLED },
+      });
+    }
+
+    // Cancel the open production items first, then the jobs themselves.
+    // Leaving non-terminal items live would let a stale kitchen tap flip the
+    // last one to READY and cascade the cancelled order back to life
+    // (READY items are kept as history, matching how the job is cancelled).
+    const orderJobs = await tx.productionJob.findMany({
+      where: { orderId },
+      select: { id: true },
+    });
+    if (orderJobs.length > 0) {
+      await tx.productionJobItem.updateMany({
+        where: {
+          jobId: { in: orderJobs.map((j) => j.id) },
+          status: { in: [ProductionJobItemStatus.QUEUED, ProductionJobItemStatus.IN_PROGRESS] },
+        },
+        data: { status: ProductionJobItemStatus.CANCELLED },
+      });
+    }
+
+    await tx.productionJob.updateMany({
+      where: {
+        orderId,
+        status: {
+          in: [
+            ProductionJobStatus.QUEUED,
+            ProductionJobStatus.PREP,
+            ProductionJobStatus.COOKING,
+            ProductionJobStatus.READY,
+          ],
+        },
+      },
+      data: { status: ProductionJobStatus.CANCELLED },
+    });
+
+    await tx.delivery.updateMany({
+      where: {
+        orderId,
+        status: {
+          in: [DeliveryStatus.SCHEDULED, DeliveryStatus.DISPATCHED, DeliveryStatus.IN_TRANSIT],
+        },
+      },
+      data: { status: DeliveryStatus.CANCELLED },
+    });
+
+    // H7(a): open banquet requisitions for this event — cancel them (and any
+    // shortfall PO their lines spawned) so cutlery isn't picked for a dead
+    // event. Same store-close line handling cancelBanquetRequisition uses.
+    const openBanquetReqs = await tx.banquetRequisition.findMany({
+      where: {
+        orderId,
+        status: {
+          in: [BanquetRequisitionStatus.SUBMITTED, BanquetRequisitionStatus.PARTIALLY_ISSUED],
+        },
+      },
+      select: { id: true },
+    });
+    const banquet = await cancelBanquetRequisitionsWithPOs(
+      tx,
+      openBanquetReqs.map((r) => r.id),
+      userId,
+      reason,
+    );
+
+    // H7(b): live vendor POs linked directly to this order — do NOT cancel
+    // (goods may already be inbound), just collect them to notify for review.
+    const orderPOs = await tx.vendorPO.findMany({
+      where: {
+        orderId,
+        status: {
+          notIn: [VendorPOStatus.CANCELLED, VendorPOStatus.CLOSED, VendorPOStatus.RECEIVED],
+        },
+      },
+      select: { poNo: true },
+    });
+
+  return {
+    closedRequisitions: openReqs.length,
+    banquetReqNos: banquet.requisitionNos,
+    reviewPoNos: [...orderPOs.map((p) => p.poNo), ...banquet.reviewPoNos],
+  };
+}
+
 export async function cancelOrder(id: string, reason: string): Promise<ActionResult> {
   try {
     return await cancelOrderInner(id, reason);
@@ -1267,118 +1411,7 @@ async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true 
       select: { code: true },
     }))!;
 
-    // Close any open downstream work so it drops off the store / kitchen /
-    // delivery queues — otherwise a cancelled order still shows a "hand over
-    // ingredients" request, a production job to cook, or a live delivery.
-    // (Already-issued stock isn't auto-reversed — that's a manual stock
-    // adjustment decision, separate from clearing the work queue.)
-    const openReqs = await tx.chefRequisition.findMany({
-      where: {
-        orderId: id,
-        status: {
-          in: [
-            ChefRequisitionStatus.DRAFT,
-            ChefRequisitionStatus.SUBMITTED,
-            ChefRequisitionStatus.PARTIALLY_ISSUED,
-          ],
-        },
-      },
-      select: { id: true },
-    });
-    if (openReqs.length > 0) {
-      const reqIds = openReqs.map((r) => r.id);
-      await tx.chefRequisitionLine.updateMany({
-        where: {
-          requisitionId: { in: reqIds },
-          status: {
-            in: [
-              ChefRequisitionLineStatus.PENDING,
-              ChefRequisitionLineStatus.PARTIALLY_ISSUED,
-              ChefRequisitionLineStatus.AWAITING_PROCUREMENT,
-            ],
-          },
-        },
-        data: { status: ChefRequisitionLineStatus.CANCELLED },
-      });
-      await tx.chefRequisition.updateMany({
-        where: { id: { in: reqIds } },
-        data: { status: ChefRequisitionStatus.CANCELLED },
-      });
-    }
-
-    // Cancel the open production items first, then the jobs themselves.
-    // Leaving non-terminal items live would let a stale kitchen tap flip the
-    // last one to READY and cascade the cancelled order back to life
-    // (READY items are kept as history, matching how the job is cancelled).
-    const orderJobs = await tx.productionJob.findMany({
-      where: { orderId: id },
-      select: { id: true },
-    });
-    if (orderJobs.length > 0) {
-      await tx.productionJobItem.updateMany({
-        where: {
-          jobId: { in: orderJobs.map((j) => j.id) },
-          status: { in: [ProductionJobItemStatus.QUEUED, ProductionJobItemStatus.IN_PROGRESS] },
-        },
-        data: { status: ProductionJobItemStatus.CANCELLED },
-      });
-    }
-
-    await tx.productionJob.updateMany({
-      where: {
-        orderId: id,
-        status: {
-          in: [
-            ProductionJobStatus.QUEUED,
-            ProductionJobStatus.PREP,
-            ProductionJobStatus.COOKING,
-            ProductionJobStatus.READY,
-          ],
-        },
-      },
-      data: { status: ProductionJobStatus.CANCELLED },
-    });
-
-    await tx.delivery.updateMany({
-      where: {
-        orderId: id,
-        status: {
-          in: [DeliveryStatus.SCHEDULED, DeliveryStatus.DISPATCHED, DeliveryStatus.IN_TRANSIT],
-        },
-      },
-      data: { status: DeliveryStatus.CANCELLED },
-    });
-
-    // H7(a): open banquet requisitions for this event — cancel them (and any
-    // shortfall PO their lines spawned) so cutlery isn't picked for a dead
-    // event. Same store-close line handling cancelBanquetRequisition uses.
-    const openBanquetReqs = await tx.banquetRequisition.findMany({
-      where: {
-        orderId: id,
-        status: {
-          in: [BanquetRequisitionStatus.SUBMITTED, BanquetRequisitionStatus.PARTIALLY_ISSUED],
-        },
-      },
-      select: { id: true },
-    });
-    const banquet = await cancelBanquetRequisitionsWithPOs(
-      tx,
-      openBanquetReqs.map((r) => r.id),
-      session.user.id,
-      reason.trim(),
-    );
-
-    // H7(b): live vendor POs linked directly to this order — do NOT cancel
-    // (goods may already be inbound), just collect them to notify for review.
-    const orderPOs = await tx.vendorPO.findMany({
-      where: {
-        orderId: id,
-        status: {
-          notIn: [VendorPOStatus.CANCELLED, VendorPOStatus.CLOSED, VendorPOStatus.RECEIVED],
-        },
-      },
-      select: { poNo: true },
-    });
+    const closed = await closeOpenOrderWork(tx, id, session.user.id, reason.trim());
 
     await tx.auditLog.create({
       data: {
@@ -1388,18 +1421,18 @@ async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true 
         entityId: id,
         payloadHash: sha256Json({
           reason,
-          closedRequisitions: openReqs.length,
-          closedBanquetRequisitions: banquet.requisitionNos.length,
-          linkedPOsToReview: orderPOs.length,
+          closedRequisitions: closed.closedRequisitions,
+          closedBanquetRequisitions: closed.banquetReqNos.length,
+          linkedPOsToReview: closed.reviewPoNos.length,
         }),
       },
     });
     return {
       orderCode,
-      banquetReqNos: banquet.requisitionNos,
       // POs to review: order-linked (H7b) + banquet shortfall POs already in
       // flight that couldn't be auto-cancelled (M17-style).
-      reviewPoNos: [...orderPOs.map((p) => p.poNo), ...banquet.reviewPoNos],
+      banquetReqNos: closed.banquetReqNos,
+      reviewPoNos: closed.reviewPoNos,
     };
   });
 
@@ -1435,6 +1468,92 @@ async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true 
   revalidatePath("/deliveries");
   revalidatePath("/banquet/requisitions");
   revalidatePath("/procurement/purchase-orders");
+  return { ok: true };
+}
+
+/**
+ * Admin/manager override: mark a stuck order as cooked and delivered so it
+ * can be invoiced. The escape hatch for orders the team completed in real
+ * life while the paperwork stalled somewhere in the middle — without it the
+ * only way out is cancelling an event that actually earned revenue.
+ *
+ * Closes the same downstream work {@link cancelOrder} does, so the store and
+ * kitchen boards don't keep showing jobs for an order that's already been
+ * served. Requires a reason, which lands in the audit log — this skips the
+ * normal controls, so it has to be traceable.
+ */
+export async function forceDeliverOrder(id: string, reason: string): Promise<ActionResult> {
+  try {
+    return await forceDeliverOrderInner(id, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function forceDeliverOrderInner(id: string, reason: string): Promise<{ ok: true }> {
+  const session = await requireRole(ORDER_MANAGER_ROLES);
+  if (!reason.trim()) throw new ActionError("A reason is required to force an order through.");
+
+  const cascade = await db.$transaction(async (tx) => {
+    // Guarded transition — a concurrent override, cancel or genuine
+    // delivery matches zero rows and we report the real status back.
+    const updated = await tx.order.updateMany({
+      where: { id, status: { in: FORCE_DELIVERABLE_ORDER_STATUSES } },
+      data: { status: OrderStatus.DELIVERED },
+    });
+    if (updated.count === 0) {
+      const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
+      if (!order) throw new ActionError("Order not found");
+      if (order.status === OrderStatus.CANCELLED) {
+        throw new ActionError("This order is cancelled — it can't be marked delivered.");
+      }
+      throw new ActionError(
+        `Order is ${STATUS_LABEL[order.status].toLowerCase()} — there's nothing to force. It's already past delivery.`,
+      );
+    }
+    const { code: orderCode } = (await tx.order.findUnique({
+      where: { id },
+      select: { code: true },
+    }))!;
+
+    const closed = await closeOpenOrderWork(tx, id, session.user.id, reason.trim());
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "ORDER_FORCE_DELIVERED",
+        entity: "Order",
+        entityId: id,
+        payloadHash: sha256Json({
+          reason: reason.trim(),
+          closedRequisitions: closed.closedRequisitions,
+          closedBanquetRequisitions: closed.banquetReqNos.length,
+          linkedPOsToReview: closed.reviewPoNos.length,
+        }),
+      },
+    });
+    return { orderCode, reviewPoNos: closed.reviewPoNos };
+  });
+
+  // Linked POs stay live (goods may be inbound) — flag them for a human.
+  if (cascade.reviewPoNos.length > 0) {
+    deferAfterResponse("order-force-deliver:po-notify", () =>
+      notifyRoles([Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER], {
+        kind: "GENERIC",
+        title: `${cascade.orderCode} closed — review purchase order ${cascade.reviewPoNos.join(", ")}`,
+        body: `Order ${cascade.orderCode} was marked delivered by override — review linked purchase order ${cascade.reviewPoNos.join(", ")}.`,
+        link: "/procurement/purchase-orders",
+        dedupeKey: `order-force-deliver-po:${id}`,
+      }),
+    );
+  }
+
+  revalidatePath(`/orders/${id}`);
+  revalidatePath("/orders");
+  revalidatePath("/dashboard");
+  revalidatePath("/requisitions");
+  revalidatePath("/kitchen");
+  revalidatePath("/deliveries");
+  revalidatePath("/banquet/requisitions");
   return { ok: true };
 }
 
