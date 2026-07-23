@@ -1,31 +1,18 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Fraunces, IBM_Plex_Mono } from "next/font/google";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 
-// Body / UI / data — Inter (self-hosted via next/font, no layout shift).
-// Exposed as --font-ik-sans (kept for back-compat) and aliased to --font-sans
-// in globals.css.
-const inter = Inter({
+// One family for the whole app — Plus Jakarta Sans (friendly-professional
+// geometric sans). Drives --font-ik-sans; globals.css aliases the old
+// --font-serif and --font-ik-mono variables to it, so every `font-serif` /
+// `font-mono` call site (headings, codes, money) resolves here too without
+// touching 465 usages. Numbers keep column alignment via tabular-nums on the
+// mono utility rather than a monospace face — see globals.css.
+const jakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700", "800"],
   variable: "--font-ik-sans",
-  display: "swap",
-});
-
-// Headings / display / the one Total figure — Fraunces (variable, optical
-// sizing on). Exposed as --font-serif.
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  variable: "--font-serif",
-  display: "swap",
-  axes: ["opsz"],
-});
-
-const plexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-ik-mono",
   display: "swap",
 });
 
@@ -65,7 +52,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${fraunces.variable} ${plexMono.variable}`}
+      className={jakarta.variable}
       suppressHydrationWarning
     >
       <body className="min-h-screen bg-background text-foreground antialiased" suppressHydrationWarning>

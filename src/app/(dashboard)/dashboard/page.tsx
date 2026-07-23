@@ -5,7 +5,7 @@ import { LauncherGreeting } from "@/components/ik/dashboard/LauncherGreeting";
 import { auth } from "@/server/auth";
 import { getDashboardSummary } from "@/server/actions/dashboard";
 import { AttentionBanner } from "@/components/ik/dashboard/launcher/AttentionBanner";
-import { TaskTiles, type TaskTile } from "@/components/ik/dashboard/launcher/TaskTiles";
+import { KpiCard, type KpiCardData } from "@/components/ik/dashboard/launcher/KpiCard";
 import { StoresStrip } from "@/components/ik/dashboard/launcher/StoresStrip";
 import { MoreActionsMenu } from "@/components/ik/dashboard/launcher/MoreActionsMenu";
 import { MyTasksPanel } from "@/components/ik/dashboard/MyTasksPanel";
@@ -625,15 +625,43 @@ export default async function DashboardPage({
 
   const kWait = summary.kitchen?.waitingOnStore ?? 0;
   const billsToAction = needMatch + needPay;
-  const tiles: TaskTile[] = [
-    needApproval > 0
-      ? { key: "orders", icon: "orders", label: "Orders", status: `${needApproval} to approve`, href: "/queue/admin-approvals", tone: "red" }
-      : { key: "orders", icon: "orders", label: "Orders", status: `${summary.dueOrders} due`, href: "/orders" },
-    { key: "kitchen", icon: "kitchen", label: "Kitchen", status: `${kWait} waiting on stock`, href: "/kitchen", tone: kWait > 0 ? "amber" : "default" },
-    { key: "stock", icon: "stock", label: "Stock", status: `${needReorder} to reorder`, href: "/inventory/ingredients", tone: needReorder > 0 ? "red" : "default" },
-    { key: "bills", icon: "bills", label: "Bills & pay", status: `${billsToAction} to action`, href: "/payments", tone: billsToAction > 0 ? "amber" : "default" },
-    { key: "customers", icon: "customers", label: "Customers", status: "Quotes & contacts", href: "/customers" },
-    { key: "deliveries", icon: "deliveries", label: "Deliveries", status: `${summary.deliveredToday} delivered today`, href: "/deliveries" },
+
+  // Orders pipeline, split into the three states the manager cares about.
+  // Counts come from the order-status groupBy already computed in the summary.
+  const sc = summary.stageCounts ?? {};
+  const ordersApproval =
+    (sc[OrderStatus.PENDING_ADMIN_APPROVAL] ?? 0) +
+    (sc[OrderStatus.PENDING_CHEF_APPROVAL] ?? 0) +
+    (sc[OrderStatus.CHANGES_PROPOSED_BY_CHEF] ?? 0);
+  const ordersProduction =
+    (sc[OrderStatus.CHEF_REQUISITION_PENDING] ?? 0) +
+    (sc[OrderStatus.ISSUING] ?? 0) +
+    (sc[OrderStatus.READY_FOR_PRODUCTION] ?? 0) +
+    (sc[OrderStatus.IN_PREP] ?? 0) +
+    (sc[OrderStatus.READY] ?? 0) +
+    (sc[OrderStatus.OUT_FOR_DELIVERY] ?? 0);
+  const ordersDone = (sc[OrderStatus.DELIVERED] ?? 0) + (sc[OrderStatus.INVOICED] ?? 0);
+  const ordersInPlay = ordersApproval + ordersProduction + ordersDone;
+
+  const kpis: KpiCardData[] = [
+    {
+      key: "orders",
+      icon: "orders",
+      label: "Orders",
+      href: "/orders",
+      hero: ordersInPlay,
+      heroSub: "orders in play",
+      segments: [
+        { label: "Approval", value: ordersApproval, tone: "approval" },
+        { label: "In production", value: ordersProduction, tone: "production" },
+        { label: "Completed", value: ordersDone, tone: "done" },
+      ],
+    },
+    { key: "kitchen", icon: "kitchen", label: "Kitchen", href: "/kitchen", hero: kWait, heroSub: "waiting on stock", heroTone: kWait > 0 ? "amber" : "muted" },
+    { key: "stock", icon: "stock", label: "Stock", href: "/inventory/ingredients", hero: needReorder, heroSub: "to reorder", heroTone: needReorder > 0 ? "red" : "muted" },
+    { key: "bills", icon: "bills", label: "Bills & pay", href: "/payments", hero: billsToAction, heroSub: "to action", heroTone: billsToAction > 0 ? "amber" : "muted" },
+    { key: "deliveries", icon: "deliveries", label: "Deliveries", href: "/deliveries", hero: summary.deliveredToday, heroSub: "delivered today" },
+    { key: "customers", icon: "customers", label: "Customers", href: "/customers", heroSub: "Quotes & contacts" },
   ];
   const moreActions = [
     { label: "Draft quote", href: "/quotes/new" },
@@ -712,19 +740,32 @@ export default async function DashboardPage({
             asks). Hidden when the user has no tasks. */}
         <MyTasksPanel />
 
-        {/* 4 ─ Task tiles — the launcher's main grid */}
-        <TaskTiles tiles={tiles} />
+        {/* 4 ─ KPI cards — big figures, Orders carries the 3-way pipeline bar */}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          {kpis.map((k) => (
+            <KpiCard key={k.key} data={k} />
+          ))}
+        </div>
 
         {/* 5 ─ Stores strip — lighter reference row */}
         <StoresStrip />
 
-        {/* 6 ─ Money this month — one quiet strip at the bottom */}
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-ik-rule bg-ik-paper-alt p-4">
-          <span className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Money this month</span>
-          <div className="flex flex-wrap gap-x-6 gap-y-1 font-mono text-[13px]">
-            <span><span className="text-ik-ink-3">In </span><span className="text-positive">{formatINRWhole(summary.ar?.collectedThisMonth ?? 0)}</span></span>
-            <span><span className="text-ik-ink-3">Out </span><span className="text-ik-ink">{formatINRWhole(summary.ap?.paidThisMonth ?? 0)}</span></span>
-            <span><span className="text-ik-ink-3">Due </span><span className="text-alert">{formatINRWhole(summary.ar?.pending ?? summary.outstandingAR)}</span></span>
+        {/* 6 ─ Money this month — three big figures */}
+        <section className="rounded-2xl border border-ik-rule bg-ik-card p-5">
+          <h2 className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Money this month</h2>
+          <div className="mt-3 grid grid-cols-3 gap-4">
+            {[
+              { label: "In", value: summary.ar?.collectedThisMonth ?? 0, cls: "text-brand-700" },
+              { label: "Out", value: summary.ap?.paidThisMonth ?? 0, cls: "text-ik-ink" },
+              { label: "Due", value: summary.ar?.pending ?? summary.outstandingAR, cls: "text-alert" },
+            ].map((m) => (
+              <div key={m.label}>
+                <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">{m.label}</div>
+                <div className={"mt-1 text-[clamp(20px,3.2vw,30px)] font-bold leading-none tracking-tight tabular-nums " + m.cls}>
+                  {formatINRWhole(m.value)}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       </div>

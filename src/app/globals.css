@@ -66,8 +66,14 @@
     --info: 210 75% 37%;                 /* #185FA5 */
     --info-wash: 210 80% 95%;            /* #E6F1FB */
 
-    /* Fonts (aliases — Inter is the sans, Fraunces the serif) */
+    /* Fonts — one family (Plus Jakarta Sans) drives everything. The old
+       serif/mono variables are aliased to it so every `font-serif` /
+       `font-mono` call site resolves to Jakarta without edits. Numeric
+       columns keep alignment through tabular-nums on the mono utility
+       below, not a monospace face. */
     --font-sans: var(--font-ik-sans);
+    --font-serif: var(--font-ik-sans);
+    --font-ik-mono: var(--font-ik-sans);
 
     /* ─── Raw IK tokens for inline styles (SVGs, dynamic) ────── */
     /* These drive BOTH inline `IK.*` styles and the Tailwind `ik-*`/`brand`
@@ -246,6 +252,15 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* `font-mono` now resolves to the proportional Jakarta face, so digits no
+     longer line up by default. Everything previously tagged mono did so for
+     numeric alignment (codes, money, quantities) — restore it with tabular
+     figures wherever the mono utilities are used. */
+  .font-mono, code, kbd, samp, pre,
+  .ik-code, .code-chip, .ik-eyebrow, .ik-caps, .eyebrow {
+    font-variant-numeric: tabular-nums;
+  }
+
   /* ─── Emerald & Gold premium primitives ──────────────────────── */
   /* Serif for section headers + the one Total figure. */
   .font-serif, .ik-serif {
@@ -283,6 +298,14 @@
     font-size: 11px;
     font-weight: 500;
     color: var(--ik-accent-ink);
+  }
+
+  /* Left-nav item: soft hover for non-active rows (active rows carry their
+     own inline wash, so this only lights up the resting rows on hover). */
+  .ik-nav-item { transition: background-color .12s, color .12s; }
+  .ik-nav-item:not([data-active]):hover {
+    background-color: var(--ik-paper-alt);
+    color: var(--ik-ink);
   }
 
   /* ─── Shell rules (1px hairlines) ────────────────────────────── */

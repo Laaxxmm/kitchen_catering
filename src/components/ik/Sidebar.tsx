@@ -70,24 +70,24 @@ export function Sidebar({ userName, userRole, badges, footer }: SidebarProps) {
         key={item.key}
         href={item.href}
         title={collapsed ? item.label : undefined}
+        className="ik-nav-item"
+        data-active={active ? "" : undefined}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 10,
           width: "100%",
-          padding: collapsed ? "8px 9px" : "7px 10px",
-          fontFamily: "var(--font-ik-sans), Inter Tight, system-ui, sans-serif",
-          fontSize: 13,
+          padding: collapsed ? "9px 9px" : "8px 11px",
+          fontSize: 13.5,
           fontWeight: active ? 600 : 500,
           color: active ? IK.accentInk : IK.ink2,
           background: active ? IK.accentWash : "transparent",
-          borderRadius: 4,
+          borderRadius: 10,
           textDecoration: "none",
-          marginBottom: 1,
-          borderLeft: active ? `2px solid ${IK.accent}` : "2px solid transparent",
+          marginBottom: 2,
         }}
       >
-        <Icon name={item.icon} size={15} />
+        <Icon name={item.icon} size={16} />
         {!collapsed && <span style={{ flex: 1 }}>{item.label}</span>}
       </Link>
     );
@@ -245,12 +245,11 @@ export function Sidebar({ userName, userRole, badges, footer }: SidebarProps) {
                   background: "transparent",
                   border: "none",
                   cursor: "pointer",
-                  fontFamily: "var(--font-ik-mono), ui-monospace, monospace",
-                  fontSize: 9.5,
+                  fontSize: 10.5,
                   color: IK.ink3,
-                  letterSpacing: ".12em",
+                  letterSpacing: ".07em",
                   textTransform: "uppercase",
-                  fontWeight: 600,
+                  fontWeight: 700,
                   textAlign: "left",
                 }}
               >
@@ -258,9 +257,11 @@ export function Sidebar({ userName, userRole, badges, footer }: SidebarProps) {
                 {badge && (
                   <span
                     style={{
-                      fontFamily: "var(--font-ik-mono), ui-monospace, monospace",
-                      fontSize: 9.5,
-                      padding: "1px 5px",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      minWidth: 18,
+                      textAlign: "center",
+                      padding: "1px 6px",
                       borderRadius: 999,
                       background: badge.tone === "red" ? IK.alertWash : IK.amberWash,
                       color: badge.tone === "red" ? IK.alert : IK.amber,
@@ -269,7 +270,18 @@ export function Sidebar({ userName, userRole, badges, footer }: SidebarProps) {
                     {badge.count}
                   </span>
                 )}
-                <span style={{ color: IK.ink4, fontSize: 11 }}>{open ? "▾" : "▸"}</span>
+                <span
+                  style={{
+                    color: IK.ink4,
+                    fontSize: 15,
+                    lineHeight: 1,
+                    display: "inline-flex",
+                    transform: open ? "rotate(90deg)" : "none",
+                    transition: "transform .15s",
+                  }}
+                >
+                  ›
+                </span>
               </button>
               {open && <div>{g.items.map(renderItem)}</div>}
             </div>
