@@ -85,7 +85,7 @@ export function ReviewControls({
 
   if (status === "SUBMITTED") {
     return (
-      <div className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
+      <div className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="text-[12px] font-medium text-ik-ink-2">Review submission</div>
         {mode === "reject" ? (
           <>
@@ -131,7 +131,7 @@ export function ReviewControls({
 
   // ASSIGNED or REJECTED — assigner can cancel.
   return (
-    <div className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
+    <div className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
       <div className="text-[12px] font-medium text-ik-ink-2">Assigner controls</div>
       {mode === "cancel" ? (
         <>

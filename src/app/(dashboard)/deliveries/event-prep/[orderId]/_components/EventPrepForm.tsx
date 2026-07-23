@@ -136,7 +136,7 @@ export function EventPrepForm({ order, items, ledger }: { order: Order; items: I
   return (
     <div className="grid max-w-3xl gap-4">
       {/* Event summary */}
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div>
             <span className="font-mono text-[12.5px] text-brand-700">{order.code}</span>
@@ -155,7 +155,7 @@ export function EventPrepForm({ order, items, ledger }: { order: Order; items: I
 
       {/* Cutlery ledger — what's out with this client */}
       {hasIssues && (
-        <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+        <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div className="text-[12px] font-medium text-ik-ink-2">Cutlery out with this client</div>
             {anyOutstanding ? (
@@ -217,7 +217,7 @@ export function EventPrepForm({ order, items, ledger }: { order: Order; items: I
       )}
 
       {/* Choose + issue cutlery */}
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="text-[12px] font-medium text-ik-ink-2">Cutlery &amp; arrangements needed</div>
           <div className="flex items-center gap-2">

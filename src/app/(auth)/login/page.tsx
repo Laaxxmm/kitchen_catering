@@ -121,7 +121,7 @@ export default async function LoginPage({
               </div>
             </div>
 
-            <div className="rounded-[14px] border border-ik-rule bg-ik-card p-6 shadow-card">
+            <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-6 shadow-card">
               <div className="mb-5">
                 <div className="ik-eyebrow">Welcome back</div>
                 <h2 className="mt-1 font-ik-sans text-[22px] font-medium tracking-[-0.025em] text-ik-ink">

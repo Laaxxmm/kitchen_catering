@@ -186,7 +186,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
               }))}
             />
           ) : (
-          <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Lines</h3>
             <Table>
               <TableHeader>
@@ -250,7 +250,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
           )}
 
           {po.grns.length > 0 && (
-            <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+            <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
               <h3 className="mb-2 font-medium text-[14px] text-ik-ink">GRNs</h3>
               <ul className="grid gap-1 text-[13px]">
                 {po.grns.map((g) => (
@@ -260,7 +260,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
             </div>
           )}
           {po.bills.length > 0 && (
-            <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+            <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
               <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Vendor bills</h3>
               <ul className="grid gap-1 text-[13px]">
                 {po.bills.map((b) => (
@@ -272,7 +272,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
         </section>
 
         <aside className="grid gap-4 text-[13px]">
-          <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Vendor</h3>
             <div><Link href={`/procurement/vendors/${po.vendor.id}`} className="text-brand hover:underline">{po.vendor.name}</Link></div>
             <div className="font-mono text-[12px] text-ik-ink-2">{po.vendor.code}</div>

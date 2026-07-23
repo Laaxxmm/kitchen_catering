@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 function KPI({ label, value, tone, sub }: { label: string; value: string; tone?: "positive" | "alert" | "neutral"; sub?: string }) {
   const colour = tone === "positive" ? "text-positive" : tone === "alert" ? "text-alert" : "text-ik-ink";
   return (
-    <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+    <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
       <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">{label}</div>
       <div className={`mt-1 font-mono text-[22px] ${colour}`}>{value}</div>
       {sub && <div className="text-[11.5px] text-ik-ink-3">{sub}</div>}
@@ -49,7 +49,7 @@ export default async function OrderPnLPage({ params }: { params: Promise<{ id: s
         <KPI label="Gross margin" value={`${pnl.grossMarginPct.toString()}%`} tone={marginTone} />
       </div>
 
-      <section className="mb-6 rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="mb-6 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Cost composition</h3>
         {(() => {
           const total = pnl.totalCost.toNumber();

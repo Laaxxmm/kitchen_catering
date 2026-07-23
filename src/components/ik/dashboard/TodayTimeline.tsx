@@ -70,7 +70,7 @@ function istHourFraction(iso: string): number {
 export function TodayTimeline({ orders }: Props) {
   if (orders.length === 0) {
     return (
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="mb-1 text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Today&apos;s orders</div>
         <p className="mt-2 text-[12.5px] text-ik-ink-3">No orders scheduled for today.</p>
       </section>
@@ -81,7 +81,7 @@ export function TodayTimeline({ orders }: Props) {
   const ticks = [6, 9, 12, 15, 18, 21]; // 6am, 9, noon, 3pm, 6pm, 9pm
 
   return (
-    <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+    <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
       <div className="mb-3 flex items-baseline justify-between">
         <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Today&apos;s orders</div>
         <div className="text-[11.5px] text-ik-ink-3">{orders.length} scheduled · 6 AM–11 PM IST</div>

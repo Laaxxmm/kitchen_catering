@@ -19,7 +19,7 @@ export default async function MobileDeliveriesPage() {
       <p className="mb-4 text-[12.5px] text-ik-ink-3">Active deliveries assigned to you. Tap a card to dispatch / arrive / confirm OTP.</p>
 
       {deliveries.length === 0 ? (
-        <p className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px] text-ik-ink-3">
+        <p className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px] text-ik-ink-3">
           No active deliveries. New ones will show up here automatically.
         </p>
       ) : (

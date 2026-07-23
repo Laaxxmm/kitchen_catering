@@ -327,7 +327,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           {/* Kitchen → delivery handover checklist — per-dish ticks so a
               late dish is attributable to the kitchen, not the driver. */}
           {showHandoverChecklist && productionJob && (
-            <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+            <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
               <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Handover to delivery</h3>
               <p className="mb-2 text-[11.5px] text-ik-ink-3">
                 Tick each dish the moment it&apos;s physically handed to the delivery team. The
@@ -342,7 +342,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           )}
 
           {/* Decision history */}
-          <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Decision history</h3>
             <ol className="grid gap-2 text-[12.5px]">
               <li>
@@ -427,7 +427,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
 
           {/* Items — pricing columns hidden for the chef, who only needs
               dish name + portions to plan production. */}
-          <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">
               {chefOnlyView ? "Items to prepare" : "Items"}
             </h3>
@@ -439,7 +439,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               const packageMode = isPackagePricedChannel(order.channel);
               if (packageMode) {
                 return (
-                  <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+                  <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
                     <p className="mb-3 text-[12px] text-ik-ink-3">
                       {{ BANQUET: "Banquet", BUFFET: "Buffet", ODC: "Outdoor catering", PACKET: "Packet food" }[order.channel as string] ?? order.channel}{" "}
                       package — items included, no per-item pricing:
@@ -525,7 +525,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           )}
 
           {/* Chef requisition block */}
-          <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Chef requisitions</h3>
             {order.chefRequisitions.length === 0 ? (
               <p className="text-[12.5px] text-ik-ink-3">No requisitions yet.</p>
@@ -557,7 +557,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
 
         {/* Sidebar */}
         <aside className="grid gap-4">
-          <section className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+          <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Delivery</h3>
             <div className="grid gap-1">
               <div><span className="text-ik-ink-3">Address:</span> {order.deliveryAddress}</div>
@@ -572,7 +572,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           {/* Serving staff — the named F&B crew allocated to run the event.
               Visible to every role that can open the page; editable by
               admin / manager / F&B service / delivery. */}
-          <section className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+          <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Serving staff</h3>
             {order.staffAllocations.length === 0 && !canAllocateStaff && (
               <p className="text-[12.5px] text-ik-ink-3">No staff allocated yet.</p>
@@ -587,7 +587,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           {/* Leftovers returned — counter-sale / ODC only. A traceability log
               of surplus food and where it went; no stock movement. */}
           {showLeftovers && (
-            <section className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+            <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
               <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Leftovers returned</h3>
               {order.leftoverReturns.length === 0 && !canAllocateStaff && (
                 <p className="text-[12.5px] text-ik-ink-3">No leftovers logged.</p>
@@ -607,7 +607,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             </section>
           )}
 
-          <section className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+          <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Customer</h3>
             <div className="grid gap-1">
               {chefOnlyView ? (
@@ -635,7 +635,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           </section>
 
           {(isAdmin || isManager) && order.status === OrderStatus.PAID && (
-            <section className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+            <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
               <h3 className="mb-1 font-medium text-[14px] text-ik-ink">Close order</h3>
               <p className="mb-3 text-ik-ink-2">
                 Payment is settled. Close the order to move it to Completed.

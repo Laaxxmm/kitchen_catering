@@ -165,7 +165,7 @@ export function ChefWorkScreen({ orders }: Props) {
 
       {/* Orders in the selected stage. */}
       {activeOrders.length === 0 ? (
-        <div className="rounded-md border border-ik-rule bg-ik-card p-5 text-[13px] text-ik-ink-2">
+        <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-5 text-[13px] text-ik-ink-2">
           Nothing in <strong>{activeTab.label}</strong> right now.
         </div>
       ) : (

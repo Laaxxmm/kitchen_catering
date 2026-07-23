@@ -47,7 +47,7 @@ export function FeedbackAllocation({ orderId, canAllocate, assigneeName, rating,
   }
 
   return (
-    <div className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+    <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
       <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Customer feedback</h3>
 
       {rating != null ? (

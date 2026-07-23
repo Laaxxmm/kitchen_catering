@@ -107,7 +107,7 @@ export function ActivityForm({
 
   return (
     <div className="grid max-w-4xl gap-4">
-      <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="grid gap-1.5">
             <Label htmlFor="performedAt">Performed at</Label>
@@ -159,7 +159,7 @@ export function ActivityForm({
         </div>
       </section>
 
-      <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="flex items-center justify-between">
           <div className="text-[12px] font-medium text-ik-ink-2">Spares used (optional)</div>
           <Button size="sm" variant="outline" onClick={addLine}>+ Add item</Button>

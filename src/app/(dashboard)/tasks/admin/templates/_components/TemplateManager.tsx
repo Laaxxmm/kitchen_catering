@@ -100,7 +100,7 @@ export function TemplateManager({ templates }: { templates: Template[] }) {
 
   return (
     <div className="grid gap-5">
-      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Add preset</h3>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="grid gap-1.5">

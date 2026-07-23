@@ -37,7 +37,7 @@ export function ReportDownloads() {
 
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
+      <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="grid gap-1">
           <label htmlFor="from" className="text-[11.5px] text-ik-ink-2">From</label>
           <input id="from" type="date" value={from} onChange={(e) => setFrom(e.target.value)}
@@ -55,7 +55,7 @@ export function ReportDownloads() {
 
       <div className="grid gap-3 sm:grid-cols-2 max-w-3xl">
         {REPORTS.map((r) => (
-          <div key={r.key} className="flex flex-col justify-between gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
+          <div key={r.key} className="flex flex-col justify-between gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
             <div>
               <div className="font-medium text-[14px] text-ik-ink">{r.title}</div>
               <div className="mt-1 text-[12.5px] text-ik-ink-2">{r.desc}</div>

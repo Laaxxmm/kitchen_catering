@@ -57,7 +57,7 @@ export function InvoiceBankDetailsCard({
   }
 
   return (
-    <form onSubmit={submit} className="rounded-md border border-ik-rule bg-ik-card p-4 max-w-2xl">
+    <form onSubmit={submit} className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 max-w-2xl">
       <h3 className="mb-1 font-medium text-[14px] text-ik-ink">Invoice bank details</h3>
       <p className="mb-3 text-[12px] text-ik-ink-3">
         Printed in the &quot;Payment details&quot; box on customer invoice PDFs. Leave all fields

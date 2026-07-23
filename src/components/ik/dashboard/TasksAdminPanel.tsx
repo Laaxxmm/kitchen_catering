@@ -27,7 +27,7 @@ export async function TasksAdminPanel() {
   // create the first task instead of waiting for the panel to appear.
   if (!hasAny) {
     return (
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-[12px] font-medium text-ik-ink-2">Team tasks</div>

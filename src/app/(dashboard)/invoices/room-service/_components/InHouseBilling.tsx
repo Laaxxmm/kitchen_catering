@@ -136,7 +136,7 @@ export function InHouseBilling({
           const total = selected.reduce((s, o) => s.plus(new Decimal(o.total)), new Decimal(0));
           const busy = pending && busyKey === f.key;
           return (
-            <section key={f.key} className="rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+            <section key={f.key} className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
               <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <h3 className="ik-accent-bar font-serif text-[16px] text-brand-700">{f.title}</h3>

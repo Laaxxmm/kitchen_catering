@@ -72,7 +72,7 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
 
   return (
     <form onSubmit={submit} className="grid gap-4">
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Lines</h3>
         <div className="overflow-x-auto">
         <table className="w-full text-[12.5px]">

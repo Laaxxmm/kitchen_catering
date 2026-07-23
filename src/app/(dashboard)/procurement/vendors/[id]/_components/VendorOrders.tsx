@@ -67,7 +67,7 @@ export function VendorOrders({ pos }: { pos: VendorPORow[] }) {
       </div>
 
       {rows.length === 0 ? (
-        <p className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px] text-ik-ink-3">No purchase orders in this filter.</p>
+        <p className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px] text-ik-ink-3">No purchase orders in this filter.</p>
       ) : (
         <Table>
           <TableHeader>

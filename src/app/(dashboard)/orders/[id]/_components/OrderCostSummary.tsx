@@ -32,7 +32,7 @@ export async function OrderCostSummary({ orderId }: Props) {
   } catch (err) {
     console.error("OrderCostSummary: P&L failed", err);
     return (
-      <div className="rounded-md border border-ik-rule bg-ik-card p-4 text-[12.5px] text-ik-ink-3">
+      <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[12.5px] text-ik-ink-3">
         Cost &amp; profitability couldn&apos;t be computed for this order right now.
       </div>
     );
@@ -50,7 +50,7 @@ export async function OrderCostSummary({ orderId }: Props) {
   const profitTone = profit > 0 ? "text-positive" : profit < 0 ? "text-alert" : "text-ik-ink";
 
   return (
-    <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+    <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
       <div className="mb-3 flex items-baseline justify-between">
         <h3 className="font-medium text-[14px] text-ik-ink">Cost &amp; profitability</h3>
         <Link

@@ -193,7 +193,7 @@ export function InvoiceLineEditor(props: Props) {
 
   return (
     <form onSubmit={submit} className="grid gap-4">
-      <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4 max-w-3xl">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 max-w-3xl">
         <h3 className="font-medium text-[14px] text-ik-ink">Header</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="grid gap-1 sm:col-span-2">
@@ -227,7 +227,7 @@ export function InvoiceLineEditor(props: Props) {
         </div>
       </section>
 
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="font-medium text-[14px] text-ik-ink">Lines</h3>
           <Button type="button" size="sm" variant="outline" onClick={() => setLines((p) => [...p, emptyLine()])}>+ Add line</Button>

@@ -68,7 +68,7 @@ export function SettingsEditor({ rows, onSave }: Props) {
         ))}
       </div>
 
-      <form onSubmit={newSetting} className="rounded-md border border-ik-rule bg-ik-card p-4 max-w-2xl">
+      <form onSubmit={newSetting} className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 max-w-2xl">
         <h3 className="mb-3 font-medium text-[14px] text-ik-ink">Add setting</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Input placeholder="key (e.g. delivery.otpProvider)" value={newKey} onChange={(e) => setNewKey(e.target.value)} />

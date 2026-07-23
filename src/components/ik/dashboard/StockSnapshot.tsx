@@ -44,7 +44,7 @@ export function StockSnapshot({ storeKeeper }: Props) {
   ];
 
   return (
-    <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+    <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
       <div className="mb-3 text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Stock snapshot</div>
       <ul className="grid gap-2">
         {rows.map((r) => (

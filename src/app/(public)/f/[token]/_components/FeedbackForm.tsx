@@ -38,7 +38,7 @@ export function FeedbackForm({ token }: { token: string }) {
   }
 
   return (
-    <form onSubmit={submit} className="grid gap-5 rounded-md border border-ik-rule bg-ik-card p-5">
+    <form onSubmit={submit} className="grid gap-5 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-5">
       <div className="grid gap-2 text-center">
         <span className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">
           Your rating

@@ -20,7 +20,7 @@ export function FormSection({
   cols?: 1 | 2;
 }) {
   return (
-    <section className="rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+    <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
       <h2 className="ik-accent-bar font-serif text-[15px] text-brand-700">{title}</h2>
       {hint && <p className="mt-0.5 text-[12px] text-ik-ink-3">{hint}</p>}
       <div className={"mt-4 grid gap-4 " + (cols === 2 ? "sm:grid-cols-2" : "")}>{children}</div>
@@ -56,7 +56,7 @@ export function StickyActions({ children }: { children: ReactNode }) {
  */
 export function EmptyState({ title, body, action }: { title: string; body?: string; action?: ReactNode }) {
   return (
-    <div className="rounded-[14px] border border-ik-rule bg-ik-card p-8 text-center">
+    <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-8 text-center">
       <div className="text-[15px] font-medium text-ik-ink">{title}</div>
       {body && <p className="mx-auto mt-1 max-w-md text-[12.5px] text-ik-ink-2">{body}</p>}
       {action && <div className="mt-4 flex justify-center">{action}</div>}

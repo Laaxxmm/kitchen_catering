@@ -174,7 +174,7 @@ export function ReviseOrderForm({
 
   return (
     <form onSubmit={submit} className="grid max-w-3xl gap-4">
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <h3 className="mb-2 text-[14px] font-medium text-ik-ink">Headcount</h3>
         <div className="flex items-center gap-3 text-[13px]">
           <span className="text-ik-ink-3">
@@ -194,7 +194,7 @@ export function ReviseOrderForm({
         </div>
       </section>
 
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <h3 className="mb-2 text-[14px] font-medium text-ik-ink">Meal</h3>
         <div className="flex items-center gap-3 text-[13px]">
           <select
@@ -215,7 +215,7 @@ export function ReviseOrderForm({
         </div>
       </section>
 
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <h3 className="mb-1 text-[14px] font-medium text-ik-ink">Portions per dish</h3>
         <p className="mb-2 text-[12px] text-ik-ink-3">
           Whole numbers only. Setting a dish to <strong>0</strong> removes it from the order.
@@ -264,7 +264,7 @@ export function ReviseOrderForm({
       </section>
 
       {dishes.length > 0 && (
-        <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+        <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
           <h3 className="mb-1 text-[14px] font-medium text-ik-ink">Add dishes</h3>
           <p className="mb-2 text-[12px] text-ik-ink-3">
             New dishes are priced at the menu&apos;s current rate when you save.
@@ -330,7 +330,7 @@ export function ReviseOrderForm({
       )}
 
       {packageChannel && (
-        <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+        <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
           <h3 className="mb-2 text-[14px] font-medium text-ik-ink">Package total</h3>
           <p className="mb-2 text-[12px] text-ik-ink-3">
             This channel is priced as one lump-sum package — enter the renegotiated total for the new
@@ -351,7 +351,7 @@ export function ReviseOrderForm({
         </section>
       )}
 
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <h3 className="mb-2 text-[14px] font-medium text-ik-ink">Event date &amp; time</h3>
         <p className="mb-2 text-[12px] text-ik-ink-3">
           Change only if the client rescheduled — the kitchen and F&amp;B replan around this.
@@ -372,7 +372,7 @@ export function ReviseOrderForm({
         </div>
       </section>
 
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <h3 className="mb-2 text-[14px] font-medium text-ik-ink">Revision note (required)</h3>
         <Textarea
           rows={2}

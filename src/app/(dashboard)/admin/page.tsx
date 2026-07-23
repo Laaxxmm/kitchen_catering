@@ -19,7 +19,7 @@ export default async function AdminPage() {
           <Link
             key={s.href}
             href={s.href}
-            className="rounded-md border border-ik-rule bg-ik-card p-4 hover:border-brand-200"
+            className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 hover:border-brand-200"
           >
             <div className="font-medium text-[14px] text-ik-ink">{s.title}</div>
             <div className="mt-1 text-[12.5px] text-ik-ink-2">{s.desc}</div>

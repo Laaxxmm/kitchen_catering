@@ -64,7 +64,7 @@ export default async function DeliveryDetailPage({ params }: { params: Promise<{
 
       <div className="grid gap-6 md:grid-cols-3">
         <section className="md:col-span-2 grid gap-4">
-          <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="font-medium text-[14px] text-ik-ink">Status</h3>
               <StatusBadge status={delivery.status} />
@@ -96,7 +96,7 @@ export default async function DeliveryDetailPage({ params }: { params: Promise<{
           )}
 
           {/* Full order details — what's being delivered, for how many, when. */}
-          <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <h3 className="font-medium text-[14px] text-ik-ink">Order {delivery.order.code}</h3>
               <span className="text-[12px] text-ik-ink-2">
@@ -141,7 +141,7 @@ export default async function DeliveryDetailPage({ params }: { params: Promise<{
           </div>
 
           {delivery.attempts.length > 0 && (
-            <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+            <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
               <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Attempts</h3>
               <ul className="grid gap-1 text-[12.5px]">
                 {delivery.attempts.map((a) => (
@@ -157,7 +157,7 @@ export default async function DeliveryDetailPage({ params }: { params: Promise<{
         </section>
 
         <aside className="grid gap-4">
-          <div className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+          <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Recipient</h3>
             <div>{delivery.order.customer.name}</div>
             {delivery.recipientName && <div className="text-ik-ink-2">{delivery.recipientName}</div>}
@@ -167,7 +167,7 @@ export default async function DeliveryDetailPage({ params }: { params: Promise<{
               <div className="font-mono text-ik-ink-2">{delivery.recipientPhone}</div>
             )}
           </div>
-          <div className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+          <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Address</h3>
             <p>{delivery.order.deliveryAddress}</p>
             <p className="mt-2 text-ik-ink-3">

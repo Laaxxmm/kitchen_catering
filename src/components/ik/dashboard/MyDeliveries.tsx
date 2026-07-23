@@ -37,7 +37,7 @@ const STATUS_TONE: Partial<Record<DeliveryStatus, "info" | "urgent" | "muted">> 
 export function MyDeliveries({ deliveries }: Props) {
   if (deliveries.length === 0) {
     return (
-      <section className="rounded-md border border-ik-rule bg-ik-card p-5">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-5">
         <div className="text-[14px] font-medium text-ik-ink">No deliveries assigned right now.</div>
         <p className="mt-1 text-[12.5px] text-ik-ink-2">
           When the manager schedules a delivery and assigns it to you, it shows up here automatically.

@@ -156,7 +156,7 @@ export default async function KitchenPage({
       )}
 
       {boardEmpty && waiting.length === 0 && (
-        <div className="mb-5 rounded-md border border-ik-rule bg-ik-card p-4 text-[13px] text-ik-ink-2">
+        <div className="mb-5 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px] text-ik-ink-2">
           <strong>All clear on the board.</strong> When orders move past the <em>issuing</em> stage they
           appear here automatically. Approve incoming orders on{" "}
           <Link href="/queue/chef-approvals" className="text-brand hover:underline">chef approvals</Link>,

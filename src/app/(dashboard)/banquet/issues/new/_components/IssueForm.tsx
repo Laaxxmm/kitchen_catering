@@ -90,7 +90,7 @@ export function IssueForm({ items, events }: { items: Item[]; events: EventOptio
 
   return (
     <div className="grid max-w-4xl gap-4">
-      <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="grid gap-1.5">
             <Label htmlFor="issuedAt">Issued at</Label>
@@ -131,7 +131,7 @@ export function IssueForm({ items, events }: { items: Item[]; events: EventOptio
         </div>
       </section>
 
-      <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-[12px] font-medium text-ik-ink-2">Items issued</div>
           <div className="flex items-center gap-2">

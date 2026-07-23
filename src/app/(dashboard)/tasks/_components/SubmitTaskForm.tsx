@@ -59,7 +59,7 @@ export function SubmitTaskForm({
   return (
     <form
       onSubmit={handleSubmit(onSubmit)}
-      className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4"
+      className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4"
     >
       <div className="text-[12px] font-medium text-ik-ink-2">
         {rejected ? "Resubmit task" : "Mark this task done"}

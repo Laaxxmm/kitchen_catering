@@ -77,7 +77,7 @@ export default async function GenerateInvoicePage() {
             return (
               <section
                 key={customerId}
-                className="rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5"
+                className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5"
               >
                 <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
                   <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">

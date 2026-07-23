@@ -47,7 +47,7 @@ export function BillPaymentForm({ outstanding, onSubmit }: Props) {
   }
 
   return (
-    <form onSubmit={submit} className="mt-6 rounded-md border border-ik-rule bg-ik-card p-4">
+    <form onSubmit={submit} className="mt-6 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
       <h3 className="mb-3 font-medium text-[14px] text-ik-ink">Record payment</h3>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="grid gap-1">

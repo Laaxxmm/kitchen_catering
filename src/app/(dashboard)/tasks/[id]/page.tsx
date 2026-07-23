@@ -65,7 +65,7 @@ export default async function TaskDetailPage({
 
       <div className="grid gap-4 lg:grid-cols-[1fr,320px]">
         <div className="grid gap-4">
-          <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
             <div className="grid grid-cols-2 gap-3 text-[12.5px] sm:grid-cols-4">
               <div>
                 <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">
@@ -135,7 +135,7 @@ export default async function TaskDetailPage({
           {(task.status === TaskStatus.SUBMITTED ||
             task.status === TaskStatus.COMPLETED) &&
             task.completionRemarks && (
-              <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+              <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
                 <div className="text-[12px] font-medium text-ik-ink-2">
                   Assignee remarks
                 </div>
@@ -187,7 +187,7 @@ export default async function TaskDetailPage({
         </div>
 
         <aside className="grid gap-3 text-[12.5px]">
-          <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
             <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">
               Assignee
             </div>
@@ -196,7 +196,7 @@ export default async function TaskDetailPage({
               {roleLabel(task.assignedTo.role)} · {task.assignedTo.email}
             </div>
           </div>
-          <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+          <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
             <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">
               Assigned by
             </div>
@@ -204,7 +204,7 @@ export default async function TaskDetailPage({
             <div className="text-[11px] text-ik-ink-3">{roleLabel(task.assignedBy.role)}</div>
           </div>
           {task.template && (
-            <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+            <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
               <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">
                 From preset
               </div>

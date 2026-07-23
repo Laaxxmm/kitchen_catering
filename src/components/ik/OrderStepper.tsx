@@ -34,7 +34,7 @@ export function OrderStepper({ current, immediate }: Props) {
   const isChanges = current === OrderStatus.CHANGES_PROPOSED_BY_CHEF;
 
   return (
-    <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+    <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
       {/* Horizontal scroll on small screens so the steps don't crush */}
       <div className="overflow-x-auto">
         <ol className="flex min-w-max items-center gap-0">

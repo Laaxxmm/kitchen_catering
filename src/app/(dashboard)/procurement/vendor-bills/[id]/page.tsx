@@ -159,7 +159,7 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
       </div>
 
       {bill.payments.length > 0 && (
-        <section className="mt-6 rounded-md border border-ik-rule bg-ik-card p-4">
+        <section className="mt-6 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
           <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Payments</h3>
           <Table>
             <TableHeader>

@@ -160,7 +160,7 @@ export function RoomsTable({ rooms }: { rooms: Room[] }) {
   return (
     <div className="grid gap-4">
       {editing ? (
-        <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
+        <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
           <div className="text-[12px] font-medium text-ik-ink-2">
             {editing.id ? "Edit room" : "Add room"}
           </div>

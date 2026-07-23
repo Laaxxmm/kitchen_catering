@@ -89,7 +89,7 @@ export function StandaloneReqForm({
 
   return (
     <div className="grid gap-4">
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="font-medium text-[14px] text-ik-ink">Ingredients</h3>
           <Button type="button" size="sm" variant="outline" onClick={() => setLines((p) => [...p, emptyLine()])}>+ Add line</Button>

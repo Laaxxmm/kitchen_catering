@@ -120,7 +120,7 @@ export default async function IngredientsPage({
           )}
         </div>
         {needs.length === 0 ? (
-          <p className="rounded-md border border-ik-rule bg-ik-card p-4 text-[13px] text-ik-ink-2">
+          <p className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px] text-ik-ink-2">
             Nothing needs reordering right now.
           </p>
         ) : (

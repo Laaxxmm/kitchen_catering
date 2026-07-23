@@ -65,7 +65,7 @@ export function WorkTabs({
       </div>
 
       {activeTab && activeTab.count === 0 ? (
-        <div className="rounded-md border border-ik-rule bg-ik-card p-5 text-[13px] text-ik-ink-2">
+        <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-5 text-[13px] text-ik-ink-2">
           {emptyHint.replace("{tab}", activeTab.label)}
         </div>
       ) : (

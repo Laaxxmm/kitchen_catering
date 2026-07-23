@@ -62,14 +62,14 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
       </header>
 
       <section className="mb-6 grid gap-4 text-[13px] sm:grid-cols-2">
-        <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+        <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
           <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Bill to</div>
           <div className="mt-1 font-medium">{invoice.customer.name}</div>
           {invoice.customer.gstin && <div className="font-mono text-[12px] text-ik-ink-2">GSTIN {invoice.customer.gstin}</div>}
           <p className="mt-1 whitespace-pre-line text-ik-ink-2">{invoice.customer.billingAddress}</p>
           <div className="mt-1 text-[11.5px] text-ik-ink-3">State {invoice.customer.stateCode}</div>
         </div>
-        <div className="rounded-md border border-ik-rule bg-ik-card p-4">
+        <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
           <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Place of supply</div>
           <div className="mt-1 font-mono">{invoice.placeOfSupplyStateCode}</div>
           {invoice.order && (

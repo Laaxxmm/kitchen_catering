@@ -29,7 +29,7 @@ export default async function IssuingQueuePage() {
             <Link
               key={r.id}
               href={`/requisitions/${r.id}`}
-              className="rounded-md border border-ik-rule bg-ik-card p-4 hover:border-brand-200"
+              className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 hover:border-brand-200"
             >
               <div className="flex items-center justify-between">
                 <span className="font-mono text-[13px] font-medium text-brand-700">{r.requisitionNo}</span>

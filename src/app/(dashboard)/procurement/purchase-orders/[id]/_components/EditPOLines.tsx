@@ -127,7 +127,7 @@ export function EditPOLines({ action, lines }: Props) {
   }
 
   return (
-    <form onSubmit={submit} className="rounded-md border border-ik-rule bg-ik-card p-4">
+    <form onSubmit={submit} className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
       <div className="mb-2 flex items-baseline justify-between">
         <h3 className="font-medium text-[14px] text-ik-ink">Edit lines</h3>
         <span className="text-[11.5px] text-ik-ink-3">

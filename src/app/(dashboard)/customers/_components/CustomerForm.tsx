@@ -76,7 +76,7 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
 
   return (
     <form onSubmit={handleSubmit(submit)} className="grid max-w-3xl gap-4">
-      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Identity</h3>
         <div className="grid gap-2">
           <Label htmlFor="name">Name<span className="text-gold" aria-hidden> *</span></Label>
@@ -95,7 +95,7 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
         </div>
       </section>
 
-      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Addresses</h3>
         <div className="grid gap-2">
           <Label htmlFor="billingAddress">Billing address<span className="text-gold" aria-hidden> *</span></Label>
@@ -146,7 +146,7 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
         </div>
       </section>
 
-      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Contact</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="grid gap-2">
@@ -187,7 +187,7 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
       </section>
 
       {/* "Bill to" + credit terms — drives invoice header + approval routing. */}
-      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Billing &amp; credit</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="grid gap-2 sm:col-span-3">

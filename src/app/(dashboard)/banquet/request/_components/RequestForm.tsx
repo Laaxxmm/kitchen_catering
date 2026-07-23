@@ -59,7 +59,7 @@ export function RequestForm({ items, events }: { items: Item[]; events: Event[] 
 
   return (
     <div className="grid max-w-2xl gap-4">
-      <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="flex items-center justify-between">
           <div className="text-[12px] font-medium text-ik-ink-2">Items needed</div>
           <Button size="sm" variant="outline" onClick={addLine}>+ Add item</Button>
@@ -96,7 +96,7 @@ export function RequestForm({ items, events }: { items: Item[]; events: Event[] 
         </div>
       </section>
 
-      <section className="grid gap-3 rounded-md border border-ik-rule bg-ik-card p-4 sm:grid-cols-2">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:grid-cols-2">
         <div className="grid gap-1.5">
           <Label htmlFor="order">Event / order (optional)</Label>
           <select

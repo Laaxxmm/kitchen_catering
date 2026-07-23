@@ -61,12 +61,12 @@ export default async function PettyCashFloatDetailPage({ params }: { params: Pro
       />
 
       <div className="grid gap-6 md:grid-cols-2 max-w-5xl">
-        <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+        <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
           <h3 className="mb-3 font-medium text-[14px] text-ik-ink">Record voucher</h3>
           <VoucherForm onSubmit={newVoucher} />
         </section>
 
-        <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+        <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
           <h3 className="mb-3 font-medium text-[14px] text-ik-ink">Top up</h3>
           <TopUpForm onSubmit={newTopUp} />
         </section>

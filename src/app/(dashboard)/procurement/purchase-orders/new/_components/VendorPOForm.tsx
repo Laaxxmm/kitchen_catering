@@ -207,7 +207,7 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
 
   return (
     <form onSubmit={submit} className="grid gap-4">
-      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 max-w-3xl sm:p-5">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 max-w-3xl sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Supplier</h3>
         {/* Vendor gets its own full-width row — the name is the most
             important field here and was being truncated in the old
@@ -294,7 +294,7 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
         </div>
       </section>
 
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="font-medium text-[14px] text-ik-ink">Lines</h3>
           <Button type="button" size="sm" variant="outline" onClick={() => setLines((p) => [...p, emptyLine()])}>+ Add line</Button>

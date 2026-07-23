@@ -174,7 +174,7 @@ export function QuoteDraftForm({ customers, dishes, onSubmit, onQuickAddCustomer
 
   return (
     <form onSubmit={submit} className="grid gap-4">
-      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 max-w-4xl sm:p-5">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 max-w-4xl sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Quote details</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="grid gap-1">
@@ -183,7 +183,7 @@ export function QuoteDraftForm({ customers, dishes, onSubmit, onQuickAddCustomer
               id="customerId"
               value={customerId}
               onChange={(e) => setCustomerId(e.target.value)}
-              className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
+              className="h-9 w-full min-w-0 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
             >
               {customerOptions.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
@@ -248,7 +248,7 @@ export function QuoteDraftForm({ customers, dishes, onSubmit, onQuickAddCustomer
         </div>
       </section>
 
-      <section className="rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Lines</h3>
           <Button type="button" size="sm" variant="outline" onClick={() => setLines((p) => [...p, emptyLine()])}>+ Add line</Button>

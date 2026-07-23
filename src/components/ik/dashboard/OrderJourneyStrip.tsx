@@ -67,7 +67,7 @@ export function OrderJourneyStrip({ stageCounts, stageStuck }: Props) {
           {totalActive} active order{totalActive === 1 ? "" : "s"} across the pipeline
         </span>
       </div>
-      <div className="overflow-x-auto rounded-md border border-ik-rule bg-ik-card p-4">
+      <div className="overflow-x-auto rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <ol className="flex min-w-max items-start gap-0">
           {STOPS.map((s, i) => {
             const count = counts[i];

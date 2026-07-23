@@ -100,7 +100,7 @@ export function RequisitionDraftForm({ ingredients, orderItems, onSubmit, onQuic
 
   return (
     <form onSubmit={submit} className="grid gap-4">
-      <section className="rounded-md border border-ik-rule bg-ik-card p-4">
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="font-medium text-[14px] text-ik-ink">Lines</h3>
           <Button type="button" variant="outline" size="sm" onClick={() => setLines((p) => [...p, emptyLine(ingredientList[0]?.id ?? "")])}>

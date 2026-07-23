@@ -300,6 +300,22 @@
     color: var(--ik-accent-ink);
   }
 
+  /* Premium soft shadow for form section cards — a close contact shadow
+     plus a wide soft one, so cards lift off the paper without looking
+     heavy. Applied globally wherever the form section card class is used. */
+  .shadow-ik-card {
+    box-shadow: 0 1px 2px rgba(20, 25, 20, 0.04), 0 14px 34px -18px rgba(20, 25, 20, 0.16);
+  }
+  /* Overlap guard for every form section card: a grid child defaults to
+     min-width:auto, so a long <select> option or unbroken string can grow
+     past its 1fr track and spill over the next field (the New-quote
+     "Title" overlap). Pin grid children to min-width:0 and cap controls at
+     their column, once, for all form cards. */
+  .shadow-ik-card .grid > * { min-width: 0; }
+  .shadow-ik-card select,
+  .shadow-ik-card input,
+  .shadow-ik-card textarea { max-width: 100%; }
+
   /* Left-nav item: soft hover for non-active rows (active rows carry their
      own inline wash, so this only lights up the resting rows on hover). */
   .ik-nav-item { transition: background-color .12s, color .12s; }

@@ -58,7 +58,7 @@ export function StoreAdjustForm({ store, items, backHref }: { store: StoreKey; i
   }
 
   return (
-    <form onSubmit={submit} className="grid max-w-lg gap-4 rounded-md border border-ik-rule bg-ik-card p-4">
+    <form onSubmit={submit} className="grid max-w-lg gap-4 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
       <label className="grid gap-1">
         <span className="text-[12px] text-ik-ink-2">Item</span>
         <select value={itemId} onChange={(e) => setItemId(e.target.value)} className={inputCls}>

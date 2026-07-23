@@ -57,7 +57,7 @@ export default async function DishDetailPage({ params }: { params: Promise<{ id:
 
       {isChef ? (
         // Chef-friendly read-only summary. Price + GST deliberately omitted.
-        <section className="grid max-w-2xl gap-2 rounded-md border border-ik-rule bg-ik-card p-4 text-[13px]">
+        <section className="grid max-w-2xl gap-2 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
           <div className="flex justify-between">
             <span className="text-ik-ink-3">Name</span>
             <span className="text-ik-ink">{dish.name}</span>

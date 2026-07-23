@@ -74,7 +74,7 @@ export function ReceiptForm({ ingredients, onSubmit, redirectOnSuccess }: Props)
 
   return (
     <form onSubmit={handleSubmit(submit)} className="grid max-w-2xl gap-4">
-      <section className="grid gap-3 rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">What came in</h3>
         <div className="grid gap-1">
           <Label htmlFor="ingredientId">Ingredient<span className="text-gold" aria-hidden> *</span></Label>
