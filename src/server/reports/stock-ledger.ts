@@ -1,0 +1,121 @@
+import { db } from "@/server/db";
+import { toDecimal } from "@/lib/money";
+
+/**
+ * Per-item stock ledger for a store over a date range: opening balance
+ * (everything before `from`), movements in the window (in / out / adjust),
+ * and the closing balance. Read-only aggregation off the same movement rows
+ * the app already writes on every receipt / issue / adjustment / return — so
+ * the ledger reconciles to what actually happened, item by item.
+ *
+ * Kitchen covers every ingredient, which is where vegetables, frozen and
+ * non-veg live (they are ingredient categories, not separate stores).
+ * Banquet covers the F&B cutlery / disposables / equipment; returns count
+ * as stock coming back in. Non-"use server" so the report page and the
+ * Excel export can both call it directly.
+ */
+export type LedgerStore = "kitchen" | "banquet";
+
+export interface LedgerRow {
+  sku: string;
+  name: string;
+  category: string | null;
+  unit: string;
+  opening: number;
+  inQty: number;
+  outQty: number;
+  adjustQty: number;
+  closing: number;
+  /** Closing × avg unit cost. null for banquet (no costed valuation). */
+  value: number | null;
+}
+
+const n = (v: { toString(): string } | null | undefined) => (v == null ? 0 : Number(v.toString()));
+
+async function kitchenLedger(from: Date, to: Date): Promise<LedgerRow[]> {
+  const [ingredients, recBefore, issBefore, adjBefore, recIn, issIn, adjIn] = await Promise.all([
+    db.ingredient.findMany({
+      where: { active: true },
+      select: { id: true, sku: true, name: true, unit: true, category: true, avgUnitCost: true },
+    }),
+    db.ingredientReceipt.groupBy({ by: ["ingredientId"], _sum: { qty: true }, where: { receivedAt: { lt: from } } }),
+    db.ingredientIssue.groupBy({ by: ["ingredientId"], _sum: { qty: true }, where: { issuedAt: { lt: from } } }),
+    db.ingredientAdjustment.groupBy({ by: ["ingredientId"], _sum: { delta: true }, where: { adjustedAt: { lt: from } } }),
+    db.ingredientReceipt.groupBy({ by: ["ingredientId"], _sum: { qty: true }, where: { receivedAt: { gte: from, lte: to } } }),
+    db.ingredientIssue.groupBy({ by: ["ingredientId"], _sum: { qty: true }, where: { issuedAt: { gte: from, lte: to } } }),
+    db.ingredientAdjustment.groupBy({ by: ["ingredientId"], _sum: { delta: true }, where: { adjustedAt: { gte: from, lte: to } } }),
+  ]);
+
+  const sum = (rows: Array<{ ingredientId: string; _sum: { qty?: unknown; delta?: unknown } }>, key: "qty" | "delta") => {
+    const m = new Map<string, number>();
+    for (const r of rows) m.set(r.ingredientId, n(r._sum[key] as never));
+    return m;
+  };
+  const rB = sum(recBefore, "qty"), iB = sum(issBefore, "qty"), aB = sum(adjBefore, "delta");
+  const rI = sum(recIn, "qty"), iI = sum(issIn, "qty"), aI = sum(adjIn, "delta");
+
+  return ingredients.map((g) => {
+    const opening = (rB.get(g.id) ?? 0) - (iB.get(g.id) ?? 0) + (aB.get(g.id) ?? 0);
+    const inQty = rI.get(g.id) ?? 0;
+    const outQty = iI.get(g.id) ?? 0;
+    const adjustQty = aI.get(g.id) ?? 0;
+    const closing = opening + inQty - outQty + adjustQty;
+    return {
+      sku: g.sku,
+      name: g.name,
+      category: g.category,
+      unit: g.unit,
+      opening,
+      inQty,
+      outQty,
+      adjustQty,
+      closing,
+      value: Number(toDecimal(closing).times(g.avgUnitCost).toDecimalPlaces(2)),
+    };
+  });
+}
+
+async function banquetLedger(from: Date, to: Date): Promise<LedgerRow[]> {
+  const [items, recBefore, retBefore, issBefore, recIn, retIn, issIn] = await Promise.all([
+    db.banquetItem.findMany({ where: { active: true }, select: { id: true, sku: true, name: true, unit: true, category: true } }),
+    db.banquetReceiptLine.groupBy({ by: ["itemId"], _sum: { quantity: true }, where: { receipt: { receivedAt: { lt: from } } } }),
+    db.banquetReturnLine.groupBy({ by: ["itemId"], _sum: { quantity: true }, where: { return: { returnedAt: { lt: from } } } }),
+    db.banquetIssueLine.groupBy({ by: ["itemId"], _sum: { quantity: true }, where: { issue: { issuedAt: { lt: from } } } }),
+    db.banquetReceiptLine.groupBy({ by: ["itemId"], _sum: { quantity: true }, where: { receipt: { receivedAt: { gte: from, lte: to } } } }),
+    db.banquetReturnLine.groupBy({ by: ["itemId"], _sum: { quantity: true }, where: { return: { returnedAt: { gte: from, lte: to } } } }),
+    db.banquetIssueLine.groupBy({ by: ["itemId"], _sum: { quantity: true }, where: { issue: { issuedAt: { gte: from, lte: to } } } }),
+  ]);
+
+  const sum = (rows: Array<{ itemId: string; _sum: { quantity: unknown } }>) => {
+    const m = new Map<string, number>();
+    for (const r of rows) m.set(r.itemId, n(r._sum.quantity as never));
+    return m;
+  };
+  const rB = sum(recBefore), tB = sum(retBefore), iB = sum(issBefore);
+  const rI = sum(recIn), tI = sum(retIn), iI = sum(issIn);
+
+  return items.map((b) => {
+    // Returns are stock coming back in.
+    const opening = (rB.get(b.id) ?? 0) + (tB.get(b.id) ?? 0) - (iB.get(b.id) ?? 0);
+    const inQty = (rI.get(b.id) ?? 0) + (tI.get(b.id) ?? 0);
+    const outQty = iI.get(b.id) ?? 0;
+    const closing = opening + inQty - outQty;
+    return { sku: b.sku ?? "", name: b.name, category: b.category, unit: b.unit, opening, inQty, outQty, adjustQty: 0, closing, value: null };
+  });
+}
+
+export async function getStockLedger(store: LedgerStore, from: Date, to: Date) {
+  const rows = store === "banquet" ? await banquetLedger(from, to) : await kitchenLedger(from, to);
+  // Items with zero everywhere in the window and zero balance add only noise.
+  const active = rows.filter((r) => r.opening || r.inQty || r.outQty || r.adjustQty || r.closing);
+  active.sort((a, b) => b.outQty - a.outQty || a.name.localeCompare(b.name));
+  const totals = active.reduce(
+    (t, r) => ({
+      inQty: t.inQty + r.inQty,
+      outQty: t.outQty + r.outQty,
+      value: t.value + (r.value ?? 0),
+    }),
+    { inQty: 0, outQty: 0, value: 0 },
+  );
+  return { rows: active, totals };
+}

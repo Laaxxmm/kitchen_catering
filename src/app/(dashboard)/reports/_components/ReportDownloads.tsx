@@ -16,6 +16,10 @@ const REPORTS: ReportDef[] = [
   { key: "gst", title: "GST / tax summary", desc: "Output GST (sales invoices) + input GST (purchases), for filing.", ranged: true },
   { key: "stock", title: "Stock & procurement", desc: "Stock valuation + purchase orders + vendor bills.", ranged: true },
   { key: "payments", title: "Payments (AR / AP)", desc: "Everything outstanding — receivables and payables.", ranged: false },
+  { key: "orders", title: "Orders", desc: "Every order — customer, event date, value, status.", ranged: false },
+  { key: "requisitions", title: "Requisitions", desc: "Chef → store ingredient requisitions with fulfilment status.", ranged: false },
+  { key: "purchase-orders", title: "Purchase orders", desc: "POs raised — vendor, value, approval and receipt status.", ranged: false },
+  { key: "deliveries", title: "Deliveries", desc: "Delivery runs — order, driver, schedule and status.", ranged: false },
 ];
 
 /**
@@ -49,7 +53,8 @@ export function ReportDownloads() {
             className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]" />
         </div>
         <p className="text-[11.5px] text-ik-ink-3">
-          Applies to the ranged reports. Leave blank for the last 90 days. Payments is a live snapshot.
+          Applies to the ranged reports (Sales, GST, Stock). Leave blank for the last 90 days.
+          Payments, Orders, Requisitions, Purchase orders and Deliveries are full snapshots.
         </p>
       </div>
 
