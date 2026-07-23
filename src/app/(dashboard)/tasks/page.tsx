@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { SummaryStrip } from "@/components/ik/StatChips";
 import { gateRolePage } from "@/server/rbac";
 import { listTasks, myTaskCounts } from "@/server/actions/tasks";
 import { TaskList } from "./_components/TaskList";
@@ -36,6 +38,13 @@ export default async function MyTasksPage({
     Role.MAINTENANCE_MANAGER,
   ]);
 
+  // Assigners land on the admin board (which now carries a "My tasks" tab),
+  // so clicking Tasks in the nav opens the powerful board, not an empty
+  // personal list. Everyone else stays on their own tasks.
+  if (session.user.role === Role.ADMIN || session.user.role === Role.MANAGER) {
+    redirect("/tasks/admin");
+  }
+
   const sp = await searchParams;
   const tab: Tab = (TABS.find((t) => t.key === sp.tab)?.key ?? "PENDING") as Tab;
 
@@ -44,34 +53,24 @@ export default async function MyTasksPage({
     myTaskCounts(),
   ]);
 
-  const isAssigner = session.user.role === Role.ADMIN || session.user.role === Role.MANAGER;
-
   return (
     <>
       <PageHeader
         eyebrow="Workflow"
         title="My tasks"
         description="Tasks assigned to you. Open one to mark done with remarks."
-        actions={
-          isAssigner ? (
-            <div className="flex gap-2">
-              <Link href="/tasks/admin">
-                <Button>Assign new task</Button>
-              </Link>
-              <Link href="/tasks/admin?tab=PENDING">
-                <Button variant="outline" size="sm">Admin board →</Button>
-              </Link>
-            </div>
-          ) : null
-        }
       />
 
-      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
-        <Stat label="Open" value={counts.open} highlight={counts.open > 0} />
-        <Stat label="Overdue" value={counts.overdue} alert={counts.overdue > 0} />
-        <Stat label="Awaiting review" value={counts.submitted} />
-        <Stat label="Completed" value={counts.completed} />
-        <Stat label="Rejected" value={counts.rejected} alert={counts.rejected > 0} />
+      <div className="mb-4">
+        <SummaryStrip
+          chips={[
+            { label: "Open", value: counts.open, tone: counts.open > 0 ? "green" : "grey" },
+            { label: "Overdue", value: counts.overdue, tone: counts.overdue > 0 ? "red" : "grey" },
+            { label: "Awaiting review", value: counts.submitted },
+            { label: "Completed", value: counts.completed },
+            { label: "Rejected", value: counts.rejected, tone: counts.rejected > 0 ? "red" : "grey" },
+          ]}
+        />
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
@@ -123,40 +122,5 @@ export default async function MyTasksPage({
 
       <TaskList tasks={tasks} showAssignee={false} emptyHint="Nothing here." />
     </>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  highlight,
-  alert,
-}: {
-  label: string;
-  value: number;
-  highlight?: boolean;
-  alert?: boolean;
-}) {
-  return (
-    <div
-      className={
-        "rounded-md border p-3 " +
-        (alert
-          ? "border-alert/30 bg-alert/5"
-          : highlight
-            ? "border-brand-200 bg-brand-50"
-            : "border-ik-rule bg-ik-card")
-      }
-    >
-      <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">{label}</div>
-      <div
-        className={
-          "mt-1 font-mono text-[20px] " +
-          (alert ? "text-alert" : highlight ? "text-brand-700" : "text-ik-ink")
-        }
-      >
-        {value}
-      </div>
-    </div>
   );
 }

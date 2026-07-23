@@ -19,13 +19,20 @@ export interface StatChipDef {
 function Chip({ chip }: { chip: StatChipDef }) {
   const body = (
     <>
-      <div className={"font-mono text-[20px] leading-none " + VALUE_TONE[chip.tone ?? "ink"]}>{chip.value}</div>
-      <div className="mt-1 text-[11px] text-ik-ink-3">{chip.label}</div>
+      <div className="text-[11px] uppercase tracking-wide text-ik-ink-3">{chip.label}</div>
+      <div
+        className={
+          "mt-1.5 text-[30px] font-bold leading-none tracking-tight tabular-nums " +
+          VALUE_TONE[chip.tone ?? "ink"]
+        }
+      >
+        {chip.value}
+      </div>
     </>
   );
   const cls =
-    "min-w-[120px] flex-1 rounded-md border border-ik-rule bg-ik-card p-3 transition" +
-    (chip.href ? " hover:border-brand-200" : "");
+    "min-w-[130px] flex-1 rounded-2xl border border-ik-rule bg-ik-card p-4 transition" +
+    (chip.href ? " hover:border-brand-300 hover:shadow-[0_4px_20px_rgba(20,25,20,0.06)]" : "");
   return chip.href ? (
     <Link href={chip.href} className={cls}>{body}</Link>
   ) : (
