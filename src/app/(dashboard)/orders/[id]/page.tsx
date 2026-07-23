@@ -241,6 +241,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             {!chefOnlyView && (
               <Link href={`/orders/${order.id}/pnl`}><Button variant="outline">P&amp;L</Button></Link>
             )}
+            {(isManager || role === Role.ACCOUNTS) && (
+              <Link href={`/orders/${order.id}/trail`}><Button variant="outline">Trail</Button></Link>
+            )}
             {showIssueAction && openRequisition && (
               <Link href={`/requisitions/${openRequisition.id}`}>
                 <Button>Issue ingredients</Button>
