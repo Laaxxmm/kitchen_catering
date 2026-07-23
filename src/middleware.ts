@@ -33,6 +33,9 @@ type Role =
 // Anything that isn't matched by any pattern is allowed for any
 // authenticated user (since /forbidden, /dashboard etc. are role-neutral).
 const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
+  // Audit log — admin + manager may review it (must precede the /admin
+  // catch-all below, which is admin-only). First match wins.
+  { pattern: /^\/admin\/audit(\/|$)/, allow: ["ADMIN", "MANAGER"] },
   // Admin
   { pattern: /^\/admin(\/|$)/, allow: ["ADMIN"] },
 
