@@ -29,6 +29,9 @@ export interface LoggedLeftover {
 
 interface Props {
   orderId: string;
+  /** Dish/item names that were on this order — offered as one-tap picks and
+   *  type-ahead so staff choose what was actually served, not free-type it. */
+  orderItems?: string[];
   leftovers: LoggedLeftover[];
   /** Whether the viewer may add/remove (the server gates anyway). */
   canEdit: boolean;
@@ -41,7 +44,7 @@ interface Props {
  * form that stays open so several items go in quickly (the same item can
  * come back more than once with different dispositions).
  */
-export function LeftoverReturns({ orderId, leftovers, canEdit }: Props) {
+export function LeftoverReturns({ orderId, orderItems = [], leftovers, canEdit }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
@@ -50,6 +53,10 @@ export function LeftoverReturns({ orderId, leftovers, canEdit }: Props) {
   const [unit, setUnit] = useState("pcs");
   const [disposition, setDisposition] = useState<LeftoverDisposition>("REUSE_BREAKFAST");
   const [note, setNote] = useState("");
+
+  // Deduped order items, offered as one-tap picks + type-ahead.
+  const itemChoices = Array.from(new Set(orderItems.map((n) => n.trim()).filter(Boolean)));
+  const datalistId = `leftover-items-${orderId}`;
 
   // Nothing to show and nothing the viewer can do — render nothing.
   if (leftovers.length === 0 && !canEdit) return null;
@@ -160,8 +167,36 @@ export function LeftoverReturns({ orderId, leftovers, canEdit }: Props) {
 
       {canEdit && open && (
         <div className="mt-2 grid gap-1.5 rounded-md border border-ik-rule bg-ik-card p-2">
+          {/* One-tap picks — what was actually on this order. Tapping fills the
+              item name; staff still set qty + where it went. Free text stays
+              allowed for anything off-menu. */}
+          {itemChoices.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {itemChoices.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => setItemName(name)}
+                  className={
+                    "rounded-full px-2 py-0.5 text-[11.5px] transition " +
+                    (itemName === name
+                      ? "bg-brand-500 text-white"
+                      : "bg-ik-paper-alt text-ik-ink-2 ring-1 ring-ik-rule hover:bg-brand-50 hover:text-brand-700")
+                  }
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
+          <datalist id={datalistId}>
+            {itemChoices.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
           <div className="flex flex-wrap gap-1.5">
             <Input
+              list={datalistId}
               value={itemName}
               onChange={(e) => setItemName(e.target.value)}
               onKeyDown={(e) => {
@@ -170,7 +205,7 @@ export function LeftoverReturns({ orderId, leftovers, canEdit }: Props) {
                   add();
                 }
               }}
-              placeholder="Item (e.g. Chocolate cake)"
+              placeholder="Item — pick above or type"
               className="h-8 min-w-[140px] flex-1 text-[12.5px]"
               autoFocus
             />

@@ -120,7 +120,7 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
       <div className="max-w-3xl">
         <ThreeWayMatchInfo />
       </div>
-      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 max-w-3xl sm:p-5">
+      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Bill details</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="grid gap-1">

@@ -268,7 +268,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
 
   return (
     <form onSubmit={submit} className="mx-auto grid max-w-4xl gap-6">
-      <section className="grid gap-4 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 max-w-3xl sm:p-5">
+      <section className="grid gap-4 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Customer &amp; event</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {immediate ? (
@@ -572,7 +572,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
         </div>
       </section>
 
-      <section className="grid gap-2 max-w-3xl">
+      <section className="grid gap-2">
         <Label htmlFor="notes">Internal notes</Label>
         <Textarea id="notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </section>

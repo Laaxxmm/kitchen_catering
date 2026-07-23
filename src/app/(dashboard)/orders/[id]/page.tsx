@@ -594,6 +594,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               )}
               <LeftoverReturns
                 orderId={order.id}
+                orderItems={order.items.map((it) => it.dish.name)}
                 leftovers={order.leftoverReturns.map((l) => ({
                   id: l.id,
                   itemName: l.itemName,
