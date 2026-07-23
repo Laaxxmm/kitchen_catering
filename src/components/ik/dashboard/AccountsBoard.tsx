@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { WorkTabs } from "@/components/ik/dashboard/WorkTabs";
 import { CappedList } from "@/components/ik/dashboard/CappedList";
 import { MarkPaidModal } from "@/components/ik/finance/MarkPaidModal";
-import { formatINR } from "@/lib/money";
+import { SummaryStrip } from "@/components/ik/StatChips";
+import { formatINR, formatINRWhole } from "@/lib/money";
 import { markVendorBillPaid } from "@/server/actions/procurement";
 
 export interface Receivable {
@@ -38,8 +39,22 @@ export function AccountsBoard({ receivables, payables }: { receivables: Receivab
   const recSorted = [...receivables].sort((a, b) => Number(b.outstanding) - Number(a.outstanding));
   const paySorted = [...payables].sort((a, b) => Number(b.outstanding) - Number(a.outstanding));
 
+  const toCollect = receivables.reduce((s, r) => s + Number(r.outstanding), 0);
+  const toPay = payables.reduce((s, p) => s + Number(p.outstanding), 0);
+
   return (
-    <WorkTabs tabs={tabs} emptyHint="Nothing in {tab} right now.">
+    <div>
+      <div className="mb-4">
+        <SummaryStrip
+          chips={[
+            { label: "To collect", value: formatINRWhole(toCollect), tone: toCollect > 0 ? "green" : "grey" },
+            { label: "To pay", value: formatINRWhole(toPay), tone: toPay > 0 ? "red" : "grey" },
+            { label: "Invoices", value: receivables.length },
+            { label: "Bills", value: payables.length },
+          ]}
+        />
+      </div>
+      <WorkTabs tabs={tabs} emptyHint="Nothing in {tab} right now.">
       {(active) =>
         active === "collect" ? (
           <CappedList items={recSorted} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" keyOf={(r) => r.id}>
@@ -94,6 +109,7 @@ export function AccountsBoard({ receivables, payables }: { receivables: Receivab
           </CappedList>
         )
       }
-    </WorkTabs>
+      </WorkTabs>
+    </div>
   );
 }

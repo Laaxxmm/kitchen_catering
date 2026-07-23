@@ -206,7 +206,7 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
   }
 
   return (
-    <form onSubmit={submit} className="grid gap-4">
+    <form onSubmit={submit} className="mx-auto grid max-w-4xl gap-4">
       <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 max-w-3xl sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Supplier</h3>
         {/* Vendor gets its own full-width row — the name is the most

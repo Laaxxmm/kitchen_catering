@@ -5,6 +5,7 @@ import { BanquetRequisitionStatus, ChefRequisitionStatus, VendorPOStatus } from 
 import { Button } from "@/components/ui/button";
 import { WorkTabs } from "@/components/ik/dashboard/WorkTabs";
 import { CappedList } from "@/components/ik/dashboard/CappedList";
+import { BoardHeader } from "@/components/ik/dashboard/BoardHeader";
 import { eventPriority } from "@/components/ik/EventDateBadge";
 import { Countdown } from "@/components/ik/dashboard/Countdown";
 import { formatINRWhole } from "@/lib/money";
@@ -107,8 +108,19 @@ export function StoreBoard({
     (a, b) => Number(PO_NEEDS_ACTION.has(b.status)) - Number(PO_NEEDS_ACTION.has(a.status)),
   );
 
+  const total = chefReqs.length + fnbReqs.length + pos.length;
+
   return (
     <div>
+      <BoardHeader
+        total={total}
+        unit="jobs on your bench"
+        segments={[
+          { label: "Chef requests", value: chefReqs.length, tone: "approval" },
+          { label: "F&B requests", value: fnbReqs.length, tone: "production" },
+          { label: "Purchase orders", value: pos.length, tone: "done" },
+        ]}
+      />
       <div className="mb-3 flex justify-end">
         <Link href="/procurement/purchase-orders/new">
           <Button size="sm" variant="outline">New purchase order</Button>

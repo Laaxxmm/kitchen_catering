@@ -105,7 +105,7 @@ export function IssueForm({
   }
 
   return (
-    <div className="grid max-w-4xl gap-4">
+    <div className="mx-auto grid max-w-4xl gap-4">
       <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="grid gap-1.5">

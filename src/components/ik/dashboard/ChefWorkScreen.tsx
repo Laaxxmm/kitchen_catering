@@ -8,6 +8,7 @@ import { OrderChannel, OrderStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { CappedList } from "@/components/ik/dashboard/CappedList";
+import { BoardHeader } from "@/components/ik/dashboard/BoardHeader";
 import { EventDateBadge, eventPriority } from "@/components/ik/EventDateBadge";
 import { formatIST } from "@/lib/time";
 import { isNextNavigationError } from "@/lib/next-error";
@@ -129,6 +130,16 @@ export function ChefWorkScreen({ orders }: Props) {
 
   return (
     <section>
+      <BoardHeader
+        total={orders.length}
+        unit="orders in your kitchen"
+        segments={[
+          { label: "New", value: byTab.new.length, tone: "approval" },
+          { label: "Ingredients", value: byTab.ingredients.length, tone: "neutral" },
+          { label: "Cooking", value: byTab.cooking.length, tone: "production" },
+          { label: "Dispatch", value: byTab.dispatch.length, tone: "done" },
+        ]}
+      />
       {/* Tab bar — big, labelled, with a live count per stage. */}
       <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {TABS.map((t) => {

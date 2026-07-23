@@ -173,7 +173,7 @@ export function QuoteDraftForm({ customers, dishes, onSubmit, onQuickAddCustomer
   }
 
   return (
-    <form onSubmit={submit} className="grid gap-4">
+    <form onSubmit={submit} className="mx-auto grid max-w-4xl gap-4">
       <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 max-w-4xl sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Quote details</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

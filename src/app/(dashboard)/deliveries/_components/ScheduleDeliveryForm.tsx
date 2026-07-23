@@ -78,7 +78,7 @@ export function ScheduleDeliveryForm({ orders, drivers, onSubmit, initialOrderId
   }
 
   return (
-    <form onSubmit={submit} className="grid max-w-2xl gap-4">
+    <form onSubmit={submit} className="mx-auto grid max-w-2xl gap-4">
       <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Delivery run</h3>
         <div className="grid gap-1">

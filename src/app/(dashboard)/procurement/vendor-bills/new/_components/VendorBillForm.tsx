@@ -116,7 +116,7 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
   }
 
   return (
-    <form onSubmit={submit} className="grid gap-4">
+    <form onSubmit={submit} className="mx-auto grid max-w-4xl gap-4">
       <div className="max-w-3xl">
         <ThreeWayMatchInfo />
       </div>

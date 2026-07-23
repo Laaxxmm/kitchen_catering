@@ -8,6 +8,7 @@ import { OrderChannel, OrderStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { WorkTabs } from "@/components/ik/dashboard/WorkTabs";
 import { CappedList } from "@/components/ik/dashboard/CappedList";
+import { BoardHeader } from "@/components/ik/dashboard/BoardHeader";
 import { Countdown } from "@/components/ik/dashboard/Countdown";
 import { formatIST } from "@/lib/time";
 import { isNextNavigationError } from "@/lib/next-error";
@@ -116,13 +117,25 @@ export function SalesBoard({ orders }: { orders: SalesOrder[] }) {
   const tabs = TABS.map((t) => ({ key: t.key, label: t.label, hint: t.hint, count: groups[t.key].length }));
 
   return (
-    <WorkTabs tabs={tabs} emptyHint="Nothing in {tab} right now.">
-      {(active) => (
-        <CappedList items={groups[active]} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" keyOf={(o) => o.id}>
-          {(o, i) => <SalesCard order={o} highlight={i === 0 && active === "draft"} />}
-        </CappedList>
-      )}
-    </WorkTabs>
+    <div>
+      <BoardHeader
+        total={orders.length}
+        unit="orders in your pipeline"
+        segments={[
+          { label: "Drafts", value: groups.draft.length, tone: "neutral" },
+          { label: "In review", value: groups.review.length, tone: "approval" },
+          { label: "In kitchen", value: groups.kitchen.length, tone: "production" },
+          { label: "Out / done", value: groups.out.length, tone: "done" },
+        ]}
+      />
+      <WorkTabs tabs={tabs} emptyHint="Nothing in {tab} right now.">
+        {(active) => (
+          <CappedList items={groups[active]} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" keyOf={(o) => o.id}>
+            {(o, i) => <SalesCard order={o} highlight={i === 0 && active === "draft"} />}
+          </CappedList>
+        )}
+      </WorkTabs>
+    </div>
   );
 }
 

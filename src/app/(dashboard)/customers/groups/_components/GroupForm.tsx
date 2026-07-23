@@ -50,7 +50,7 @@ export function GroupForm({
         e.preventDefault();
         submit();
       }}
-      className="mb-6 grid max-w-xl gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4"
+      className="mx-auto mb-6 grid max-w-xl gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4"
     >
       <div className="grid gap-1">
         <Label htmlFor="name">Group name</Label>
