@@ -67,6 +67,11 @@ export default async function IngredientsPage({
             {(role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS) && (
               <a href="/api/export/stock"><Button variant="outline">Download Excel</Button></a>
             )}
+            {role === Role.ADMIN && (
+              <Link href="/admin/stock-reconcile">
+                <Button variant="outline">Reconcile received stock</Button>
+              </Link>
+            )}
             {canAdd && (
               <Link href="/inventory/ingredients/new">
                 <Button variant="outline">New ingredient</Button>
