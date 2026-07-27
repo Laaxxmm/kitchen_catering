@@ -191,3 +191,96 @@ export async function applyGrnStockReconcile(): Promise<ActionResultWith<{ poste
     return actionFailure(err);
   }
 }
+
+/**
+ * Manually post one flagged GRN line, with the admin deciding the quantity and
+ * unit to book. For a unit mismatch where the item already holds stock, only a
+ * human knows the conversion (how many catalogue-units a purchase pack is), so
+ * they enter it here. The GRN line's total value (accepted × PO price) is
+ * preserved: the per-unit cost is derived from the quantity booked, so
+ * whatever unit is chosen the stock is valued at the same rupees. When the
+ * chosen unit differs from the catalogue, the item is re-based to it (the
+ * admin's explicit call). Admin only, idempotent (unique grnLineId), audited.
+ */
+export async function postReconcileLineManual(input: {
+  grnLineId: string;
+  quantity: string;
+  unit: string;
+}): Promise<ActionResultWith<{ posted: true }>> {
+  try {
+    const session = await requireRole([Role.ADMIN]);
+    const qty = toDecimal(input.quantity || "0");
+    const unit = input.unit.trim();
+    if (qty.lte(0)) throw new ActionError("Enter a quantity greater than zero.");
+    if (!unit) throw new ActionError("Enter the unit to book the stock in.");
+
+    await db.$transaction(async (tx) => {
+      const line = await tx.gRNLine.findUnique({
+        where: { id: input.grnLineId },
+        select: {
+          acceptedQty: true,
+          grn: { select: { grnNo: true } },
+          poLine: { select: { ingredientId: true, unitPrice: true } },
+          ingredientReceipt: { select: { id: true } },
+        },
+      });
+      if (!line) throw new ActionError("GRN line not found — refresh the page.");
+      if (line.ingredientReceipt) throw new ActionError("This line is already in stock.");
+      const ingredientId = line.poLine.ingredientId;
+      if (!ingredientId) throw new ActionError("This line isn't linked to a kitchen item — add it to stock and record a receipt instead.");
+
+      await tx.$executeRaw`SELECT 1 FROM "Ingredient" WHERE "id" = ${ingredientId} FOR UPDATE`;
+      // Re-check no receipt slipped in under the lock (idempotency).
+      const dup = await tx.ingredientReceipt.findUnique({ where: { grnLineId: input.grnLineId }, select: { id: true } });
+      if (dup) throw new ActionError("This line is already in stock.");
+
+      const ing = await tx.ingredient.findUniqueOrThrow({
+        where: { id: ingredientId },
+        select: { id: true, unit: true, onHandQty: true, avgUnitCost: true },
+      });
+
+      // Preserve the line's total value: value = accepted × PO unit price,
+      // spread over the quantity the admin is booking.
+      const totalValue = toDecimal(line.acceptedQty).times(toDecimal(line.poLine.unitPrice));
+      const receiptUnitCost = totalValue.div(qty);
+
+      if (unit.toLowerCase() !== ing.unit.trim().toLowerCase()) {
+        await tx.ingredient.update({ where: { id: ing.id }, data: { unit } });
+      }
+      const { qty: newQty, avgUnitCost: newAvg } = newMovingAverage({
+        onHandQty: ing.onHandQty,
+        avgUnitCost: ing.avgUnitCost,
+        receiptQty: qty,
+        receiptUnitCost,
+      });
+      await tx.ingredient.update({
+        where: { id: ing.id },
+        data: { onHandQty: newQty.toDecimalPlaces(3).toString(), avgUnitCost: newAvg.toDecimalPlaces(4).toString() },
+      });
+      await tx.ingredientReceipt.create({
+        data: {
+          ingredientId: ing.id,
+          qty: qty.toString(),
+          unitCost: receiptUnitCost.toDecimalPlaces(4).toString(),
+          receivedAt: new Date(),
+          supplier: null,
+          note: `Reconciled (manual) from GRN ${line.grn.grnNo}`,
+          grnLineId: input.grnLineId,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "GRN_STOCK_RECONCILED_MANUAL",
+          entity: "GRNLine",
+          entityId: input.grnLineId,
+          payloadHash: sha256Json({ ingredientId: ing.id, quantity: input.quantity, unit, grnNo: line.grn.grnNo }),
+        },
+      });
+    });
+
+    return { ok: true, posted: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
+}

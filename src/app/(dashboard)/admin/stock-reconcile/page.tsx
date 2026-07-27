@@ -5,6 +5,7 @@ import { SummaryStrip } from "@/components/ik/StatChips";
 import { gateRolePage } from "@/server/rbac";
 import { previewGrnStockReconcile, type UnpostedLine } from "@/server/actions/reconcile-grn-stock";
 import { ReconcileButton } from "./ReconcileButton";
+import { ManualPostCell } from "./ManualPostCell";
 
 export const dynamic = "force-dynamic";
 
@@ -66,14 +67,23 @@ export default async function StockReconcilePage() {
           </div>
 
           <Section title={`Will post (${postableRows.length})`} rows={postableRows} />
-          {manualRows.length > 0 && <Section title={`Need a human (${manualRows.length})`} rows={manualRows} />}
+          {manualRows.length > 0 && (
+            <>
+              <p className="mb-2 text-[12.5px] text-ik-ink-2">
+                These need your call — the item already holds stock in a different unit. Set the
+                quantity + unit to book (defaults to what was bought) and post each. The rupee value
+                is preserved whatever unit you choose.
+              </p>
+              <Section title={`Need a human (${manualRows.length})`} rows={manualRows} manual />
+            </>
+          )}
         </>
       )}
     </>
   );
 }
 
-function Section({ title, rows }: { title: string; rows: UnpostedLine[] }) {
+function Section({ title, rows, manual }: { title: string; rows: UnpostedLine[]; manual?: boolean }) {
   return (
     <section className="mb-6">
       <h2 className="mb-2 text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">{title}</h2>
@@ -85,7 +95,7 @@ function Section({ title, rows }: { title: string; rows: UnpostedLine[] }) {
               <TableHead>GRN · PO</TableHead>
               <TableHead className="text-right">Accepted</TableHead>
               <TableHead>Bought / catalogued</TableHead>
-              <TableHead>What happens</TableHead>
+              {manual ? <TableHead>Post to stock</TableHead> : <TableHead>What happens</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -100,7 +110,13 @@ function Section({ title, rows }: { title: string; rows: UnpostedLine[] }) {
                 <TableCell className="text-[12.5px] text-ik-ink-2">
                   {r.poUnit} / {r.catalogueUnit ?? "—"}
                 </TableCell>
-                <TableCell className="text-[12px] text-ik-ink-2">{REASON_LABEL[r.reason] ?? r.reason}</TableCell>
+                {manual && r.ingredientId ? (
+                  <TableCell>
+                    <ManualPostCell grnLineId={r.grnLineId} defaultQty={r.acceptedQty} defaultUnit={r.poUnit} />
+                  </TableCell>
+                ) : (
+                  <TableCell className="text-[12px] text-ik-ink-2">{REASON_LABEL[r.reason] ?? r.reason}</TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
