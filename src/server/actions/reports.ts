@@ -5,6 +5,7 @@ import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { toDecimal } from "@/lib/money";
 import { istMonthStart, istMonthEnd, istMonthsInRange } from "@/lib/time";
+import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
 
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
 

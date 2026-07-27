@@ -321,7 +321,7 @@ export default async function DashboardPage({
   // bills) in two tabs, with "Mark paid" inline.
   if (isAccounts) {
     const [invoices, bills] = await Promise.all([
-      listCustomerInvoices({ status: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] }),
+      listCustomerInvoices({ status: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL], excludeProforma: true }),
       listVendorBills({
         status: [
           VendorBillStatus.MATCHED,

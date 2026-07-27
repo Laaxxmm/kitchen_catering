@@ -15,6 +15,7 @@ import { db } from "@/server/db";
 import { hasRole, requireSession } from "@/server/rbac";
 import { toDecimal } from "@/lib/money";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
+import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
 
 /**
  * Returns the 4 dashboard KPIs and a role-aware "my queue" count.
@@ -88,7 +89,8 @@ export async function getDashboardSummary() {
     // Aggregate in SQL — fetching every open invoice / ingredient row on
     // every dashboard load was a large part of the page's latency.
     db.customerInvoice.aggregate({
-      where: { status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] } },
+      // Exclude proformas — ISSUED but not real receivables (see invoice-kinds).
+      where: { status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] }, ...EXCLUDE_PROFORMA },
       _sum: { grandTotal: true, amountPaid: true },
       _count: { _all: true },
     }),
@@ -165,6 +167,7 @@ export async function getDashboardSummary() {
         where: {
           status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] },
           dueAt: { lt: now },
+          ...EXCLUDE_PROFORMA,
         },
         _sum: { grandTotal: true, amountPaid: true },
       }),

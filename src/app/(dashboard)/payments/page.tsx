@@ -18,7 +18,8 @@ export default async function PaymentsPage() {
   const now = new Date();
 
   const [invoices, bills] = await Promise.all([
-    listCustomerInvoices(),
+    // Receivables to collect — a proforma isn't collectible, so keep it out.
+    listCustomerInvoices({ excludeProforma: true }),
     listVendorBills(),
   ]);
 

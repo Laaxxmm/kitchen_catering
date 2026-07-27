@@ -27,6 +27,7 @@ import { sha256Json } from "@/lib/audit";
 import { computeLine, summarise } from "@/lib/gst";
 import { STATUS_LABEL, humanizeStatus } from "@/lib/order-status";
 import { toDecimal } from "@/lib/money";
+import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
 import { indefineGstin, indefineCompanyName, indefineStateCode } from "@/lib/org";
 import { eInvoiceEnabled, getEInvoiceProvider } from "@/server/services/e-invoice/provider";
 import { notifyRoles } from "@/server/notification-core";
@@ -1196,12 +1197,16 @@ async function releaseCustomerInvoiceHoldInner(id: string, note?: string): Promi
 
 // ─── Queries ─────────────────────────────────────────────────────────────
 
-export async function listCustomerInvoices(opts: { status?: CustomerInvoiceStatus[]; customerId?: string } = {}) {
+export async function listCustomerInvoices(
+  opts: { status?: CustomerInvoiceStatus[]; customerId?: string; excludeProforma?: boolean } = {},
+) {
   await requireRole(READ_ROLES);
   return db.customerInvoice.findMany({
     where: {
       ...(opts.status ? { status: { in: opts.status } } : {}),
       ...(opts.customerId ? { customerId: opts.customerId } : {}),
+      // Collect/receivable views pass this so proformas don't show as owed.
+      ...(opts.excludeProforma ? EXCLUDE_PROFORMA : {}),
     },
     include: {
       customer: { select: { name: true } },

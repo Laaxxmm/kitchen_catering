@@ -12,6 +12,7 @@ import {
 import { db } from "@/server/db";
 import { hasRole, requireSession } from "@/server/rbac";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
+import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
 import type { NavBadges } from "@/lib/nav-config";
 
 /**
@@ -66,12 +67,13 @@ const computeNavBadges = unstable_cache(
         where: { status: { in: [VendorBillStatus.MATCHED, VendorBillStatus.APPROVED, VendorBillStatus.OVERDUE] } },
       }),
       db.customerInvoice.count({
-        where: { status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] } },
+        where: { status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] }, ...EXCLUDE_PROFORMA },
       }),
       db.customerInvoice.count({
         where: {
           status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] },
           dueAt: { lt: now },
+          ...EXCLUDE_PROFORMA,
         },
       }),
     ]);

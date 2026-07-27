@@ -1,4 +1,5 @@
 import { db } from "@/server/db";
+import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
 
 /**
  * The full document trail for one catering order — every step that actually
@@ -78,7 +79,9 @@ export async function getOrderTrail(orderId: string) {
       },
     }),
     db.customerInvoice.findMany({
-      where: { orderId, status: { not: "CANCELLED" } },
+      // Proformas aren't real invoices — excluding keeps the trail totals from
+      // double-counting the order value (see invoice-kinds).
+      where: { orderId, status: { not: "CANCELLED" }, ...EXCLUDE_PROFORMA },
       orderBy: { issuedAt: "asc" },
       select: {
         invoiceNo: true, status: true, grandTotal: true, amountPaid: true, issuedAt: true,

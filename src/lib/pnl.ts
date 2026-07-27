@@ -2,6 +2,7 @@ import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { toDecimal } from "./money";
 import { computeOrderRecipeCost } from "./recipe-cost";
+import { EXCLUDE_PROFORMA } from "./invoice-kinds";
 
 export interface OrderPnL {
   orderId: string;
@@ -60,7 +61,9 @@ export async function computeOrderPnL(orderId: string): Promise<OrderPnL | null>
 
   // Revenue
   const invoices = await db.customerInvoice.findMany({
-    where: { orderId, status: { not: "CANCELLED" } },
+    // A proforma carries the full order value at status ISSUED but is not
+    // revenue — counting it alongside the real invoice doubled the figure.
+    where: { orderId, status: { not: "CANCELLED" }, ...EXCLUDE_PROFORMA },
     select: { grandTotal: true, amountPaid: true },
   });
   const revenueInvoiced = invoices.reduce((s, i) => s.plus(toDecimal(i.grandTotal)), new Decimal(0));

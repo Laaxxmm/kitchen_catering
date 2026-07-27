@@ -2,6 +2,7 @@ import { CustomerInvoiceStatus } from "@prisma/client";
 import { db } from "@/server/db";
 import { buildWorkbook, xlsxResponse } from "@/lib/exports/excel";
 import { gateReport, parseRange } from "@/lib/exports/report-util";
+import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export async function GET(req: Request) {
 
   const [invoices, bills] = await Promise.all([
     db.customerInvoice.findMany({
-      where: { issuedAt: { gte: from, lte: to }, status: { not: CustomerInvoiceStatus.CANCELLED } },
+      where: { issuedAt: { gte: from, lte: to }, status: { not: CustomerInvoiceStatus.CANCELLED }, ...EXCLUDE_PROFORMA },
       select: {
         invoiceNo: true, issuedAt: true, placeOfSupplyStateCode: true,
         subtotal: true, cgst: true, sgst: true, igst: true, taxTotal: true, grandTotal: true,

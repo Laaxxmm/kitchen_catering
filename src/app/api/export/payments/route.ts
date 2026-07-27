@@ -3,6 +3,7 @@ import { db } from "@/server/db";
 import { buildWorkbook, xlsxResponse } from "@/lib/exports/excel";
 import { gateReport } from "@/lib/exports/report-util";
 import { toDecimal } from "@/lib/money";
+import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export async function GET() {
 
   const [invoices, bills] = await Promise.all([
     db.customerInvoice.findMany({
-      where: { status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] } },
+      where: { status: { in: [CustomerInvoiceStatus.ISSUED, CustomerInvoiceStatus.PARTIAL] }, ...EXCLUDE_PROFORMA },
       select: { invoiceNo: true, issuedAt: true, dueAt: true, grandTotal: true, amountPaid: true, status: true, customer: { select: { name: true } } },
       orderBy: { dueAt: "asc" },
       take: 5000,
