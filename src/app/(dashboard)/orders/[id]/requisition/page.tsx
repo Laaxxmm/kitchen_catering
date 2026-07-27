@@ -1,9 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { getOrder } from "@/server/actions/orders";
-import { createIngredient, listIngredients } from "@/server/actions/inventory";
+import { listIngredients } from "@/server/actions/inventory";
 import { createChefRequisition } from "@/server/actions/chef-requisitions";
-import type { ActionResultWith } from "@/lib/action-result";
 import { RequisitionDraftForm } from "./_components/RequisitionDraftForm";
 
 export const dynamic = "force-dynamic";
@@ -31,28 +30,8 @@ export default async function RaiseRequisitionPage({ params }: { params: Promise
     redirect(`/requisitions/${result.id}`);
   }
 
-  // Inline ingredient creator — the chef adds a missing catalogue item
-  // right here instead of leaving for /inventory/ingredients/new. Opening
-  // qty is omitted so it starts at 0 on hand; the requisition's shortage
-  // path (AWAITING_PROCUREMENT) covers it. Gated inside createIngredient
-  // (CATALOG_ROLES includes KITCHEN_HEAD).
-  async function quickAddIngredient(input: {
-    sku: string;
-    name: string;
-    unit: string;
-    subStore: "VEGETABLE" | "GROCERY" | "MILK" | "WATER" | "OTHER";
-    category?: string;
-  }): Promise<ActionResultWith<{ id: string }>> {
-    "use server";
-    return await createIngredient({
-      sku: input.sku,
-      name: input.name,
-      unit: input.unit,
-      subStore: input.subStore,
-      category: input.category ?? null,
-    });
-  }
-
+  // No inline ingredient creator — adding catalogue items is management-only
+  // now (see CATALOG_CREATE_ROLES); the chef picks from what already exists.
   return (
     <>
       <PageHeader
@@ -70,7 +49,6 @@ export default async function RaiseRequisitionPage({ params }: { params: Promise
         }))}
         orderItems={order.items.map((it) => ({ id: it.id, dishName: it.dish.name }))}
         onSubmit={create}
-        onQuickAddIngredient={quickAddIngredient}
       />
     </>
   );

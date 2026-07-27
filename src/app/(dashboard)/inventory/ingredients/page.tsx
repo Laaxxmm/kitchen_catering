@@ -27,8 +27,10 @@ export default async function IngredientsPage({
   ]);
   const role = session?.user?.role as Role | undefined;
   const canEdit = role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER;
-  // Catalogue management (add an ingredient) also includes the chef.
-  const canAdd = canEdit || role === Role.KITCHEN_HEAD;
+  // Creating a NEW ingredient is management-only — the store and the chef were
+  // adding duplicates of the same item under different names/units, which
+  // stranded GRNs and corrupted stock. They can still edit what exists.
+  const canAdd = role === Role.ADMIN || role === Role.MANAGER;
 
   const rows = ingredients.map((i) => {
     const onHand = toDecimal(i.onHandQty);

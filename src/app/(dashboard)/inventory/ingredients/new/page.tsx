@@ -6,8 +6,8 @@ import { createIngredient } from "@/server/actions/inventory";
 import type { IngredientInputT } from "@/lib/validators";
 
 export default async function NewIngredientPage() {
-  // Store keeper + chef curate the kitchen catalogue (+ management oversight).
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD]);
+  // Adding a new ingredient is management-only — see CATALOG_CREATE_ROLES.
+  await gateRolePage([Role.ADMIN, Role.MANAGER]);
 
   async function submit(input: IngredientInputT) {
     "use server";

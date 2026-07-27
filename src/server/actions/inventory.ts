@@ -35,10 +35,14 @@ async function lockIngredientRow(tx: Prisma.TransactionClient, id: string) {
 
 // Stock movements (receipts / issues) — the store's job (+ management).
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
-// Managing the ingredient CATALOGUE (add / edit / deactivate / reorder level)
-// is broader: the chef (kitchen head) also curates the kitchen's item list,
-// so they can add ingredients — but not record receipts or issue stock.
+// Maintaining EXISTING catalogue entries (edit / deactivate / reorder level)
+// stays broad — the store and the chef curate the items they work with daily.
 const CATALOG_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD];
+// CREATING a new ingredient is management-only. Letting the store and chef
+// add items produced duplicates of the same ingredient under different names
+// and units, which then stranded GRNs and corrupted stock — so a new item is
+// now a deliberate management decision.
+const CATALOG_CREATE_ROLES = [Role.ADMIN, Role.MANAGER];
 // Manual stock corrections (write-offs, opening fixes, post-count tweaks)
 // are admin/manager only. Storekeeper records new stock through receipts
 // — that path has a unit cost + supplier, this one is a free-form quantity
@@ -94,7 +98,7 @@ export async function createIngredient(raw: unknown): Promise<ActionResultWith<{
 }
 
 async function createIngredientInner(raw: unknown): Promise<{ ok: true; id: string }> {
-  const session = await requireRole(CATALOG_ROLES);
+  const session = await requireRole(CATALOG_CREATE_ROLES);
   const input = IngredientInput.parse(raw);
 
   // Friendly duplicate check up front (the DB unique on sku still backstops

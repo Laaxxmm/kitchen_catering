@@ -6,9 +6,8 @@ import { toast } from "sonner";
 import { Decimal } from "decimal.js";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
-import { QuickAddIngredient, type QuickIngredientInput } from "@/components/ik/QuickAddIngredient";
 import { isNextNavigationError } from "@/lib/next-error";
-import type { ActionResult, ActionResultWith } from "@/lib/action-result";
+import type { ActionResult } from "@/lib/action-result";
 
 interface Ingredient { id: string; name: string; sku: string; unit: string; avgCost: string }
 interface OrderItem { id: string; dishName: string }
@@ -17,8 +16,6 @@ interface Props {
   ingredients: Ingredient[];
   orderItems: OrderItem[];
   onSubmit: (lines: Array<{ ingredientId: string; requestedQty: string; orderItemId: string | null; notes: string | null }>) => Promise<ActionResult | void>;
-  /** Inline ingredient creator — lets the chef add a missing catalogue item without leaving the form. */
-  onQuickAddIngredient?: (input: QuickIngredientInput) => Promise<ActionResultWith<{ id: string }>>;
 }
 
 interface DraftLine {
@@ -32,11 +29,10 @@ function emptyLine(firstIngredientId = ""): DraftLine {
   return { ingredientId: firstIngredientId, requestedQty: "1", orderItemId: "", notes: "" };
 }
 
-export function RequisitionDraftForm({ ingredients, orderItems, onSubmit, onQuickAddIngredient }: Props) {
+export function RequisitionDraftForm({ ingredients, orderItems, onSubmit }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  // Local copy so a quick-added ingredient shows up in the picker instantly.
-  const [ingredientList, setIngredientList] = useState<Ingredient[]>(ingredients);
+  const ingredientList = ingredients;
   const [lines, setLines] = useState<DraftLine[]>([emptyLine(ingredients[0]?.id ?? "")]);
 
   // Searchable ingredient options — the catalogue is long, so the chef types
@@ -48,19 +44,6 @@ export function RequisitionDraftForm({ ingredients, orderItems, onSubmit, onQuic
 
   function setLine(idx: number, patch: Partial<DraftLine>) {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
-  }
-
-  // A freshly quick-added ingredient (0 on hand, 0 avg cost) drops into the
-  // first line that has no ingredient yet, or a new line.
-  function onIngredientCreated(ing: { id: string; sku: string; name: string; unit: string }) {
-    setIngredientList((prev) => [{ ...ing, avgCost: "0" }, ...prev]);
-    setLines((prev) => {
-      const emptyIdx = prev.findIndex((l) => !l.ingredientId);
-      if (emptyIdx >= 0) {
-        return prev.map((l, i) => (i === emptyIdx ? { ...l, ingredientId: ing.id } : l));
-      }
-      return [...prev, { ...emptyLine(), ingredientId: ing.id }];
-    });
   }
 
   const totalCost = useMemo(() => {
@@ -107,11 +90,9 @@ export function RequisitionDraftForm({ ingredients, orderItems, onSubmit, onQuic
             + Add line
           </Button>
         </div>
-        {onQuickAddIngredient && (
-          <div className="mb-2 flex flex-wrap items-start gap-2">
-            <QuickAddIngredient onCreate={onQuickAddIngredient} onCreated={onIngredientCreated} />
-          </div>
-        )}
+        {/* No inline "new ingredient" here — creating catalogue items is
+            management-only (duplicate items added from this shortcut stranded
+            GRNs and stock). Ask a manager to add anything missing. */}
         <div className="overflow-x-auto">
           <table className="w-full text-[12.5px]">
             <thead className="border-b border-ik-rule text-left text-ik-ink-3">

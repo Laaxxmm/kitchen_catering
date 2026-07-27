@@ -80,6 +80,9 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // Recording incoming stock — store + accounts (books-side receipt). The
   // chef can view stock levels but doesn't record receipts.
   { pattern: /^\/inventory\/receipts(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "ACCOUNTS"] },
+  // Adding a NEW ingredient is management-only (store/chef were creating
+  // duplicates that stranded GRNs). Must precede the /inventory rule below.
+  { pattern: /^\/inventory\/ingredients\/new(\/|$)/, allow: ["ADMIN", "MANAGER"] },
   // Inventory landing / ingredient list / stock levels — read for chef too.
   { pattern: /^\/inventory(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "KITCHEN_HEAD", "ACCOUNTS"] },
 
