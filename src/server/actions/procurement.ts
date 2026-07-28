@@ -278,12 +278,20 @@ async function submitVendorPOInner(id: string): Promise<{ ok: true }> {
         procurementType: true,
         poNo: true,
         grandTotal: true,
-        vendor: { select: { name: true } },
+        vendor: { select: { name: true, approvalStatus: true } },
       },
     });
     if (!po) throw new ActionError("PO not found");
     if (po.status !== VendorPOStatus.DRAFT) {
       throw new ActionError("Only DRAFT POs can be submitted");
+    }
+    // Store-created vendors need manager/admin sign-off before an order is
+    // placed with them. Drafting against a pending vendor is fine — this is
+    // the point where the PO would actually go out, so it's the real gate.
+    if (po.vendor.approvalStatus !== "APPROVED") {
+      throw new ActionError(
+        `"${po.vendor.name}" is still awaiting approval — a manager must approve the vendor before this PO can be submitted. The draft is saved.`,
+      );
     }
     const nextStatus =
       po.approvalTier === "auto" ? VendorPOStatus.APPROVED : VendorPOStatus.PENDING_APPROVAL;

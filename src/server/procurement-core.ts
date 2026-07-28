@@ -37,17 +37,16 @@ export async function createVendorPOTx(
     }
   }
 
-  // Store-created vendors need GM/Admin sign-off before money moves on them.
+  // Store-created vendors need GM/Admin sign-off before money moves on them —
+  // but that gate lives on SUBMIT, not here. A draft commits nothing and is
+  // never sent, so blocking creation only threw away a form the storekeeper
+  // had just filled in (they add the vendor inline on this very page). The PO
+  // page flags the pending vendor and submitVendorPO refuses until approved.
   const vendor = await tx.vendor.findUnique({
     where: { id: input.vendorId },
     select: { approvalStatus: true, name: true },
   });
   if (!vendor) throw new ActionError("Vendor not found — refresh and pick again.");
-  if (vendor.approvalStatus !== "APPROVED") {
-    throw new ActionError(
-      `"${vendor.name}" is awaiting approval — ask a manager to approve them first.`,
-    );
-  }
 
   const supplierState = indefineStateCode();
   const summary = summarise({
