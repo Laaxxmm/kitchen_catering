@@ -7,6 +7,7 @@ import { ActionError, actionFailure, type ActionResultWith } from "@/server/acti
 import { newMovingAverage } from "@/lib/inventory-cost";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
+import { unitsEquivalent } from "@/lib/units";
 
 /**
  * Recover stock for goods that were received (GRN accepted) but never
@@ -82,7 +83,7 @@ async function classify(): Promise<UnpostedLine[]> {
       return { ...base, ingredientId: null, itemName: p.description, catalogueUnit: null, reason: "free-text" as const, postable: false };
     }
     const ing = p.ingredient;
-    const unitSame = p.unit.trim().toLowerCase() === ing.unit.trim().toLowerCase();
+    const unitSame = unitsEquivalent(p.unit, ing.unit);
     const fresh = toDecimal(ing.onHandQty).eq(0) && ing._count.receipts === 0 && ing._count.issues === 0;
     const reason: UnpostedLine["reason"] = unitSame
       ? "unit-match"
@@ -140,7 +141,7 @@ export async function applyGrnStockReconcile(): Promise<ActionResultWith<{ poste
 
         // Re-base the catalogue unit to the purchase unit only while the item
         // is still untouched (guarded again under the lock).
-        const unitSame = c.poUnit.trim().toLowerCase() === ing.unit.trim().toLowerCase();
+        const unitSame = unitsEquivalent(c.poUnit, ing.unit);
         if (!unitSame) {
           const receipts = await tx.ingredientReceipt.count({ where: { ingredientId: ing.id } });
           const issues = await tx.ingredientIssue.count({ where: { ingredientId: ing.id } });
@@ -244,7 +245,7 @@ export async function postReconcileLineManual(input: {
       const totalValue = toDecimal(line.acceptedQty).times(toDecimal(line.poLine.unitPrice));
       const receiptUnitCost = totalValue.div(qty);
 
-      if (unit.toLowerCase() !== ing.unit.trim().toLowerCase()) {
+      if (!unitsEquivalent(unit, ing.unit)) {
         await tx.ingredient.update({ where: { id: ing.id }, data: { unit } });
       }
       const { qty: newQty, avgUnitCost: newAvg } = newMovingAverage({

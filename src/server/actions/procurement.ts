@@ -37,6 +37,7 @@ import { indefineStateCode } from "@/lib/org";
 import { nextGRNNumber, nextVendorBillNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { newMovingAverage } from "@/lib/inventory-cost";
+import { unitsEquivalent } from "@/lib/units";
 import { toDecimal } from "@/lib/money";
 import { getSettingOr } from "@/lib/settings";
 import { createNotification, notifyRoles } from "@/server/notification-core";
@@ -781,10 +782,10 @@ export async function createGRN(
   }
 }
 
-/** lower(trim(unit)) — "Pkt " and "pkt" are the same unit, "pkt" vs "piece" is not. */
-function unitsMatch(a: string, b: string): boolean {
-  return a.trim().toLowerCase() === b.trim().toLowerCase();
-}
+// Unit comparison now lives in @/lib/units (unitsEquivalent), which folds
+// spelling variants — "pcts"/"pct", "Nos"/"nos", "Kgs"/"kg" — so a typing
+// difference can't stop received goods reaching stock. Genuinely different
+// measures (pkt vs kg) still block, because only a human knows the pack size.
 
 /**
  * Row-lock an ingredient for the rest of the transaction (local mirror of
@@ -965,16 +966,49 @@ async function createGRNInner(
         );
       }
 
+      // Does the purchase unit differ from the catalogue in a way that
+      // actually matters? Spelling variants ("pcts" vs "pct") are the same
+      // measure and must not block posting; packet vs kg genuinely does.
+      const unitDiffers =
+        accepted.gt(0) && poLine.ingredientId && poLine.ingredient
+          ? !unitsEquivalent(poLine.unit, poLine.ingredient.unit)
+          : false;
+      // An item nobody has transacted yet has no balance to corrupt, so the
+      // catalogue simply adopts the unit it's actually bought in and the goods
+      // post normally. This is the same safe rule the reconcile tool applies —
+      // doing it here stops the backlog re-forming after every GRN.
+      const canRebaseUnit =
+        unitDiffers && poLine.ingredientId
+          ? await (async () => {
+              const [receipts, issues, fresh] = await Promise.all([
+                tx.ingredientReceipt.count({ where: { ingredientId: poLine.ingredientId! } }),
+                tx.ingredientIssue.count({ where: { ingredientId: poLine.ingredientId! } }),
+                tx.ingredient.findUniqueOrThrow({
+                  where: { id: poLine.ingredientId! },
+                  select: { onHandQty: true },
+                }),
+              ]);
+              return receipts === 0 && issues === 0 && toDecimal(fresh.onHandQty).eq(0);
+            })()
+          : false;
+
       // Post inventory only if accepted > 0 AND the PO line links to an Ingredient.
-      if (accepted.gt(0) && poLine.ingredientId && poLine.ingredient &&
-          !unitsMatch(poLine.unit, poLine.ingredient.unit)) {
-        // PO bought in a different unit than the catalogue tracks — the
-        // accepted qty/price would corrupt onHandQty and moving-average
-        // cost. Record the receipt on the GRN but leave stock alone.
+      if (unitDiffers && !canRebaseUnit && poLine.ingredient) {
+        // PO bought in a genuinely different unit on an item that already
+        // holds stock — the accepted qty/price would corrupt onHandQty and
+        // moving-average cost. Record the receipt on the GRN but leave stock
+        // alone; /admin/stock-reconcile lets an admin post it with the real
+        // conversion.
         warnings.push(
-          `GRN ${grnNo}: ${poLine.ingredient.name} received in ${poLine.unit.trim()} but the catalogue tracks ${poLine.ingredient.unit.trim()} — stock NOT auto-updated; correct it via stock count / receipt and then issue.`,
+          `GRN ${grnNo}: ${poLine.ingredient.name} received in ${poLine.unit.trim()} but the catalogue tracks ${poLine.ingredient.unit.trim()} — stock NOT auto-updated. An admin can post it from Reconcile received stock.`,
         );
       } else if (accepted.gt(0) && poLine.ingredientId && poLine.ingredient) {
+        if (canRebaseUnit) {
+          await tx.ingredient.update({
+            where: { id: poLine.ingredientId },
+            data: { unit: poLine.unit.trim() },
+          });
+        }
         // H1: re-read onHandQty/avgUnitCost under the row lock taken above —
         // the PO-include snapshot (poLine.ingredient) is stale by now.
         const ing = await tx.ingredient.findUniqueOrThrow({
@@ -1050,7 +1084,7 @@ async function createGRNInner(
       // post a real BanquetReceipt, bump the item's stock, and flip the
       // linked requisition lines back to PENDING so the store issues them.
       if (accepted.gt(0) && poLine.banquetItemId && poLine.banquetItem &&
-          !unitsMatch(poLine.unit, poLine.banquetItem.unit)) {
+          !unitsEquivalent(poLine.unit, poLine.banquetItem.unit)) {
         // Same unit-mismatch guard as the ingredient branch: no receipt, no
         // stock bump — and deliberately NO requisition-line flip. If stock
         // wasn't posted the store can't issue, so linked lines stay
