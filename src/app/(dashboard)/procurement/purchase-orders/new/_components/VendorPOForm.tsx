@@ -150,6 +150,20 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
     ...banquetItems.map((b) => ({ value: `bq:${b.id}`, label: `Banquet · ${b.sku} · ${b.name}` })),
   ], [ingredients, banquetItems]);
 
+  const vendorComboOptions: ComboOption[] = useMemo(
+    () => vendorOptions.map((v) => ({ value: v.id, label: `${v.code} · ${v.name}` })),
+    [vendorOptions],
+  );
+
+  // Live duplicate check while typing a "new" supplier — compares the way the
+  // server does (trimmed, case-insensitive) so the warning always matches the
+  // record that would be reused.
+  const duplicateVendor = useMemo(() => {
+    const typed = newVendorName.trim().toLowerCase();
+    if (typed.length < 2) return null;
+    return vendorOptions.find((v) => v.name.trim().toLowerCase() === typed) ?? null;
+  }, [newVendorName, vendorOptions]);
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!vendorId) return toast.error("Pick a vendor");
@@ -214,17 +228,18 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
             three-up grid. */}
         <div className="grid gap-1">
           <Label htmlFor="vendorId">Vendor<span className="text-gold" aria-hidden> *</span></Label>
-          <select
-            id="vendorId"
+          {/* Searchable, like the ingredient picker below. A plain dropdown of
+              every supplier was unusable on a phone, so staff reached for
+              "+ Add new vendor" instead of scrolling — which is where the
+              duplicate suppliers came from. */}
+          <Combobox
+            options={vendorComboOptions}
             value={vendorId}
-            onChange={(e) => setVendorId(e.target.value)}
-            className="h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
-          >
-            <option value="" disabled>— pick vendor —</option>
-            {vendorOptions.map((v) => <option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}
-          </select>
+            onChange={setVendorId}
+            placeholder="Type to search a supplier…"
+          />
           <div className="flex items-center justify-between">
-            <p className="text-[11.5px] text-ik-ink-3">Who you&apos;re buying from. Pick the supplier, then set their prices below.</p>
+            <p className="text-[11.5px] text-ik-ink-3">Who you&apos;re buying from. Search by name or code, then set their prices below.</p>
             {onQuickAddVendor && !addingVendor && (
               <button type="button" className="text-[11.5px] text-brand hover:underline" onClick={() => setAddingVendor(true)}>
                 + Add new vendor
@@ -236,6 +251,20 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
               <div className="grid gap-1">
                 <Label htmlFor="newVendorName">New vendor name</Label>
                 <Input id="newVendorName" value={newVendorName} onChange={(e) => setNewVendorName(e.target.value)} placeholder="e.g. Amazon Business" />
+                {/* Catch the duplicate before it's created, not after. */}
+                {duplicateVendor && (
+                  <button
+                    type="button"
+                    className="text-left text-[11.5px] font-medium text-amber-700 hover:underline"
+                    onClick={() => {
+                      setVendorId(duplicateVendor.id);
+                      setAddingVendor(false);
+                      setNewVendorName("");
+                    }}
+                  >
+                    “{duplicateVendor.name}” already exists — tap to use it instead of adding a copy.
+                  </button>
+                )}
               </div>
               <div className="grid gap-1">
                 <Label htmlFor="newVendorState">State code</Label>

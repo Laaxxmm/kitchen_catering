@@ -114,8 +114,10 @@ export type CustomerGroupInputT = z.infer<typeof CustomerGroupInput>;
 // =====================================================================
 
 export const IngredientInput = z.object({
-  sku: z.string().min(1).max(40),
-  name: z.string().min(1).max(160),
+  // Trimmed: an untrimmed "Paneer " matched nothing and became a second
+  // ingredient, splitting stock away from "Paneer" and stranding GRNs.
+  sku: z.string().trim().min(1).max(40),
+  name: z.string().trim().min(1).max(160),
   category: z.string().max(60).nullable().optional(),
   // Sub-store discriminator — drives the per-category requisition
   // approval rules from the Workflow doc matrix. See

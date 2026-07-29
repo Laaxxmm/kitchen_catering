@@ -11,6 +11,7 @@ import {
   IngredientIssueInput,
 } from "@/lib/validators";
 import { newMovingAverage } from "@/lib/inventory-cost";
+import { unitsEquivalent } from "@/lib/units";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
 import { getSettingOr } from "@/lib/settings";
@@ -507,7 +508,7 @@ async function mergeIngredientInner(sourceId: string, targetId: string): Promise
 
     // Merging across units numerically corrupts stock, cost and every open
     // line (5 pkt folded into kg becomes 5 kg) — refuse (AUDIT_REPORT M20).
-    if (source.unit.trim().toLowerCase() !== target.unit.trim().toLowerCase()) {
+    if (!unitsEquivalent(source.unit, target.unit)) {
       throw new ActionError(
         `These items are tracked in different units (${source.unit} vs ${target.unit}) — align the units first, then merge.`,
       );
