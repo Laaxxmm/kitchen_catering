@@ -571,7 +571,9 @@ export const PaymentReversalInput = z.object({
 // =====================================================================
 
 export const VendorInput = z.object({
-  name: z.string().min(1).max(200),
+  // Trimmed: an untrimmed "Smart Bazar " created a second vendor alongside the
+  // approved "Smart Bazar", and POs then pointed at the unapproved twin.
+  name: z.string().trim().min(1).max(200),
   gstin: gstin.nullable().optional(),
   pan: z.string().max(20).nullable().optional(),
   stateCode,

@@ -65,6 +65,17 @@ async function createVendorInner(raw: unknown): Promise<{ ok: true; id: string; 
   const session = await requireRole(WRITE_ROLES);
   const input = VendorInput.parse(raw);
 
+  // Re-adding a supplier that already exists used to mint a duplicate — and
+  // since store-created vendors start PENDING_APPROVAL, that duplicate then
+  // blocked POs even though the original was already approved ("Smart Bazar "
+  // vs "Smart Bazar"). Reuse the existing record instead; the caller selects
+  // it exactly as if it had just been created.
+  const existing = await db.vendor.findFirst({
+    where: { name: { equals: input.name, mode: "insensitive" }, active: true },
+    select: { id: true, code: true },
+  });
+  if (existing) return { ok: true, id: existing.id, code: existing.code };
+
   // Store-keeper-added vendors need a management sign-off before POs can be
   // raised on them; admin/manager/accounts creations stay auto-approved.
   const needsApproval = session.user.role === Role.STORE_KEEPER;
