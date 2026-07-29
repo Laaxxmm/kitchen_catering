@@ -24,6 +24,7 @@ import { AccountsBoard } from "@/components/ik/dashboard/AccountsBoard";
 import { listOrders, listUpcomingOrdersForStore } from "@/server/actions/orders";
 import { listChefRequisitions } from "@/server/actions/chef-requisitions";
 import { listVendorPOs, listVendorBills } from "@/server/actions/procurement";
+import { listPendingVendors } from "@/server/actions/vendors";
 import { listBanquetRequisitions } from "@/server/actions/banquet";
 import { listCustomerInvoices } from "@/server/actions/customer-invoices";
 import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
@@ -600,6 +601,9 @@ export default async function DashboardPage({
         listOrders({ status: [OrderStatus.PENDING_ADMIN_APPROVAL] }),
         listOrders({ status: [OrderStatus.CHANGES_PROPOSED_BY_CHEF] }),
         listVendorPOs({ status: [VendorPOStatus.PENDING_APPROVAL] }),
+        // Store-added suppliers awaiting sign-off — every PO on them is
+        // blocked at submit, so they must sit in the manager's face here.
+        listPendingVendors(),
       ])
     : null;
 
@@ -731,6 +735,12 @@ export default async function DashboardPage({
                 grandTotal: po.grandTotal.toString(),
                 awaitingAdmin: po.managerApprovedAt != null,
               }))}
+            pendingVendors={approvals[3].map((v) => ({
+              id: v.id,
+              name: v.name,
+              code: v.code,
+              createdAt: v.createdAt.toISOString(),
+            }))}
             viewerIsAdmin={role === "ADMIN"}
           />
         )}

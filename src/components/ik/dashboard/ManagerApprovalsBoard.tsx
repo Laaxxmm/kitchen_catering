@@ -15,6 +15,7 @@ import { isNextNavigationError } from "@/lib/next-error";
 import type { ActionResult } from "@/lib/action-result";
 import { adminApproveOrder, managerApproveChefSuggestion } from "@/server/actions/orders";
 import { approveVendorPO } from "@/server/actions/procurement";
+import { approveVendor } from "@/server/actions/vendors";
 
 export interface OrderToApprove {
   id: string;
@@ -40,11 +41,20 @@ export interface PurchaseOrder {
   /** Manager step already recorded — only the admin's signature is left. */
   awaitingAdmin: boolean;
 }
+export interface PendingVendor {
+  id: string;
+  name: string;
+  code: string;
+  /** ISO createdAt. */
+  createdAt: string;
+}
 
 interface Props {
   ordersToApprove: OrderToApprove[];
   orderChanges: OrderChange[];
   purchaseOrders: PurchaseOrder[];
+  /** Store-added suppliers awaiting sign-off — every PO on them is blocked. */
+  pendingVendors?: PendingVendor[];
   viewerIsAdmin?: boolean;
 }
 
@@ -66,14 +76,16 @@ const CHANNEL_LABEL: Record<OrderChannel, string> = {
  * grows downwards and stays on screen. Nothing here gets missed: the order
  * gate sits first since the kitchen waits on it.
  */
-export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseOrders, viewerIsAdmin = false }: Props) {
-  const total = ordersToApprove.length + orderChanges.length + purchaseOrders.length;
+export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseOrders, pendingVendors = [], viewerIsAdmin = false }: Props) {
+  const total =
+    ordersToApprove.length + orderChanges.length + purchaseOrders.length + pendingVendors.length;
   if (total === 0) return null;
 
   const tabs = [
     { key: "orders", label: "Orders to approve", hint: "Commercial sign-off", count: ordersToApprove.length },
     { key: "changes", label: "Order changes", hint: "Chef suggestions", count: orderChanges.length },
     { key: "po", label: "Purchase orders", hint: "Sign off spend", count: purchaseOrders.length },
+    { key: "vendors", label: "New suppliers", hint: "Approve to unblock POs", count: pendingVendors.length },
   ];
 
   // Soonest event first (the kitchen waits on these); POs keep their order.
@@ -97,6 +109,13 @@ export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseO
             return (
               <CappedList items={changesSorted} className={CARD_GRID} keyOf={(o) => o.id}>
                 {(o) => <OrderChangeCard change={o} />}
+              </CappedList>
+            );
+          }
+          if (active === "vendors") {
+            return (
+              <CappedList items={pendingVendors} className={CARD_GRID} keyOf={(v) => v.id}>
+                {(v) => <VendorApprovalCard vendor={v} />}
               </CappedList>
             );
           }
@@ -257,6 +276,37 @@ function PurchaseOrderCard({ po, viewerIsAdmin }: { po: PurchaseOrder; viewerIsA
           </span>
         )}
         <Link href={`/procurement/purchase-orders/${po.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open</Link>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * A store-added supplier awaiting sign-off. Until approved, every PO on
+ * them refuses to submit — so the approve action lives right here on the
+ * board instead of only on the vendor detail page, where nobody looked.
+ */
+function VendorApprovalCard({ vendor }: { vendor: PendingVendor }) {
+  const { pending, run } = useApprove();
+  return (
+    <li className={CARD + " border border-amber/45 bg-amber-wash/40"}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="font-mono text-[12.5px] text-brand-700">{vendor.code}</span>
+        <span className="text-[11.5px] text-ik-ink-3">added {formatIST(new Date(vendor.createdAt), "d MMM")}</span>
+      </div>
+      <div className="mt-1 text-[13px] text-ik-ink"><strong>{vendor.name}</strong></div>
+      <div className="mt-0.5 text-[11.5px] text-ik-ink-2">
+        New supplier from the store — their purchase orders are blocked until you approve.
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          disabled={pending}
+          onClick={() => run(() => approveVendor(vendor.id), `${vendor.name} approved — their POs can now be submitted`)}
+        >
+          Approve
+        </Button>
+        <Link href={`/procurement/vendors/${vendor.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Review</Link>
       </div>
     </li>
   );

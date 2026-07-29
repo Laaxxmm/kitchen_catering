@@ -66,6 +66,11 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
 
   async function doSubmit() { "use server"; return await submitVendorPO(id); }
   async function doApprove() { "use server"; return await approveVendorPO(id); }
+  async function doApproveVendor() {
+    "use server";
+    const { approveVendor } = await import("@/server/actions/vendors");
+    return await approveVendor(po!.vendorId);
+  }
   // Returns the result — ActionResultButton / NotifyVendorBlock check
   // `res.ok` and toast the failure.
   async function doMarkSent() { "use server"; return await sendVendorPO(id); }
@@ -161,6 +166,16 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
           status={po.status}
           vendorPending={po.vendor.approvalStatus !== "APPROVED"}
           vendorName={po.vendor.name}
+          approveVendorSlot={
+            role === Role.ADMIN || role === Role.MANAGER ? (
+              <ActionResultButton
+                action={doApproveVendor}
+                successMessage={`${po.vendor.name} approved — submit the PO`}
+              >
+                Approve vendor now
+              </ActionResultButton>
+            ) : undefined
+          }
           canReceive={canReceive}
           canRecordBill={canRecordBill}
           receiveHref={`/procurement/grns/new?poId=${po.id}`}
@@ -305,6 +320,8 @@ interface NextStepProps {
   /** Vendor still awaiting manager sign-off — submit will refuse. */
   vendorPending: boolean;
   vendorName: string;
+  /** One-tap approve, rendered only for admin/manager viewers. */
+  approveVendorSlot?: React.ReactNode;
   canReceive: boolean;
   canRecordBill: boolean;
   receiveHref: string;
@@ -315,19 +332,22 @@ interface NextStepProps {
  * gets the richer NotifyVendorBlock with WhatsApp/email/mark-sent actions;
  * everything else just needs a one-liner pointing at the next button.
  */
-function NextStep({ status, vendorPending, vendorName, canReceive, canRecordBill, receiveHref }: NextStepProps) {
+function NextStep({ status, vendorPending, vendorName, approveVendorSlot, canReceive, canRecordBill, receiveHref }: NextStepProps) {
   if (status === VendorPOStatus.CANCELLED || status === VendorPOStatus.CLOSED) return null;
 
   let body: React.ReactNode = null;
 
   // A newly added supplier can be drafted against, but nothing goes out until
   // a manager approves them — say so here rather than only failing on submit.
+  // An admin/manager viewing the blocked PO gets the approve button right in
+  // the banner, so unblocking is one tap instead of a hunt through /vendors.
   if (status === VendorPOStatus.DRAFT && vendorPending) {
     return (
       <div className="mb-5 rounded-2xl border border-amber bg-amber-wash p-4 text-[13px] text-amber-700 shadow-ik-card">
         <strong>Waiting on vendor approval:</strong> “{vendorName}” is a new supplier and a manager
         or admin must approve them before this PO can be submitted. Your draft is saved — they have
         been notified, and you can submit as soon as the vendor is approved.
+        {approveVendorSlot && <div className="mt-3">{approveVendorSlot}</div>}
       </div>
     );
   }

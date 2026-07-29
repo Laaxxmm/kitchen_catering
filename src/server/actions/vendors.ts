@@ -208,6 +208,21 @@ export async function deactivateVendor(id: string): Promise<ActionResult> {
   }
 }
 
+/**
+ * Suppliers waiting on a manager/admin sign-off. Feeds the dashboard
+ * approvals board — the approve control used to live only on the vendor
+ * detail page, so pending vendors sat unnoticed while every PO on them
+ * refused to submit.
+ */
+export async function listPendingVendors() {
+  await requireRole([Role.ADMIN, Role.MANAGER]);
+  return db.vendor.findMany({
+    where: { approvalStatus: VendorApprovalStatus.PENDING_APPROVAL, active: true },
+    select: { id: true, name: true, code: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
 export async function listVendors(opts: { query?: string; active?: boolean; category?: VendorCategory } = {}) {
   await requireRole(READ_ROLES);
   return db.vendor.findMany({
