@@ -927,8 +927,11 @@ export async function listChefRequisitions(
         : {}),
     },
     include: {
-      order: { select: { code: true, customer: { select: { name: true } }, eventDate: true } },
+      order: { select: { code: true, customer: { select: { name: true } }, eventDate: true, deliveryWindowStart: true, deliveryWindowEnd: true } },
       _count: { select: { lines: true } },
+      // Line statuses ride along so boards can tell an issuable request from
+      // one that's entirely waiting on a purchase (nothing to issue yet).
+      lines: { select: { status: true } },
     },
     orderBy: { createdAt: "desc" },
     take: 200,

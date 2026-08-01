@@ -756,6 +756,8 @@ export async function listChefBoardOrders(
       channel: true,
       headcount: true,
       eventDate: true,
+      deliveryWindowStart: true,
+      deliveryWindowEnd: true,
       roomNumber: true,
       tableNumber: true,
       handedToDeliveryAt: true,

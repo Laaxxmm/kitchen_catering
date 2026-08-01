@@ -50,6 +50,30 @@ export default async function ReviseOrderPage({ params }: { params: Promise<{ id
 
   const revisable = REVISABLE_ORDER_STATUSES.includes(order.status);
 
+  // Inline dish creator — counter sales sell ad-hoc items; the manager adds
+  // the dish here and it lands straight on the revision. createDish gates
+  // roles server-side (admin/manager/chef/sales).
+  async function quickAddDish(input: {
+    name: string;
+    unitPrice: string;
+    gstRatePct: string;
+    unit: string;
+    category?: string;
+  }) {
+    "use server";
+    const { createDish } = await import("@/server/actions/dishes");
+    return await createDish({
+      name: input.name,
+      unitPrice: input.unitPrice,
+      gstRatePct: input.gstRatePct,
+      unit: input.unit,
+      category: input.category ?? null,
+      code: null,
+      description: null,
+      hsnSac: null,
+    });
+  }
+
   return (
     <>
       <PageHeader
@@ -87,6 +111,7 @@ export default async function ReviseOrderPage({ params }: { params: Promise<{ id
             discountPct: it.discountPct.toString(),
             gstRatePct: it.gstRatePct.toString(),
           }))}
+          onQuickAddDish={quickAddDish}
           onSubmit={doRevise}
         />
       )}

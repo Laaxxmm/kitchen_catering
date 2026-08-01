@@ -34,6 +34,7 @@ import { toDecimal, formatINRWhole } from "@/lib/money";
 import { formatIST, istDayWindow, istScopeWindow, istWeekWindow, type EventDateScope } from "@/lib/time";
 import { EventScopePills } from "@/components/ik/EventScopePills";
 import {
+  ChefRequisitionLineStatus,
   ChefRequisitionStatus, VendorPOStatus, OrderStatus,
   CustomerInvoiceStatus, VendorBillStatus, BanquetRequisitionStatus,
 } from "@prisma/client";
@@ -269,16 +270,28 @@ export default async function DashboardPage({
         <div className="grid grid-cols-1 gap-5">
           <MyTasksPanel />
           <StoreBoard
-            chefReqs={chefReqs.map((r) => ({
-              id: r.id,
-              requisitionNo: r.requisitionNo,
-              status: r.status,
-              orderCode: r.order?.code ?? null,
-              customerName: r.order?.customer.name ?? "Kitchen stock request",
-              eventDate: r.order?.eventDate.toISOString() ?? null,
-              createdAt: r.createdAt.toISOString(),
-              lines: r._count.lines,
-            }))}
+            chefReqs={chefReqs
+              // A request whose every open line is awaiting a purchase has
+              // nothing the store can issue — its work lives on the PO under
+              // "My purchase orders", so it leaves this tab. The GRN flips
+              // those lines back to PENDING, which brings it straight back.
+              .filter((r) =>
+                r.lines.some(
+                  (l) =>
+                    l.status === ChefRequisitionLineStatus.PENDING ||
+                    l.status === ChefRequisitionLineStatus.PARTIALLY_ISSUED,
+                ),
+              )
+              .map((r) => ({
+                id: r.id,
+                requisitionNo: r.requisitionNo,
+                status: r.status,
+                orderCode: r.order?.code ?? null,
+                customerName: r.order?.customer.name ?? "Kitchen stock request",
+                eventDate: r.order?.eventDate.toISOString() ?? null,
+                createdAt: r.createdAt.toISOString(),
+                lines: r._count.lines,
+              }))}
             fnbReqs={fnbReqs.map((r) => ({
               id: r.id,
               requisitionNo: r.requisitionNo,

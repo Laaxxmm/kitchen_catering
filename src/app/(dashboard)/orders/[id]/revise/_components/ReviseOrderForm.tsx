@@ -8,8 +8,9 @@ import { MealType } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Textarea } from "@/components/ui/textarea";
+import { QuickAddDish, type QuickDishInput } from "@/components/ik/QuickAddDish";
 import { isNextNavigationError } from "@/lib/next-error";
-import type { ActionResult } from "@/lib/action-result";
+import type { ActionResult, ActionResultWith } from "@/lib/action-result";
 
 interface Line {
   id: string;
@@ -52,6 +53,9 @@ interface Props {
   /** Dishes from the order's channel menu, for the "Add dish" picker.
    *  Prices shown are indicative — the server re-prices from the catalogue. */
   dishes: DishOption[];
+  /** Inline dish creator — counter sales often sell ad-hoc items, so the
+   *  manager can add a brand-new dish without leaving the revision. */
+  onQuickAddDish?: (input: QuickDishInput) => Promise<ActionResultWith<{ id: string }>>;
   onSubmit: (raw: unknown) => Promise<ActionResult>;
 }
 
@@ -75,6 +79,7 @@ export function ReviseOrderForm({
   currentContractValue,
   lines,
   dishes,
+  onQuickAddDish,
   onSubmit,
 }: Props) {
   const router = useRouter();
@@ -92,7 +97,9 @@ export function ReviseOrderForm({
   // preview uses the same catalogue price the server will read.
   const [added, setAdded] = useState<Array<{ dishId: string; portions: string }>>([]);
   const [pickDishId, setPickDishId] = useState("");
-  const dishById = useMemo(() => new Map(dishes.map((d) => [d.id, d])), [dishes]);
+  // Local copy so a quick-added dish shows up immediately.
+  const [dishList, setDishList] = useState<DishOption[]>(dishes);
+  const dishById = useMemo(() => new Map(dishList.map((d) => [d.id, d])), [dishList]);
 
   // Current vs new contract value. Package channels carry the typed lump
   // sum; per-dish channels re-sum the lines exactly like the server will.
@@ -263,7 +270,7 @@ export function ReviseOrderForm({
         )}
       </section>
 
-      {dishes.length > 0 && (
+      {(dishList.length > 0 || onQuickAddDish) && (
         <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
           <h3 className="mb-1 text-[14px] font-medium text-ik-ink">Add dishes</h3>
           <p className="mb-2 text-[12px] text-ik-ink-3">
@@ -307,7 +314,7 @@ export function ReviseOrderForm({
               <Combobox
                 value={pickDishId}
                 onChange={setPickDishId}
-                options={dishes.map((d) => ({ value: d.id, label: `${d.name} · ₹${d.unitPrice}` }))}
+                options={dishList.map((d) => ({ value: d.id, label: `${d.name} · ₹${d.unitPrice}` }))}
                 placeholder="Type to search a dish…"
                 emptyText="No dish matches"
               />
@@ -325,6 +332,15 @@ export function ReviseOrderForm({
             >
               + Add dish
             </Button>
+            {onQuickAddDish && (
+              <QuickAddDish
+                onCreate={onQuickAddDish}
+                onCreated={(d) => {
+                  setDishList((prev) => [{ id: d.id, name: d.name, unit: "plate", unitPrice: d.unitPrice, gstRatePct: d.gstRatePct }, ...prev]);
+                  setAdded((prev) => [...prev, { dishId: d.id, portions: headcount || "1" }]);
+                }}
+              />
+            )}
           </div>
         </section>
       )}

@@ -44,9 +44,22 @@ export default async function NewVendorPOPage({
   // Raised from a chef-requisition shortfall: pre-fill the short items with
   // their quantity and the unit price = each ingredient's average cost (an
   // approximate; the store/manager edits it before/at approval).
+  //
+  // vendorPOLineId === null is load-bearing: a line KEEPS the
+  // AWAITING_PROCUREMENT status after its PO is raised (the goods aren't in
+  // yet) — it just gets back-linked to the PO line. Without this filter the
+  // second PO for the same requisition pre-filled the same items again and
+  // the store double-ordered them.
   const reqLines = chefReq
-    ? chefReq.lines.filter((l) => l.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT)
+    ? chefReq.lines.filter(
+        (l) => l.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT && l.vendorPOLineId == null,
+      )
     : [];
+  const alreadyOnPO = chefReq
+    ? chefReq.lines.filter(
+        (l) => l.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT && l.vendorPOLineId != null,
+      ).length
+    : 0;
   let prefillLines = chefReq
     ? reqLines.map((l) => {
         const ing = ingredients.find((i) => i.id === l.ingredientId);
@@ -70,8 +83,25 @@ export default async function NewVendorPOPage({
   // Reorder all low-stock ingredients in one PO. Quantity defaults to the
   // reorder level (top-up target) and the unit price to the average cost —
   // both editable before the PO is created.
+  let lowStockSkipped = 0;
+  let lowStockToOrder = lowStockItems;
+  if (fromLowStock && lowStockItems.length > 0) {
+    // Skip items that already sit on a live PO — re-listing them here made
+    // the store order the same shortfall twice while the first delivery was
+    // still on its way.
+    const onOpenPO = await db.vendorPOLine.findMany({
+      where: {
+        ingredientId: { in: lowStockItems.map((i) => i.id) },
+        po: { status: { in: ["DRAFT", "PENDING_APPROVAL", "APPROVED", "SENT", "PARTIALLY_RECEIVED"] } },
+      },
+      select: { ingredientId: true },
+    });
+    const onOpenPOIds = new Set(onOpenPO.map((l) => l.ingredientId));
+    lowStockToOrder = lowStockItems.filter((i) => !onOpenPOIds.has(i.id));
+    lowStockSkipped = lowStockItems.length - lowStockToOrder.length;
+  }
   if (fromLowStock) {
-    prefillLines = lowStockItems.map((i) => ({
+    prefillLines = lowStockToOrder.map((i) => ({
       ingredientId: i.id,
       banquetItemId: "",
       chefReqLineId: null,
@@ -143,7 +173,11 @@ export default async function NewVendorPOPage({
       {chefReq && (
         <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">
           <strong>From kitchen requisition {chefReq.requisitionNo}</strong> ·{" "}
-          {reqLines.length} short item{reqLines.length === 1 ? "" : "s"}. Prices are pre-filled from
+          {reqLines.length} short item{reqLines.length === 1 ? "" : "s"}.
+          {alreadyOnPO > 0 && (
+            <> {alreadyOnPO} other short item{alreadyOnPO === 1 ? " is" : "s are"} already on an earlier PO and {alreadyOnPO === 1 ? "was" : "were"} left out so they aren&apos;t ordered twice.</>
+          )}{" "}
+          Prices are pre-filled from
           each item&apos;s average cost — <strong>edit them</strong> to match the supplier&apos;s
           quote. The total decides the approval: under ₹5,000 the manager signs off; ₹5,000 and above
           needs admin.
@@ -152,7 +186,10 @@ export default async function NewVendorPOPage({
 
       {fromLowStock && (
         <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">
-          <strong>Reordering {lowStockItems.length} low-stock item{lowStockItems.length === 1 ? "" : "s"}.</strong>{" "}
+          <strong>Reordering {lowStockToOrder.length} low-stock item{lowStockToOrder.length === 1 ? "" : "s"}.</strong>{" "}
+          {lowStockSkipped > 0 && (
+            <>{lowStockSkipped} more {lowStockSkipped === 1 ? "is" : "are"} already on an open PO and {lowStockSkipped === 1 ? "was" : "were"} left out. </>
+          )}
           Quantities and prices are pre-filled — <strong>edit them</strong>, pick the vendor, then
           create the PO. Under ₹5,000 the manager approves; ₹5,000 and above needs admin.
         </div>
