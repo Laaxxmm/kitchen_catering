@@ -344,6 +344,86 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             </section>
           )}
 
+          {/* Revisions — what the manager changed mid-flight, in plain words.
+              The chef cooks from this, so it's visible to every role; only
+              the money line is hidden from the chef view. */}
+          {order.orderRevisions.length > 0 && (
+            <section className="rounded-2xl border border-amber/40 bg-amber-wash/30 shadow-ik-card p-4">
+              <h3 className="mb-2 font-medium text-[14px] text-amber-700">
+                Order revised {order.orderRevisions.length > 1 ? `${order.orderRevisions.length} times` : ""}
+              </h3>
+              <ol className="grid gap-3">
+                {order.orderRevisions.map((rev) => {
+                  const changes = (rev.lineChanges ?? []) as Array<{
+                    kind: "added" | "removed" | "portions";
+                    dish: string;
+                    from?: string;
+                    to?: string;
+                  }>;
+                  const paxChanged = rev.beforeHeadcount !== rev.afterHeadcount;
+                  const dateChanged = rev.beforeEventDate.getTime() !== rev.afterEventDate.getTime();
+                  const mealChanged = rev.beforeMealType !== rev.afterMealType;
+                  const valueChanged = rev.beforeContractValue.toString() !== rev.afterContractValue.toString();
+                  return (
+                    <li key={rev.id} className="rounded-xl border border-ik-rule bg-ik-card p-3 text-[12.5px]">
+                      <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-medium text-ik-ink">{rev.revisedBy.name}</span>
+                        <span className="font-mono text-[11px] text-ik-ink-3">{formatIST(rev.createdAt)}</span>
+                      </div>
+                      <ul className="grid gap-1 text-ik-ink-2">
+                        {paxChanged && (
+                          <li>
+                            Pax: <s className="text-ik-ink-3">{rev.beforeHeadcount}</s>{" "}
+                            <strong className="text-ik-ink">→ {rev.afterHeadcount}</strong>
+                          </li>
+                        )}
+                        {dateChanged && (
+                          <li>
+                            Event: <s className="text-ik-ink-3">{formatIST(rev.beforeEventDate, "EEE d MMM HH:mm")}</s>{" "}
+                            <strong className="text-ik-ink">→ {formatIST(rev.afterEventDate, "EEE d MMM HH:mm")}</strong>
+                          </li>
+                        )}
+                        {mealChanged && (
+                          <li>
+                            Meal: <s className="text-ik-ink-3">{rev.beforeMealType.replace("_", " ")}</s>{" "}
+                            <strong className="text-ik-ink">→ {rev.afterMealType.replace("_", " ")}</strong>
+                          </li>
+                        )}
+                        {!chefOnlyView && valueChanged && (
+                          <li>
+                            Value: <s className="text-ik-ink-3">{formatINR(rev.beforeContractValue)}</s>{" "}
+                            <strong className="text-ik-ink">→ {formatINR(rev.afterContractValue)}</strong>
+                          </li>
+                        )}
+                        {changes.map((c, i) => (
+                          <li key={i}>
+                            {c.kind === "added" && (
+                              <>Added <strong className="text-ik-ink">{c.dish}</strong> · {c.to} portions</>
+                            )}
+                            {c.kind === "removed" && (
+                              <>Removed <s className="text-ik-ink-3">{c.dish}</s></>
+                            )}
+                            {c.kind === "portions" && (
+                              <>
+                                {c.dish}: <s className="text-ik-ink-3">{c.from}</s>{" "}
+                                <strong className="text-ik-ink">→ {c.to} portions</strong>
+                              </>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                      {rev.note && (
+                        <p className="mt-2 rounded-md bg-ik-paper-alt px-2 py-1.5 italic text-ik-ink">
+                          “{rev.note}” <span className="not-italic text-ik-ink-3">— {rev.revisedBy.name}</span>
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          )}
+
           {/* Decision history */}
           <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
             <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Decision history</h3>

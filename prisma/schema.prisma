@@ -457,6 +457,7 @@ model User {
   banquetRequisitionsCreated   BanquetRequisition[]   @relation("BanquetRequisitionCreatedBy")
   banquetRequisitionsFulfilled BanquetRequisition[]   @relation("BanquetRequisitionFulfilledBy")
   staffAllocationsMade         OrderStaffAllocation[] @relation("StaffAllocationBy")
+  orderRevisionsMade           OrderRevision[]        @relation("OrderRevisionRevisedBy")
   leftoverReturnsRecorded      OrderLeftoverReturn[]  @relation("LeftoverReturnBy")
 
   productionItemsHandedOver ProductionJobItem[] @relation("ProductionItemHandedOverBy")
@@ -1032,6 +1033,7 @@ model Order {
   consolidatedInvoice   CustomerInvoice?          @relation("ConsolidatedInvoiceOrders", fields: [consolidatedInvoiceId], references: [id])
   staffAllocations      OrderStaffAllocation[]
   leftoverReturns       OrderLeftoverReturn[]
+  orderRevisions        OrderRevision[]
 
   @@index([status])
   @@index([customerId])
@@ -2631,4 +2633,29 @@ model Notification {
   @@unique([userId, dedupeKey])
   @@index([userId, readAt])
   @@index([createdAt])
+}
+
+// One row per mid-flight order revision (pax / date / meal / value / line
+// changes). The chef reads this on the order page — the audit log only
+// stores a hash, which nobody can read back.
+model OrderRevision {
+  id                  String   @id @default(cuid())
+  orderId             String
+  order               Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  revisedById         String
+  revisedBy           User     @relation("OrderRevisionRevisedBy", fields: [revisedById], references: [id])
+  note                String?
+  beforeHeadcount     Int
+  afterHeadcount      Int
+  beforeContractValue Decimal  @db.Decimal(14, 2)
+  afterContractValue  Decimal  @db.Decimal(14, 2)
+  beforeEventDate     DateTime
+  afterEventDate      DateTime
+  beforeMealType      MealType
+  afterMealType       MealType
+  // [{kind:"added"|"removed"|"portions", dish, from?, to?}]
+  lineChanges         Json?
+  createdAt           DateTime @default(now())
+
+  @@index([orderId, createdAt])
 }

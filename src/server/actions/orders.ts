@@ -474,7 +474,9 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
   const revised = await db.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id },
-      include: { items: true },
+      // Dish names ride along so the revision record can say WHICH dish was
+      // removed / re-portioned in plain words (the chef reads this).
+      include: { items: { include: { dish: { select: { name: true } } } } },
     });
     if (!order) throw new ActionError("Order not found");
     if (!REVISABLE_ORDER_STATUSES.includes(order.status)) {
@@ -506,6 +508,12 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
       throw new ActionError("An order needs at least one dish — cancel the order instead of zeroing every line.");
     }
 
+    // Plain-words line diff for the revision record the chef reads.
+    const lineChanges: Array<{ kind: "added" | "removed" | "portions"; dish: string; from?: string; to?: string }> = [];
+    for (const r of removals) {
+      lineChanges.push({ kind: "removed", dish: byId.get(r.id)!.dish.name });
+    }
+
     if (removals.length > 0) {
       await tx.orderItem.deleteMany({
         where: { id: { in: removals.map((r) => r.id) }, orderId: id },
@@ -515,6 +523,14 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
     // same price, discount and GST, only the portions change.
     for (const li of keeps) {
       const existing = byId.get(li.id)!;
+      if (Number(existing.portions.toString()) !== li.portions) {
+        lineChanges.push({
+          kind: "portions",
+          dish: existing.dish.name,
+          from: existing.portions.toString(),
+          to: String(li.portions),
+        });
+      }
       const c = computeLine(
         String(li.portions),
         existing.unitPrice.toString(),
@@ -571,6 +587,7 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
           },
         });
         addedNames.push(dish.name);
+        lineChanges.push({ kind: "added", dish: dish.name, to: String(add.portions) });
       }
     }
 
@@ -630,6 +647,26 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
         `Too late — the order is ${current ? STATUS_LABEL[current.status].toLowerCase() : "gone"}. Someone moved it while you were editing — refresh the page.`,
       );
     }
+
+    // Readable revision record — the chef (and everyone else) sees exactly
+    // what changed and the manager's note on the order page. The audit row
+    // below only stores a hash, which nobody can read back.
+    await tx.orderRevision.create({
+      data: {
+        orderId: id,
+        revisedById: session.user.id,
+        note: input.revisionNote ?? null,
+        beforeHeadcount: order.headcount,
+        afterHeadcount: input.headcount,
+        beforeContractValue: order.contractValue.toString(),
+        afterContractValue: contractValue.toString(),
+        beforeEventDate: order.eventDate,
+        afterEventDate: newEventDate ?? order.eventDate,
+        beforeMealType: order.mealType,
+        afterMealType: newMealType ?? order.mealType,
+        lineChanges: lineChanges.length > 0 ? lineChanges : undefined,
+      },
+    });
 
     await tx.auditLog.create({
       data: {
@@ -2074,6 +2111,10 @@ export async function getOrder(id: string) {
       kitchenSupervisor: { select: { name: true } },
       feedbackAssignee: { select: { name: true } },
       chefRequisitions: { select: { id: true, requisitionNo: true, status: true } },
+      orderRevisions: {
+        include: { revisedBy: { select: { name: true } } },
+        orderBy: { createdAt: "desc" },
+      },
       // Named serving staff the F&B team allocated to run the event —
       // rendered as chips in the "Serving staff" section.
       staffAllocations: {

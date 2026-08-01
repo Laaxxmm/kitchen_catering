@@ -25,15 +25,19 @@ interface DraftLine {
   notes: string;
 }
 
-function emptyLine(firstIngredientId = ""): DraftLine {
-  return { ingredientId: firstIngredientId, requestedQty: "1", orderItemId: "", notes: "" };
+// A new line starts with NO ingredient picked. It used to pre-pick the
+// first catalogue item alphabetically — literally "Additional Ingredients" —
+// so untouched rows went to the store as junk. Empty rows are silently
+// dropped on submit instead.
+function emptyLine(): DraftLine {
+  return { ingredientId: "", requestedQty: "1", orderItemId: "", notes: "" };
 }
 
 export function RequisitionDraftForm({ ingredients, orderItems, onSubmit }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const ingredientList = ingredients;
-  const [lines, setLines] = useState<DraftLine[]>([emptyLine(ingredients[0]?.id ?? "")]);
+  const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
 
   // Searchable ingredient options — the catalogue is long, so the chef types
   // to filter instead of scrolling a giant dropdown.
@@ -86,7 +90,7 @@ export function RequisitionDraftForm({ ingredients, orderItems, onSubmit }: Prop
       <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="font-medium text-[14px] text-ik-ink">Lines</h3>
-          <Button type="button" variant="outline" size="sm" onClick={() => setLines((p) => [...p, emptyLine(ingredientList[0]?.id ?? "")])}>
+          <Button type="button" variant="outline" size="sm" onClick={() => setLines((p) => [...p, emptyLine()])}>
             + Add line
           </Button>
         </div>
