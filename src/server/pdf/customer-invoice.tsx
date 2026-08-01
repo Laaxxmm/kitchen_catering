@@ -30,6 +30,8 @@ const INR = new Intl.NumberFormat("en-IN", {
 const money = (v: string | number) => INR.format(Number(v));
 // Trim trailing zeros on rate percentages: 2.5 not 2.50, 9 not 9.00.
 const pct = (v: number) => String(Number(v.toFixed(2)));
+// MealType enum → printed label. BREAKFAST → "Breakfast", HIGH_TEA → "High tea".
+const mealLabel = (m: string) => m.charAt(0) + m.slice(1).toLowerCase().replaceAll("_", " ");
 
 /**
  * Reformat the stored invoice number to the client's printed style.
@@ -189,10 +191,20 @@ interface InvoicePDFData {
   invoiceNo: string;
   kind?: string | null;
   issuedAt?: Date | null;
+  orderCode?: string | null;
 
   seller: { name: string; gstin: string; address: string; bank: BankFields };
   contact: { email?: string; phone?: string; mobile?: string };
   customer: { name: string; address: string };
+
+  /**
+   * LIVE order snapshot at render time (null for adhoc / consolidated folio
+   * invoices, which have no single order). When present the bill prints as
+   * ONE consolidated event line with the CURRENT headcount and meal — the
+   * invoice's own lines are a creation-time snapshot and go stale the moment
+   * the order is revised (100 → 200 pax).
+   */
+  order?: { headcount: number; mealType: string } | null;
 
   lines: InvoiceLine[];
   subtotal: string | number;
@@ -220,6 +232,27 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
   const rateOf = (tax: number) => (subtotal > 0 ? (tax / subtotal) * 100 : 0);
 
   const dateStr = data.issuedAt ? formatIST(data.issuedAt, "dd.MM.yyyy") : "";
+
+  // An order-linked bill is ONE line — the customer bought a meal for N pax,
+  // not a list of dishes. Pax + meal come from the LIVE order; the taxable
+  // amount stays exactly as invoiced, so the printed rate is the per-head
+  // share of it. Adhoc / folio invoices (no order) keep their own lines.
+  const days = 1; // no per-line day count is stored; the client's format defaults to 1
+  const rows = data.order
+    ? [{
+        particular: [`${mealLabel(data.order.mealType)} catering`, data.orderCode]
+          .filter(Boolean)
+          .join(" — "),
+        pax: data.order.headcount,
+        rate: data.order.headcount > 0 ? subtotal / data.order.headcount : subtotal,
+        taxable: subtotal,
+      }]
+    : data.lines.map((l) => ({
+        particular: l.description,
+        pax: Number(l.quantity),
+        rate: Number(l.unitPrice),
+        taxable: Number(l.quantity) * days * Number(l.unitPrice),
+      }));
   const b = data.seller.bank;
   const bankRows = [
     ["Bank Name", b.bankName],
@@ -281,21 +314,16 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
               <Text style={[s.cell, s.cDays, s.headText, s.right]}>No Of Days</Text>
               <Text style={[s.cell, s.cAmt, s.cellLast, s.headText, s.right]}>Taxable Amt</Text>
             </View>
-            {data.lines.map((l, i) => {
-              const pax = Number(l.quantity);
-              const days = 1; // no distinct day-count field on a line; template default
-              const taxable = pax * days * Number(l.unitPrice);
-              return (
-                <View key={i} style={s.row}>
-                  <Text style={[s.cell, s.cDate]}>{dateStr}</Text>
-                  <Text style={[s.cell, s.cParticular]}>{l.description}</Text>
-                  <Text style={[s.cell, s.cPax, s.right]}>{String(l.quantity)}</Text>
-                  <Text style={[s.cell, s.cRate, s.right]}>{money(l.unitPrice)}</Text>
-                  <Text style={[s.cell, s.cDays, s.right]}>{days}</Text>
-                  <Text style={[s.cell, s.cAmt, s.cellLast, s.right]}>{money(taxable)}</Text>
-                </View>
-              );
-            })}
+            {rows.map((r, i) => (
+              <View key={i} style={s.row}>
+                <Text style={[s.cell, s.cDate]}>{dateStr}</Text>
+                <Text style={[s.cell, s.cParticular]}>{r.particular}</Text>
+                <Text style={[s.cell, s.cPax, s.right]}>{r.pax}</Text>
+                <Text style={[s.cell, s.cRate, s.right]}>{money(r.rate)}</Text>
+                <Text style={[s.cell, s.cDays, s.right]}>{days}</Text>
+                <Text style={[s.cell, s.cAmt, s.cellLast, s.right]}>{money(r.taxable)}</Text>
+              </View>
+            ))}
           </View>
 
           {/* Totals (right-aligned) */}
@@ -382,6 +410,12 @@ export async function renderCustomerInvoicePDF(input: {
   issuedAt?: Date | null;
   dueAt?: Date | null;
   orderCode?: string | null;
+  /**
+   * Live order fields read at render time — pass these for every order-linked
+   * invoice so the printed pax/meal follow order revisions. Omit for adhoc /
+   * consolidated invoices (they print their own lines).
+   */
+  order?: { headcount: number; mealType: string } | null;
   placeOfSupplyStateCode: string;
   irn?: string | null;
   ackNo?: string | null;
@@ -428,6 +462,8 @@ export async function renderCustomerInvoicePDF(input: {
     invoiceNo: input.invoiceNo,
     kind: input.kind,
     issuedAt: input.issuedAt,
+    orderCode: input.orderCode,
+    order: input.order ?? null,
     seller: {
       name: indefineCompanyName(),
       gstin: indefineGstin(),

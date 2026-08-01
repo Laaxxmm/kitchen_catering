@@ -1508,7 +1508,10 @@ export async function getCustomerInvoice(id: string) {
     where: { id },
     include: {
       customer: true,
-      order: { select: { id: true, code: true } },
+      // headcount/mealType feed the PDF's live event line — the invoice's own
+      // lines are a creation-time snapshot and go stale when the order is
+      // revised (client item #6: 100 → 200 pax still printed 100).
+      order: { select: { id: true, code: true, headcount: true, mealType: true } },
       createdBy: { select: { name: true } },
       onHoldBy: { select: { name: true } },
       lines: { orderBy: { sortOrder: "asc" } },

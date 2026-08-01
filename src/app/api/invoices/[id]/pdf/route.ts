@@ -20,6 +20,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     issuedAt: inv.issuedAt,
     dueAt: inv.dueAt,
     orderCode: inv.order?.code ?? null,
+    // Live pax/meal — deliberately NOT the invoice line snapshot.
+    order: inv.order ? { headcount: inv.order.headcount, mealType: inv.order.mealType } : null,
     placeOfSupplyStateCode: inv.placeOfSupplyStateCode,
     irn: inv.irn,
     ackNo: inv.ackNo,

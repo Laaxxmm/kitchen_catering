@@ -180,6 +180,8 @@ export async function createProformaInvoiceForOrderCore(orderId: string) {
         issuedAt: fullInvoice.issuedAt,
         dueAt: fullInvoice.dueAt,
         orderCode: fullInvoice.order?.code ?? null,
+        // Live pax/meal off the order we just read — not the line snapshot.
+        order: { headcount: order.headcount, mealType: order.mealType },
         placeOfSupplyStateCode: fullInvoice.placeOfSupplyStateCode,
         irn: fullInvoice.irn,
         ackNo: fullInvoice.ackNo,
