@@ -77,7 +77,20 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
       r.status === ChefRequisitionStatus.SUBMITTED ||
       r.status === ChefRequisitionStatus.PARTIALLY_ISSUED,
   );
-  const showIssueAction = canIssue && order.status === OrderStatus.ISSUING;
+  // The order now advances to the kitchen once every requisition line has
+  // been ACTED on (partial issues / shortfalls included), so an open
+  // requisition can outlive ISSUING — keep the issue button up while there
+  // is genuinely something left to issue and the order is still in play.
+  const showIssueAction =
+    canIssue &&
+    openRequisition != null &&
+    (
+      [
+        OrderStatus.ISSUING,
+        OrderStatus.READY_FOR_PRODUCTION,
+        OrderStatus.IN_PREP,
+      ] as OrderStatus[]
+    ).includes(order.status);
 
   // Feedback collection can be allocated once the order has been delivered.
   const feedbackEligible = (

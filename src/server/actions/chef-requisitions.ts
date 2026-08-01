@@ -430,9 +430,13 @@ async function submitChefRequisitionInner(id: string): Promise<{ ok: true }> {
 /**
  * Issue stock for one line. Decrements ingredient.onHandQty, creates an
  * IngredientIssue, updates line.issuedQty + status, may flip the parent
- * requisition to PARTIALLY_ISSUED / FULLY_ISSUED, and (if every requisition
- * for the order is FULLY_ISSUED) auto-advances the order to
- * READY_FOR_PRODUCTION.
+ * requisition to PARTIALLY_ISSUED / FULLY_ISSUED, and — once the store has
+ * ACTED on every line of the order's open requisitions (see
+ * recomputeReqAndAdvance) — auto-advances the order to READY_FOR_PRODUCTION.
+ *
+ * Deliberately does NOT gate on the order's status: a top-up issued against
+ * an order already in the kitchen is legitimate (see the no-regress guard in
+ * recomputeReqAndAdvance). The requisition's own status is the gate.
  */
 export async function issueChefRequisitionLine(raw: unknown): Promise<ActionResult> {
   try {
@@ -446,7 +450,7 @@ async function issueChefRequisitionLineInner(raw: unknown): Promise<{ ok: true }
   const session = await requireRole(REQUISITION_FULFIL_ROLES);
   const input = ChefRequisitionIssueInput.parse(raw);
 
-  await db.$transaction(async (tx) => {
+  const outcome = await db.$transaction(async (tx) => {
     // Serialise concurrent issuers of the same line: lock the line row
     // BEFORE reading it, so the loser waits here and then sees the
     // winner's committed issuedQty/status instead of a stale snapshot.
@@ -521,10 +525,15 @@ async function issueChefRequisitionLineInner(raw: unknown): Promise<{ ok: true }
     });
 
     // 4–5. Recompute the requisition status from its sibling lines and, if
-    //      every line is now terminal (issued or cancelled), advance the
-    //      order to the kitchen board. Shared with the line-cancel action so
-    //      the two paths can never disagree on "done".
-    await recomputeReqAndAdvance(tx, line.requisition.id, line.requisition.orderId, session.user.id);
+    //      the store has now acted on every line the order is waiting on,
+    //      advance the order to the kitchen board. Shared with the line-cancel
+    //      and send-to-procurement actions so no path can disagree on "acted".
+    const advance = await recomputeReqAndAdvance(
+      tx,
+      line.requisition.id,
+      line.requisition.orderId,
+      session.user.id,
+    );
 
     await tx.auditLog.create({
       data: {
@@ -535,30 +544,82 @@ async function issueChefRequisitionLineInner(raw: unknown): Promise<{ ok: true }
         payloadHash: sha256Json({ qty: input.qtyToIssue }),
       },
     });
+    return advance;
   });
+
+  if (outcome.shortfall) notifyShortfallAdvance(outcome.shortfall);
 
   revalidatePath("/requisitions");
   revalidatePath("/queue/issuing");
   revalidatePath("/inventory/ingredients");
   revalidatePath("/inventory/issues");
+  // A partial issue can now be what moves the order to the kitchen board.
+  revalidatePath("/kitchen");
   return { ok: true };
 }
 
+/** Who to tell when the order left the store with something still owed. */
+type ShortfallAdvance = { reqId: string; requisitionNo: string; createdById: string };
+
 /**
- * Recompute a requisition's status from its lines and, when every line is
- * terminal (ISSUED or CANCELLED), advance the order to READY_FOR_PRODUCTION
- * and create its production job. Assumes the caller already updated the
- * triggering line's status and holds the requisition FOR UPDATE lock. Shared
- * by the issue and line-cancel paths so a cancelled item counts as "done"
- * identically — the order can't get stuck at issuance because one product
- * won't be provided.
+ * The order moved on to the kitchen while the store still owes stock — a
+ * part-issued line, or one waiting on a purchase. The chef who raised the
+ * requisition is the person who has to cook around that gap, so they hear
+ * about it once, the moment it happens. Deduped per requisition: later
+ * top-up activity on the same requisition doesn't re-notify.
+ */
+function notifyShortfallAdvance(s: ShortfallAdvance) {
+  deferAfterResponse("chef-req-shortfall-advance:notify", () =>
+    createNotification({
+      userId: s.createdById,
+      kind: "GENERIC",
+      title: "Order proceeding — shortfall pending",
+      body:
+        `The store has acted on every item of ${s.requisitionNo}, so the order has moved ` +
+        `to the kitchen — start with what was issued. The shortfall stays open on the ` +
+        `requisition and can be topped up once stock arrives.`,
+      link: `/requisitions/${s.reqId}`,
+      dedupeKey: `chef-req-shortfall-advance:${s.reqId}`,
+    }),
+  );
+}
+
+/**
+ * Recompute a requisition's status from its lines and, when the store has
+ * ACTED on every line of every open requisition for the order, advance the
+ * order to READY_FOR_PRODUCTION and create its production job.
+ *
+ * "Acted" means the line is no longer PENDING: ISSUED, PARTIALLY_ISSUED,
+ * CANCELLED or AWAITING_PROCUREMENT. It used to mean ISSUED or CANCELLED
+ * only, which froze the order at ISSUING for as long as the store could
+ * only part-issue a line or had to raise a PO for the shortfall — the
+ * kitchen sat idle waiting on stock that might be days away, with no route
+ * forward short of a manual status override. The store's job is done once
+ * it has responded to every line; the kitchen starts with what arrived and
+ * the shortfall keeps its own life (the requisition stays PARTIALLY_ISSUED
+ * and therefore stays on the store's issuing queue; a GRN flipping an
+ * AWAITING_PROCUREMENT line back to PENDING makes it issuable again as a
+ * top-up, which REQUISITION_ELIGIBLE_ORDER_STATUSES already allows past
+ * ISSUING).
+ *
+ * The REQUISITION roll-up is deliberately unchanged: FULLY_ISSUED only when
+ * every line is ISSUED or CANCELLED. A part-issued requisition is not
+ * "closed" just because the order moved on — that's what keeps the shortfall
+ * visible and toppable-up.
+ *
+ * Assumes the caller already updated the triggering line's status and holds
+ * the requisition FOR UPDATE lock. Shared by the issue, line-cancel and
+ * send-to-procurement paths so no two of them can disagree on "acted".
+ *
+ * Returns `shortfall` (non-null) only when this call actually advanced the
+ * order AND something is still owed — the caller notifies the chef.
  */
 async function recomputeReqAndAdvance(
   tx: Prisma.TransactionClient,
   requisitionId: string,
   orderId: string | null,
   userId: string,
-): Promise<{ allDone: boolean }> {
+): Promise<{ allDone: boolean; shortfall: ShortfallAdvance | null }> {
   const siblings = await tx.chefRequisitionLine.findMany({
     where: { requisitionId },
     select: { status: true },
@@ -568,54 +629,70 @@ async function recomputeReqAndAdvance(
       s.status === ChefRequisitionLineStatus.ISSUED ||
       s.status === ChefRequisitionLineStatus.CANCELLED,
   );
-  await tx.chefRequisition.update({
+  const req = await tx.chefRequisition.update({
     where: { id: requisitionId },
     data: {
       status: allDone ? ChefRequisitionStatus.FULLY_ISSUED : ChefRequisitionStatus.PARTIALLY_ISSUED,
       lastFulfilledById: userId,
       closedAt: allDone ? new Date() : null,
     },
+    select: { requisitionNo: true, createdById: true },
   });
-  if (allDone && orderId) {
-    await tx.$executeRaw`SELECT 1 FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
-    const allReqs = await tx.chefRequisition.findMany({
-      where: { orderId },
-      select: { status: true },
-    });
-    const everyReqDone = allReqs.every(
-      (r) =>
-        r.status === ChefRequisitionStatus.FULLY_ISSUED ||
-        r.status === ChefRequisitionStatus.CANCELLED,
-    );
-    if (everyReqDone) {
-      // No-regress: only advance an order still in the pre-cook issuing phase.
-      // A top-up requisition fully issued while the order is already
-      // READY_FOR_PRODUCTION / IN_PREP (or beyond) must NOT knock it back to
-      // READY_FOR_PRODUCTION — that would re-create a production job. The extra
-      // stock is simply issued; the order's status is left untouched.
-      const advanced = await tx.order.updateMany({
-        where: {
-          id: orderId,
-          status: { in: [OrderStatus.CHEF_REQUISITION_PENDING, OrderStatus.ISSUING] },
-        },
-        data: { status: OrderStatus.READY_FOR_PRODUCTION },
-      });
-      if (advanced.count > 0) {
-        await createProductionJobForOrder(tx, orderId);
-      }
-    }
-  }
-  return { allDone };
+
+  // Cheap pre-check on the lines already in hand: if THIS requisition still
+  // has an untouched line the order can't be ready, so skip the order lock
+  // entirely on the common mid-issue call. (allDone implies this holds.)
+  const actedHere = siblings.every((s) => s.status !== ChefRequisitionLineStatus.PENDING);
+  if (!actedHere || !orderId) return { allDone, shortfall: null };
+
+  await tx.$executeRaw`SELECT 1 FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
+  // Every line the store still owes on, across the order's live requisitions.
+  // A CANCELLED requisition is off the books; a DRAFT top-up the chef hasn't
+  // submitted yet still counts as outstanding, exactly as before.
+  const orderLines = await tx.chefRequisitionLine.findMany({
+    where: { requisition: { orderId, status: { not: ChefRequisitionStatus.CANCELLED } } },
+    select: { status: true },
+  });
+  const everyLineActed = orderLines.every((l) => l.status !== ChefRequisitionLineStatus.PENDING);
+  if (!everyLineActed) return { allDone, shortfall: null };
+
+  // No-regress: only advance an order still in the pre-cook issuing phase.
+  // A top-up requisition acted on while the order is already
+  // READY_FOR_PRODUCTION / IN_PREP (or beyond) must NOT knock it back to
+  // READY_FOR_PRODUCTION — that would re-create a production job. The extra
+  // stock is simply issued; the order's status is left untouched.
+  const advanced = await tx.order.updateMany({
+    where: {
+      id: orderId,
+      status: { in: [OrderStatus.CHEF_REQUISITION_PENDING, OrderStatus.ISSUING] },
+    },
+    data: { status: OrderStatus.READY_FOR_PRODUCTION },
+  });
+  if (advanced.count === 0) return { allDone, shortfall: null };
+
+  await createProductionJobForOrder(tx, orderId);
+
+  const stillOwed = orderLines.some(
+    (l) =>
+      l.status === ChefRequisitionLineStatus.PARTIALLY_ISSUED ||
+      l.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT,
+  );
+  return {
+    allDone,
+    shortfall: stillOwed
+      ? { reqId: requisitionId, requisitionNo: req.requisitionNo, createdById: req.createdById }
+      : null,
+  };
 }
 
 /**
  * Store keeper cancels a single requisition line it can't provide (item
  * discontinued, client dropped the dish, spoiled, etc.) with a mandatory
- * reason. The line becomes CANCELLED — which counts as "done" — so the rest
- * of the requisition still issues and the order proceeds to the kitchen
- * instead of freezing at the issuance stage. The chef who raised it is told
- * so they can adjust the dish. Already-issued qty on a part-issued line stays
- * issued; the cancel just stops any remainder.
+ * reason. The line becomes CANCELLED — which counts as the store having ACTED
+ * on it — so the rest of the requisition still issues and the order proceeds
+ * to the kitchen instead of freezing at the issuance stage. The chef who
+ * raised it is told so they can adjust the dish. Already-issued qty on a
+ * part-issued line stays issued; the cancel just stops any remainder.
  */
 export async function cancelChefRequisitionLine(
   lineId: string,
@@ -680,7 +757,7 @@ async function cancelChefRequisitionLineInner(
       },
     });
 
-    const { allDone } = await recomputeReqAndAdvance(
+    const { allDone, shortfall } = await recomputeReqAndAdvance(
       tx,
       line.requisition.id,
       line.requisition.orderId,
@@ -694,6 +771,7 @@ async function cancelChefRequisitionLineInner(
       orderId: line.requisition.orderId,
       createdById: line.requisition.createdById,
       reqClosed: allDone,
+      shortfall,
     };
   });
 
@@ -711,12 +789,16 @@ async function cancelChefRequisitionLineInner(
       dedupeKey: `chef-line-cancel:${lineId}`,
     }),
   );
+  if (result.shortfall) notifyShortfallAdvance(result.shortfall);
 
   revalidatePath("/requisitions");
   revalidatePath(`/requisitions/${result.reqId}`);
   revalidatePath("/queue/issuing");
   revalidatePath("/dashboard");
-  if (result.reqClosed && result.orderId) {
+  // A cancel can now move the order on even when the requisition itself stays
+  // open (siblings part-issued / awaiting a purchase), so refresh the
+  // order-facing pages whenever there was an order at all.
+  if (result.orderId) {
     revalidatePath("/kitchen");
     revalidatePath(`/orders/${result.orderId}`);
   }
@@ -729,24 +811,46 @@ async function cancelChefRequisitionLineInner(
  * for the shortfall directly (see /procurement/purchase-orders/new?reqId=).
  * Once the vendor delivers and the store records the GRN, stock comes back
  * in and the line becomes issuable again ("stock has arrived — issue now").
+ *
+ * Raising the purchase IS the store acting on the line, so this runs the same
+ * recompute as issue / cancel: if it was the last line the order was waiting
+ * on, the order moves to the kitchen with whatever was issued rather than
+ * sitting at ISSUING until the vendor turns up days later.
  */
 export async function sendChefRequisitionLineToProcurement(raw: unknown): Promise<ActionResult> {
   try {
     const session = await requireRole(REQUISITION_FULFIL_ROLES);
     const input = ChefRequisitionSendToProcurementInput.parse(raw);
 
-    await db.$transaction(async (tx) => {
+    const outcome = await db.$transaction(async (tx) => {
+      // Same lock order as the issue / cancel paths: line, then requisition,
+      // then (inside the recompute) the order.
+      await tx.$executeRaw`SELECT 1 FROM "ChefRequisitionLine" WHERE "id" = ${input.lineId} FOR UPDATE`;
       const line = await tx.chefRequisitionLine.findUnique({
         where: { id: input.lineId },
-        select: { id: true, status: true, requestedQty: true, issuedQty: true },
+        select: {
+          id: true,
+          status: true,
+          requestedQty: true,
+          issuedQty: true,
+          requisitionId: true,
+          requisition: { select: { orderId: true } },
+        },
       });
       if (!line) throw new ActionError("Line not found");
       if (line.status === ChefRequisitionLineStatus.ISSUED) {
         throw new ActionError("Line is already fully issued");
       }
+      // A cancelled line has no shortfall to buy — and resurrecting it into
+      // AWAITING_PROCUREMENT would re-open an already-closed requisition
+      // through the recompute below.
+      if (line.status === ChefRequisitionLineStatus.CANCELLED) {
+        throw new ActionError("Line is cancelled");
+      }
       const shortfall = toDecimal(line.requestedQty).minus(toDecimal(line.issuedQty));
       if (shortfall.lte(0)) throw new ActionError("No shortfall to procure");
 
+      await tx.$executeRaw`SELECT 1 FROM "ChefRequisition" WHERE "id" = ${line.requisitionId} FOR UPDATE`;
       await tx.chefRequisitionLine.update({
         where: { id: line.id },
         data: { status: ChefRequisitionLineStatus.AWAITING_PROCUREMENT, notes: input.reason },
@@ -761,10 +865,24 @@ export async function sendChefRequisitionLineToProcurement(raw: unknown): Promis
           payloadHash: sha256Json({ reason: input.reason, shortfall: shortfall.toString() }),
         },
       });
+
+      const advance = await recomputeReqAndAdvance(
+        tx,
+        line.requisitionId,
+        line.requisition.orderId,
+        session.user.id,
+      );
+      return { ...advance, orderId: line.requisition.orderId };
     });
+
+    if (outcome.shortfall) notifyShortfallAdvance(outcome.shortfall);
 
     revalidatePath("/requisitions");
     revalidatePath("/queue/issuing");
+    if (outcome.orderId) {
+      revalidatePath("/kitchen");
+      revalidatePath(`/orders/${outcome.orderId}`);
+    }
     return { ok: true };
   } catch (err) {
     return actionFailure(err);
