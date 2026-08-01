@@ -22,6 +22,8 @@ export interface OrderToApprove {
   code: string;
   customerName: string;
   eventDate: string;
+  /** ISO — when it was submitted for this approval. */
+  requestedAt?: string;
   channel: OrderChannel;
   headcount: number;
   contractValue: string;
@@ -38,6 +40,8 @@ export interface PurchaseOrder {
   poNo: string;
   vendor: string;
   grandTotal: string;
+  /** ISO — when the store raised it. */
+  raisedAt?: string;
   /** Manager step already recorded — only the admin's signature is left. */
   awaitingAdmin: boolean;
 }
@@ -178,6 +182,11 @@ function OrderApprovalCard({ order }: { order: OrderToApprove }) {
       <div className="mt-0.5 text-[11.5px] text-ik-ink-2">
         {CHANNEL_LABEL[order.channel]} · {order.headcount} pax · {formatIST(new Date(order.eventDate), "EEE d MMM")}
       </div>
+      {order.requestedAt && (
+        <div className="mt-0.5 text-[11px] text-ik-ink-3">
+          Requested {formatIST(new Date(order.requestedAt), "d MMM, HH:mm")}
+        </div>
+      )}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <Button size="sm" disabled={pending} onClick={() => setMode((m) => (m === "approve" ? null : "approve"))}>
           Approve
@@ -266,6 +275,11 @@ function PurchaseOrderCard({ po, viewerIsAdmin }: { po: PurchaseOrder; viewerIsA
         <span className="font-mono text-[12.5px] text-ik-ink">{formatINR(po.grandTotal)}</span>
       </div>
       <div className="mt-1 text-[13px] text-ik-ink"><strong>{po.vendor}</strong></div>
+      {po.raisedAt && (
+        <div className="mt-0.5 text-[11px] text-ik-ink-3">
+          Raised {formatIST(new Date(po.raisedAt), "d MMM, HH:mm")}
+        </div>
+      )}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         {viewerCanAct ? (
           <Button size="sm" disabled={pending}

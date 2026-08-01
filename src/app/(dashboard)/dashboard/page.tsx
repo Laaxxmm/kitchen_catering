@@ -152,6 +152,8 @@ export default async function DashboardPage({
               channel: o.channel,
               headcount: o.headcount,
               eventDate: o.eventDate.toISOString(),
+              deliveryWindowStart: o.deliveryWindowStart?.toISOString(),
+              deliveryWindowEnd: o.deliveryWindowEnd?.toISOString(),
               roomNumber: o.roomNumber,
               tableNumber: o.tableNumber,
               handedToDelivery: o.handedToDeliveryAt != null,
@@ -289,6 +291,8 @@ export default async function DashboardPage({
                 orderCode: r.order?.code ?? null,
                 customerName: r.order?.customer.name ?? "Kitchen stock request",
                 eventDate: r.order?.eventDate.toISOString() ?? null,
+                deliveryWindowStart: r.order?.deliveryWindowStart.toISOString() ?? null,
+                deliveryWindowEnd: r.order?.deliveryWindowEnd.toISOString() ?? null,
                 createdAt: r.createdAt.toISOString(),
                 lines: r._count.lines,
               }))}
@@ -722,6 +726,7 @@ export default async function DashboardPage({
               code: o.code,
               customerName: o.customer.name,
               eventDate: o.eventDate.toISOString(),
+              requestedAt: (o.submittedAt ?? o.createdAt).toISOString(),
               channel: o.channel,
               headcount: o.headcount,
               contractValue: o.contractValue.toString(),
@@ -744,6 +749,7 @@ export default async function DashboardPage({
               .map((po) => ({
                 id: po.id,
                 poNo: po.poNo,
+                raisedAt: po.issueDate.toISOString(),
                 vendor: po.vendor.name,
                 grandTotal: po.grandTotal.toString(),
                 awaitingAdmin: po.managerApprovedAt != null,

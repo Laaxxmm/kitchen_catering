@@ -268,7 +268,12 @@ function OrdersTable({ rows, showValue = true }: { rows: OrderRow[]; showValue?:
               </TableCell>
               <TableCell className="text-[12.5px] text-ik-ink-2">{o.mealType}</TableCell>
               <TableCell className="text-right">{o.headcount}</TableCell>
-              <TableCell className="font-mono text-[12px]">{formatIST(o.eventDate, "yyyy-MM-dd")}</TableCell>
+              <TableCell className="font-mono text-[12px]">
+                {formatIST(o.eventDate, "yyyy-MM-dd")}
+                <div className="text-[10.5px] text-ik-ink-3">
+                  {formatIST(o.deliveryWindowStart, "HH:mm")}–{formatIST(o.deliveryWindowEnd, "HH:mm")}
+                </div>
+              </TableCell>
               {showValue && <TableCell className="text-right font-mono">{formatINRWhole(o.contractValue)}</TableCell>}
               <TableCell><StatusPill tone={tone}>{STATUS_LABEL[o.status]}</StatusPill></TableCell>
             </TableRow>

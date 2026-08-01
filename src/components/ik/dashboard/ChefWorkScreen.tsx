@@ -35,6 +35,9 @@ export interface ChefBoardOrder {
   channel: OrderChannel;
   headcount: number | null;
   eventDate: string;
+  /** ISO delivery window — shown so the chef cooks to the clock. */
+  deliveryWindowStart?: string;
+  deliveryWindowEnd?: string;
   roomNumber: string | null;
   tableNumber: string | null;
   handedToDelivery: boolean;
@@ -253,6 +256,12 @@ function ChefOrderCard({ order, highlight = false }: { order: ChefBoardOrder; hi
         <strong>{order.customerName}</strong>
         {order.headcount ? <span className="text-ik-ink-3"> · {order.headcount} pax</span> : null}
       </div>
+
+      {order.deliveryWindowStart && order.deliveryWindowEnd && (
+        <div className="mt-0.5 text-[11.5px] font-medium text-ik-ink-2">
+          🕒 Window {formatIST(new Date(order.deliveryWindowStart), "HH:mm")}–{formatIST(new Date(order.deliveryWindowEnd), "HH:mm")}
+        </div>
+      )}
 
       <div className="mt-0.5 text-[12px] text-ik-ink-2">{stage.line}</div>
 

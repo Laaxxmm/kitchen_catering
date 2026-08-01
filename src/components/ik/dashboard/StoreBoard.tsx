@@ -28,6 +28,8 @@ export interface StoreReq {
   orderCode: string | null;
   customerName: string;
   eventDate: string | null;
+  deliveryWindowStart?: string | null;
+  deliveryWindowEnd?: string | null;
   /** ISO createdAt — the "raised" date shown for order-less requests. */
   createdAt: string;
   lines: number;
@@ -138,6 +140,7 @@ export function StoreBoard({
                   title={r.customerName}
                   sub={`${r.orderCode ? `order ${r.orderCode} · ` : "general · "}${r.lines} ${r.lines === 1 ? "line" : "lines"} · ${r.status === "PARTIALLY_ISSUED" ? "part issued" : "to issue"}`}
                   eventDate={r.eventDate}
+                  deliveryWindow={r.deliveryWindowStart && r.deliveryWindowEnd ? { start: r.deliveryWindowStart, end: r.deliveryWindowEnd } : null}
                   createdAt={r.createdAt}
                 />
               )}
@@ -205,6 +208,7 @@ function ReqCard({
   title,
   sub,
   eventDate,
+  deliveryWindow = null,
   createdAt,
 }: {
   href: string;
@@ -212,6 +216,8 @@ function ReqCard({
   title: string;
   sub: string;
   eventDate: string | null;
+  /** Order delivery window — the store issues to this clock. */
+  deliveryWindow?: { start: string; end: string } | null;
   createdAt: string;
 }) {
   const prio = eventDate ? eventPriority(eventDate) : null;
@@ -250,6 +256,11 @@ function ReqCard({
           <div className="mt-1 text-[11.5px] font-medium">
             {prio ? <Countdown target={target} /> : <span className="text-ik-ink-3">Raised</span>}
           </div>
+          {deliveryWindow && (
+            <div className="mt-0.5 text-[11px] font-medium text-ik-ink-2">
+              🕒 Window {formatIST(new Date(deliveryWindow.start), "HH:mm")}–{formatIST(new Date(deliveryWindow.end), "HH:mm")}
+            </div>
+          )}
         </div>
         <div className="border-t border-ik-rule pt-2.5">
           <div className="truncate text-[13px] font-medium text-ik-ink">{title}</div>
