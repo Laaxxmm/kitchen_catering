@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { BanquetRequisitionStatus, Role } from "@prisma/client";
+import { BanquetRequisitionLineStatus, BanquetRequisitionStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -20,6 +20,9 @@ import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 export const dynamic = "force-dynamic";
 
 const ISSUE_ROLES: Role[] = [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER];
+// Who the /procurement/purchase-orders/new page lets in — the "Raise PO for
+// all short items" button is pointless for anyone else (they'd be bounced).
+const PO_ROLES: Role[] = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
 
 export default async function BanquetRequisitionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -47,8 +50,20 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
     ((isCreator && !requisition.lines.some((l) => Number(l.issuedQty.toString()) > 0)) ||
       isStoreClose);
 
-  // Vendor picker for "Raise PO for shortfall" — only fetched when the
-  // viewer can actually fulfil lines.
+  // One PO for every short line, same screen the kitchen uses. Counted with
+  // the same filter the prefill applies (still open, still short, not
+  // already back-linked to a PO line) so the button and the screen agree.
+  const shortLineCount = requisition.lines.filter(
+    (l) =>
+      l.vendorPOLineId == null &&
+      l.status !== BanquetRequisitionLineStatus.ISSUED &&
+      l.status !== BanquetRequisitionLineStatus.CANCELLED &&
+      Number(l.requestedQty.toString()) - Number(l.issuedQty.toString()) > 0,
+  ).length;
+  const canRaisePO = canFulfil && !!role && PO_ROLES.includes(role) && shortLineCount > 0;
+
+  // Vendor picker for the per-line "Raise PO for shortfall" — only fetched
+  // when the viewer can actually fulfil lines.
   const vendors: VendorOption[] = canFulfil
     ? (await listVendors({ active: true })).map((v) => ({
         id: v.id,
@@ -85,7 +100,16 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
             : "F&B stock request against the banquet store — not tied to any order."
         }
         actions={
-          <Link href="/banquet/requisitions"><Button variant="outline">Back to requisitions</Button></Link>
+          <div className="flex flex-wrap gap-2">
+            {canRaisePO && (
+              <Link href={`/procurement/purchase-orders/new?banquetReqId=${requisition.id}`}>
+                <Button>
+                  Raise PO for {shortLineCount} short item{shortLineCount === 1 ? "" : "s"}
+                </Button>
+              </Link>
+            )}
+            <Link href="/banquet/requisitions"><Button variant="outline">Back to requisitions</Button></Link>
+          </div>
         }
       />
 

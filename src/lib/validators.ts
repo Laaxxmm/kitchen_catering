@@ -605,6 +605,11 @@ export const VendorPOLineInput = z.object({
   // ChefRequisitionLine.vendorPOLineId so GRN acceptance can flip the line
   // back to issuable — mirrors the banquet vendorPOLineId link.
   chefReqLineId: z.string().nullable().optional(),
+  // Banquet (F&B) requisition line whose shortfall this PO line is buying
+  // (the ?banquetReqId= prefill flow). createVendorPOTx flips the line to
+  // AWAITING_PROCUREMENT and back-links vendorPOLineId — the same end state
+  // the single-line "Raise PO for shortfall" control produces.
+  banquetReqLineId: z.string().nullable().optional(),
   sku: z.string().min(1, "Each line needs an SKU / item name").max(40),
   description: z.string().min(1).max(500),
   unit: z.string().min(1).max(20),

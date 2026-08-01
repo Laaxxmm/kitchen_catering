@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
-import { ChefRequisitionLineStatus, Role } from "@prisma/client";
+import { BanquetRequisitionLineStatus, ChefRequisitionLineStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { createVendor, listVendors } from "@/server/actions/vendors";
 import { listIngredients } from "@/server/actions/inventory";
-import { listBanquetItems } from "@/server/actions/banquet";
+import { getBanquetRequisition, listBanquetItems } from "@/server/actions/banquet";
 import { createVendorPO } from "@/server/actions/procurement";
 import { getChefRequisition } from "@/server/actions/chef-requisitions";
 import { gateRolePage } from "@/server/rbac";
@@ -17,18 +17,19 @@ export const dynamic = "force-dynamic";
 export default async function NewVendorPOPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reqId?: string; lowstock?: string }>;
+  searchParams: Promise<{ reqId?: string; banquetReqId?: string; lowstock?: string }>;
 }) {
   // The store keeper raises the PO for a shortfall; manager/admin approve it.
   await gateRolePage([Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER]);
-  const { reqId, lowstock } = await searchParams;
+  const { reqId, banquetReqId, lowstock } = await searchParams;
   const fromLowStock = lowstock === "1";
 
-  const [vendors, ingredients, banquetItems, chefReq, lowStockItems, activeOrders] = await Promise.all([
+  const [vendors, ingredients, banquetItems, chefReq, banquetReq, lowStockItems, activeOrders] = await Promise.all([
     listVendors({ active: true }),
     listIngredients({ active: true }),
     listBanquetItems({ activeOnly: true }),
     reqId ? getChefRequisition(reqId) : Promise.resolve(null),
+    banquetReqId ? getBanquetRequisition(banquetReqId) : Promise.resolve(null),
     fromLowStock ? listIngredients({ active: true, lowStock: true }) : Promise.resolve([]),
     // "For order" picker (#9/#27): orders still in the kitchen's hands —
     // that's when a PO is being raised for them. Direct scoped query is
@@ -70,6 +71,7 @@ export default async function NewVendorPOPage({
           // M16: back-link — createVendorPOTx sets this line's
           // vendorPOLineId so the GRN can flip it back to issuable.
           chefReqLineId: l.id as string | null,
+          banquetReqLineId: null as string | null,
           sku: l.ingredient.sku,
           description: l.ingredient.name,
           unit: l.ingredient.unit,
@@ -79,6 +81,51 @@ export default async function NewVendorPOPage({
         };
       })
     : null;
+
+  // Same flow off an F&B (banquet) requisition: one PO for every short line
+  // instead of one PO per line via the row control. Dedupe mirrors the
+  // kitchen one — a line already back-linked to a PO line is left out so the
+  // store doesn't order the same shortfall twice.
+  const banquetShortLines = banquetReq
+    ? banquetReq.lines.filter(
+        (l) =>
+          l.vendorPOLineId == null &&
+          l.status !== BanquetRequisitionLineStatus.ISSUED &&
+          l.status !== BanquetRequisitionLineStatus.CANCELLED &&
+          toDecimal(l.requestedQty).minus(toDecimal(l.issuedQty)).gt(0),
+      )
+    : [];
+  const banquetAlreadyOnPO = banquetReq
+    ? banquetReq.lines.filter((l) => l.vendorPOLineId != null).length
+    : 0;
+  if (banquetReq && banquetShortLines.length > 0) {
+    // Banquet items carry no cost on the catalogue — the nearest thing to a
+    // price is what was last paid for them, so the PO total (and with it the
+    // approval tier) isn't a row of zeros. Editable like every other price.
+    const lastCosts = await db.banquetReceiptLine.findMany({
+      where: { itemId: { in: banquetShortLines.map((l) => l.itemId) }, costPerUnit: { not: null } },
+      select: { itemId: true, costPerUnit: true },
+      orderBy: { receipt: { receivedAt: "desc" } },
+    });
+    const costByItem = new Map<string, string>();
+    for (const c of lastCosts) {
+      if (!costByItem.has(c.itemId)) costByItem.set(c.itemId, c.costPerUnit!.toString());
+    }
+    prefillLines = banquetShortLines.map((l) => ({
+      ingredientId: "",
+      banquetItemId: l.itemId,
+      chefReqLineId: null,
+      // Back-link — createVendorPOTx flips the line to AWAITING_PROCUREMENT
+      // and points its vendorPOLineId here, so GRN acceptance re-opens it.
+      banquetReqLineId: l.id as string | null,
+      sku: l.item.sku ?? "",
+      description: l.item.name,
+      unit: l.item.unit,
+      quantity: toDecimal(l.requestedQty).minus(toDecimal(l.issuedQty)).toString(),
+      unitPrice: costByItem.get(l.itemId) ?? "0",
+      gstRatePct: "5",
+    }));
+  }
 
   // Reorder all low-stock ingredients in one PO. Quantity defaults to the
   // reorder level (top-up target) and the unit price to the average cost —
@@ -105,6 +152,7 @@ export default async function NewVendorPOPage({
       ingredientId: i.id,
       banquetItemId: "",
       chefReqLineId: null,
+      banquetReqLineId: null,
       sku: i.sku,
       description: i.name,
       unit: i.unit,
@@ -127,7 +175,7 @@ export default async function NewVendorPOPage({
     placeOfSupplyStateCode: string;
     expectedDate: string | undefined;
     notes: string | null;
-    lines: Array<{ ingredientId: string | null; banquetItemId: string | null; chefReqLineId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
+    lines: Array<{ ingredientId: string | null; banquetItemId: string | null; chefReqLineId: string | null; banquetReqLineId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
   }) {
     "use server";
     // input.lines already carry banquetItemId; createVendorPO parses via
@@ -164,9 +212,11 @@ export default async function NewVendorPOPage({
         description={
           chefReq
             ? `Filled in from kitchen requisition ${chefReq.requisitionNo}. Confirm the supplier, adjust prices, then create the PO.`
-            : fromLowStock
-              ? "Reordering low-stock items. Confirm the supplier, edit quantities/prices, then create the PO."
-              : "Pick a vendor, add line items, submit. The total auto-determines the approval tier."
+            : banquetReq
+              ? `Filled in from F&B requisition ${banquetReq.requisitionNo}. Confirm the supplier, adjust prices, then create the PO.`
+              : fromLowStock
+                ? "Reordering low-stock items. Confirm the supplier, edit quantities/prices, then create the PO."
+                : "Pick a vendor, add line items, submit. The total auto-determines the approval tier."
         }
       />
 
@@ -181,6 +231,21 @@ export default async function NewVendorPOPage({
           each item&apos;s average cost — <strong>edit them</strong> to match the supplier&apos;s
           quote. The total decides the approval: under ₹5,000 the manager signs off; ₹5,000 and above
           needs admin.
+        </div>
+      )}
+
+      {banquetReq && (
+        <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">
+          <strong>From F&amp;B requisition {banquetReq.requisitionNo}</strong> ·{" "}
+          {banquetShortLines.length} short item{banquetShortLines.length === 1 ? "" : "s"}.
+          {banquetAlreadyOnPO > 0 && (
+            <> {banquetAlreadyOnPO} other short item{banquetAlreadyOnPO === 1 ? " is" : "s are"} already on an earlier PO and {banquetAlreadyOnPO === 1 ? "was" : "were"} left out so they aren&apos;t ordered twice.</>
+          )}{" "}
+          Prices are pre-filled from what was last paid for each item —{" "}
+          <strong>edit them</strong> to match the supplier&apos;s quote. Creating the PO marks these
+          lines &ldquo;awaiting procurement&rdquo;; the store can issue them again once the goods
+          arrive. The total decides the approval: under ₹5,000 the manager signs off; ₹5,000 and
+          above needs admin.
         </div>
       )}
 

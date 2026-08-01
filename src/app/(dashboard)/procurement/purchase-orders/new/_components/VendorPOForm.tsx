@@ -22,6 +22,8 @@ interface DraftLine {
   banquetItemId: string;
   /** Chef requisition line this PO line is buying for (?reqId= prefill). */
   chefReqLineId?: string | null;
+  /** Banquet requisition line this PO line is buying for (?banquetReqId=). */
+  banquetReqLineId?: string | null;
   sku: string;
   description: string;
   unit: string;
@@ -45,7 +47,7 @@ interface Props {
     placeOfSupplyStateCode: string;
     expectedDate: string | undefined;
     notes: string | null;
-    lines: Array<{ ingredientId: string | null; banquetItemId: string | null; chefReqLineId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
+    lines: Array<{ ingredientId: string | null; banquetItemId: string | null; chefReqLineId: string | null; banquetReqLineId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
   }) => Promise<ActionResult | void>;
   // Pre-fill when the PO is being spun out of an approved PR — the lines
   // come straight from the request so the user only has to fill in prices.
@@ -60,7 +62,7 @@ interface Props {
 }
 
 function emptyLine(): DraftLine {
-  return { ingredientId: "", banquetItemId: "", chefReqLineId: null, sku: "", description: "", unit: "kg", quantity: "1", unitPrice: "0", gstRatePct: "5" };
+  return { ingredientId: "", banquetItemId: "", chefReqLineId: null, banquetReqLineId: null, sku: "", description: "", unit: "kg", quantity: "1", unitPrice: "0", gstRatePct: "5" };
 }
 
 export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders = [], initialOrderId, onSubmit, initialVendorId, initialLines, onQuickAddVendor }: Props) {
@@ -126,19 +128,19 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
     const bq = value.startsWith("bq:") ? banquetItems.find((b) => b.id === value.slice(3)) : undefined;
     setLines((p) => p.map((x, i) => {
       if (i !== idx) return x;
-      // Changing the item breaks any chef-requisition back-link the prefill
-      // carried — the requisition line must not end up tied to a PO line
-      // buying a different item.
+      // Changing the item breaks any requisition back-link the prefill
+      // carried (kitchen or F&B) — the requisition line must not end up tied
+      // to a PO line buying a different item.
       if (ing) {
-        return { ...x, ingredientId: ing.id, banquetItemId: "", chefReqLineId: null, sku: ing.sku, description: ing.name, unit: ing.unit, gstRatePct: ing.gstRatePct };
+        return { ...x, ingredientId: ing.id, banquetItemId: "", chefReqLineId: null, banquetReqLineId: null, sku: ing.sku, description: ing.name, unit: ing.unit, gstRatePct: ing.gstRatePct };
       }
       if (bq) {
         // Banquet items don't carry GST in the catalogue — keep the line's
         // current rate (bq.gstRatePct if a caller ever provides one).
-        return { ...x, ingredientId: "", banquetItemId: bq.id, chefReqLineId: null, sku: bq.sku, description: bq.name, unit: bq.unit, gstRatePct: bq.gstRatePct ?? x.gstRatePct };
+        return { ...x, ingredientId: "", banquetItemId: bq.id, chefReqLineId: null, banquetReqLineId: null, sku: bq.sku, description: bq.name, unit: bq.unit, gstRatePct: bq.gstRatePct ?? x.gstRatePct };
       }
       // Free text — clear both ids, leave sku/description as typed.
-      return { ...x, ingredientId: "", banquetItemId: "", chefReqLineId: null };
+      return { ...x, ingredientId: "", banquetItemId: "", chefReqLineId: null, banquetReqLineId: null };
     }));
   }
 
@@ -200,6 +202,7 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
             ingredientId: l.ingredientId || null,
             banquetItemId: l.banquetItemId || null,
             chefReqLineId: l.chefReqLineId || null,
+            banquetReqLineId: l.banquetReqLineId || null,
             sku: l.sku,
             description: l.description,
             unit: l.unit,
