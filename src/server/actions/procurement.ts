@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Decimal } from "decimal.js";
 import {
   BanquetRequisitionLineStatus,
+  BanquetRequisitionStatus,
   ChefRequisitionLineStatus,
   ChefRequisitionStatus,
   GRNStatus,
@@ -1044,9 +1045,18 @@ async function createGRNInner(
         // goods are in and stock is posted, so they're issuable again.
         // Mirrors the banquet flip below. Guarded on line status AND a live
         // parent so a cancelled requisition isn't resurrected.
+        //
+        // Matches by back-link OR by ingredient: a PO raised manually (typed
+        // lines, not the ?reqId= prefill) carries no back-link, and matching
+        // only vendorPOLineId left those requisition lines frozen at
+        // "awaiting procurement" while the goods sat posted on the shelf —
+        // the recurring "GRN accepted but can't issue" complaint. Goods for
+        // this ingredient have arrived; every live line waiting on it
+        // becomes issuable. Issuing still checks stock, so over-flipping is
+        // harmless.
         const chefLinked = await tx.chefRequisitionLine.findMany({
           where: {
-            vendorPOLineId: poLine.id,
+            OR: [{ vendorPOLineId: poLine.id }, { ingredientId: poLine.ingredientId }],
             status: ChefRequisitionLineStatus.AWAITING_PROCUREMENT,
             requisition: {
               status: {
@@ -1130,12 +1140,21 @@ async function createGRNInner(
           data: { currentStock: { increment: new Prisma.Decimal(accepted.toString()) } },
         });
 
-        // Requisition lines waiting on this exact PO line: goods are in, so
-        // they're issuable again. Parent statuses are recomputed per req.
+        // Requisition lines waiting on these goods: issuable again. By
+        // back-link OR by item — a manually-raised PO carries no back-link,
+        // and matching only vendorPOLineId froze those lines at "awaiting
+        // procurement" with the stock already on the shelf (same bug as the
+        // kitchen side). Live requisitions only, so a cancelled one isn't
+        // resurrected; parent statuses are recomputed per req below.
         const linked = await tx.banquetRequisitionLine.findMany({
           where: {
-            vendorPOLineId: poLine.id,
+            OR: [{ vendorPOLineId: poLine.id }, { itemId: poLine.banquetItemId }],
             status: BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
+            requisition: {
+              status: {
+                in: [BanquetRequisitionStatus.SUBMITTED, BanquetRequisitionStatus.PARTIALLY_ISSUED],
+              },
+            },
           },
           select: {
             id: true,
