@@ -87,11 +87,10 @@ async function upsertBanquetItemInner(
   raw: unknown,
   id?: string,
 ): Promise<{ ok: true; id: string }> {
-  // Store keeper may CREATE a new banquet item (they load/correct stock and
-  // often add the SKU they're receiving), but editing the catalogue stays
-  // with WRITE_ROLES — mirrors the kitchen pattern where SALES can add a dish
-  // but not edit the catalogue. Gate dynamically on create-vs-update.
-  const session = await requireRole(id ? WRITE_ROLES : [...WRITE_ROLES, Role.STORE_KEEPER]);
+  // Catalogue is management-only, create AND edit. Letting the store / F&B
+  // add or re-unit items produced duplicates and mixed units, which is what
+  // stranded GRNs and corrupted stock. Everyone else picks from the list.
+  const session = await requireRole([Role.ADMIN, Role.MANAGER]);
   const input = BanquetItemInput.parse(raw);
 
   const row = await db.$transaction(async (tx) => {

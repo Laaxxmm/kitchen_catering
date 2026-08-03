@@ -20,7 +20,8 @@ export default async function NewVendorPOPage({
   searchParams: Promise<{ reqId?: string; banquetReqId?: string; lowstock?: string }>;
 }) {
   // The store keeper raises the PO for a shortfall; manager/admin approve it.
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER]);
+  const session = await gateRolePage([Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER]);
+  const viewerRole = session.user.role;
   const { reqId, banquetReqId, lowstock } = await searchParams;
   const fromLowStock = lowstock === "1";
 
@@ -275,6 +276,7 @@ export default async function NewVendorPOPage({
         initialOrderId={chefReq?.order?.id ?? null}
         onSubmit={create}
         onQuickAddVendor={quickAddVendor}
+        canFreeText={viewerRole === Role.ADMIN || viewerRole === Role.MANAGER}
         initialVendorId={suggestedVendorId}
         initialLines={prefillLines}
       />

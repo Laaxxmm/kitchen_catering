@@ -59,13 +59,17 @@ interface Props {
     | { ok: true; id: string; name: string; code: string; stateCode: string }
     | { ok: false; error: string }
   >;
+  /** Admin/manager only: allow a non-catalogue (free text) line, e.g.
+   *  transport charges. Everyone else must pick items from the dropdown —
+   *  free-typed items are where the duplicate catalogue entries came from. */
+  canFreeText?: boolean;
 }
 
 function emptyLine(): DraftLine {
   return { ingredientId: "", banquetItemId: "", chefReqLineId: null, banquetReqLineId: null, sku: "", description: "", unit: "kg", quantity: "1", unitPrice: "0", gstRatePct: "5" };
 }
 
-export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders = [], initialOrderId, onSubmit, initialVendorId, initialLines, onQuickAddVendor }: Props) {
+export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders = [], initialOrderId, onSubmit, initialVendorId, initialLines, onQuickAddVendor, canFreeText = false }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [vendorOptions, setVendorOptions] = useState(vendors);
@@ -147,10 +151,10 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
   // Combobox has no optgroups, so the Kitchen/Banquet split is carried as a
   // label prefix. Value encoding is unchanged: "ing:<id>" / "bq:<id>" / "".
   const itemOptions: ComboOption[] = useMemo(() => [
-    { value: "", label: "— free text —" },
+    ...(canFreeText ? [{ value: "", label: "— free text —" }] : []),
     ...ingredients.map((i) => ({ value: `ing:${i.id}`, label: `Kitchen · ${i.sku} · ${i.name}` })),
     ...banquetItems.map((b) => ({ value: `bq:${b.id}`, label: `Banquet · ${b.sku} · ${b.name}` })),
-  ], [ingredients, banquetItems]);
+  ], [ingredients, banquetItems, canFreeText]);
 
   const vendorComboOptions: ComboOption[] = useMemo(
     () => vendorOptions.map((v) => ({ value: v.id, label: `${v.code} · ${v.name}` })),
@@ -173,6 +177,9 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
     // missing/zero quantity is an error, not a silent drop.
     const touched = lines.filter((l) => l.description.trim() || l.sku.trim() || l.quantity.trim() || l.unitPrice.trim());
     for (const l of touched) {
+      if (!canFreeText && !l.ingredientId && !l.banquetItemId) {
+        return toast.error("Pick each item from the list — free-typed items aren't allowed.");
+      }
       if (!l.description.trim()) return toast.error("A line is missing its description");
       const q = Number(l.quantity);
       if (!l.quantity.trim() || Number.isNaN(q) || q <= 0) {
@@ -368,9 +375,32 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
                         emptyText="No item matches"
                       />
                     </td>
-                    <td className="py-1 pr-2"><input value={l.sku} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, sku: e.target.value } : x))} className="h-8 w-20 rounded border border-ik-rule bg-ik-card px-1 font-mono" /></td>
-                    <td className="py-1 pr-2"><input value={l.description} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, description: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1" /></td>
-                    <td className="py-1 pr-2"><input value={l.unit} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, unit: e.target.value } : x))} className="h-8 w-12 rounded border border-ik-rule bg-ik-card px-1" /></td>
+                    {/* Catalogue lines are the catalogue's words: sku, name and
+                        UNIT come from the picked item and cannot be edited here
+                        — mixed-up units ("pkt" bought as "kg") are what corrupted
+                        stock. Only an admin/manager free-text line types these. */}
+                    {(() => {
+                      const locked = !canFreeText || l.ingredientId !== "" || l.banquetItemId !== "";
+                      return (
+                        <>
+                          <td className="py-1 pr-2 font-mono text-[12px] text-ik-ink-3">
+                            {locked ? (l.sku || "—") : (
+                              <input value={l.sku} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, sku: e.target.value } : x))} className="h-8 w-20 rounded border border-ik-rule bg-ik-card px-1 font-mono" />
+                            )}
+                          </td>
+                          <td className="py-1 pr-2">
+                            {locked ? <span className="text-[12.5px] text-ik-ink">{l.description || "— pick an item —"}</span> : (
+                              <input value={l.description} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, description: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1" />
+                            )}
+                          </td>
+                          <td className="py-1 pr-2 text-[12.5px] text-ik-ink-2">
+                            {locked ? (l.unit || "—") : (
+                              <input value={l.unit} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, unit: e.target.value } : x))} className="h-8 w-12 rounded border border-ik-rule bg-ik-card px-1" />
+                            )}
+                          </td>
+                        </>
+                      );
+                    })()}
                     <td className="py-1 pr-2"><input type="number" step="any" min="0.001" value={l.quantity} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, quantity: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
                     <td className="py-1 pr-2"><input type="number" step="0.01" min="0" value={l.unitPrice} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, unitPrice: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
                     <td className="py-1 pr-2"><input type="number" step="0.01" min="0" value={l.gstRatePct} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, gstRatePct: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>

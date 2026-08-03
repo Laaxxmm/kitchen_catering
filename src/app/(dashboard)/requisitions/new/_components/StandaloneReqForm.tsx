@@ -103,8 +103,7 @@ export function StandaloneReqForm({ ingredients }: { ingredients: Ingredient[] }
                       className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" />
                   </td>
                   <td className="py-1 pr-2">
-                    <input value={l.unit} onChange={(e) => setLine(idx, { unit: e.target.value })}
-                      className="h-8 w-14 rounded border border-ik-rule bg-ik-card px-1" />
+                    <span className="text-[12.5px] text-ik-ink-2">{l.unit || "—"}</span>
                   </td>
                   <td className="py-1 pr-2">
                     <input value={l.notes} onChange={(e) => setLine(idx, { notes: e.target.value })}

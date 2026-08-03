@@ -20,8 +20,9 @@ export default async function BanquetItemsPage({
   // The store keeper may only CREATE a new item (they add the SKU they're
   // receiving), mirroring the server-side gate on upsertBanquetItem.
   const WRITE_ROLES: Role[] = [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY];
-  const canManage = WRITE_ROLES.includes(session.user.role);
-  const canCreate = canManage || session.user.role === Role.STORE_KEEPER;
+  // Catalogue changes (add / edit) are management-only — see upsertBanquetItem.
+  const canManage = session.user.role === Role.ADMIN || session.user.role === Role.MANAGER;
+  const canCreate = canManage;
   const items = await listBanquetItems({ activeOnly: false });
   const serialised = items.map((i) => ({
     id: i.id,

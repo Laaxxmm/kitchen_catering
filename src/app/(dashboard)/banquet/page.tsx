@@ -27,7 +27,10 @@ export default async function BanquetLandingPage() {
         <div className="flex flex-wrap gap-2">
           <Link href="/banquet/issues/new"><Button>Issue to event</Button></Link>
           <Link href="/banquet/receipts/new"><Button variant="outline">Record receipt</Button></Link>
-          <Link href="/banquet/items?new=1"><Button variant="outline">New item</Button></Link>
+          {/* Catalogue is management-only — the button follows upsertBanquetItem's gate. */}
+          {(session.user.role === Role.ADMIN || session.user.role === Role.MANAGER) && (
+            <Link href="/banquet/items?new=1"><Button variant="outline">New item</Button></Link>
+          )}
           <Link href="/banquet/requisitions"><Button variant="outline">Requisitions</Button></Link>
           {canRaiseRequisition && (
             <Link href="/banquet/request"><Button variant="outline">Raise requisition</Button></Link>
