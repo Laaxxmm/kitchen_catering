@@ -1384,24 +1384,34 @@ function computeVendorBillLines(lines: VendorBillLineInputT[]) {
   let subtotal = new Decimal(0);
   let taxTotal = new Decimal(0);
   const linesData = lines.map((l, idx) => {
+    // decimalString lets "" through (legitimate "not provided" elsewhere),
+    // and `?? "0"` only catches null — so a blank GST/qty/price box reached
+    // new Decimal("") and crashed with a raw [DecimalError] on Create draft
+    // bill. Same blank-guards as the PO path: qty/price must be entered
+    // (0 price is fine), blank GST means 0%.
+    const quantity = l.quantity.trim();
+    if (!quantity) throw new ActionError(`Line "${l.description}": enter the quantity.`);
+    const unitPrice = l.unitPrice.trim();
+    if (!unitPrice) throw new ActionError(`Line "${l.description}": enter the unit price (0 is fine).`);
+    const gstRatePct = l.gstRatePct?.trim() || "0";
     // Per-line round then sum via gst.computeLine, so the header totals are
     // the sum of the rounded lines (matching summarise / the PO convention)
     // rather than a single rounding of the raw sum.
     const { subtotal: lineSub, tax: lineTax, total: lineTotal } = computeLine({
-      quantity: l.quantity,
-      unitPrice: l.unitPrice,
+      quantity,
+      unitPrice,
       discountPct: "0",
-      gstRatePct: l.gstRatePct ?? "0",
+      gstRatePct,
     });
     subtotal = subtotal.plus(lineSub);
     taxTotal = taxTotal.plus(lineTax);
     return {
       sortOrder: idx,
       description: l.description,
-      quantity: l.quantity,
+      quantity,
       unit: l.unit,
-      unitPrice: l.unitPrice,
-      gstRatePct: l.gstRatePct ?? "0",
+      unitPrice,
+      gstRatePct,
       lineSubtotal: lineSub.toString(),
       lineTax: lineTax.toString(),
       lineTotal: lineTotal.toString(),
