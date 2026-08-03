@@ -16,10 +16,6 @@ export default async function BanquetItemsPage({
   const sp = await searchParams;
   // The whole F&B Service team manages the banquet catalogue.
   const session = await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
-  // Editing / deactivating / deleting the catalogue stays with WRITE_ROLES.
-  // The store keeper may only CREATE a new item (they add the SKU they're
-  // receiving), mirroring the server-side gate on upsertBanquetItem.
-  const WRITE_ROLES: Role[] = [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY];
   // Catalogue changes (add / edit) are management-only — see upsertBanquetItem.
   const canManage = session.user.role === Role.ADMIN || session.user.role === Role.MANAGER;
   const canCreate = canManage;
