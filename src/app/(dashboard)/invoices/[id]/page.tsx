@@ -20,10 +20,20 @@ import { RecordPaymentForm } from "./_components/RecordPaymentForm";
 import { MarkPaidModal } from "@/components/ik/finance/MarkPaidModal";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
-import { formatINR } from "@/lib/money";
+import { formatINR, toDecimal } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
+
+// Friendly meal labels for the consolidated order row (mirrors the PDF).
+const MEAL_LABEL: Record<string, string> = {
+  BREAKFAST: "Breakfast",
+  LUNCH: "Lunch",
+  DINNER: "Dinner",
+  HIGH_TEA: "High tea",
+  SNACKS: "Snacks",
+  CUSTOM: "Custom",
+};
 
 export default async function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -191,15 +201,40 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {invoice.lines.map((l) => (
-                  <TableRow key={l.id}>
-                    <TableCell>{l.description}</TableCell>
-                    <TableCell className="text-right font-mono">{l.quantity.toString()} {l.unit}</TableCell>
-                    <TableCell className="text-right font-mono">{l.unitPrice.toString()}</TableCell>
-                    <TableCell className="text-right font-mono">{l.gstRatePct.toString()}</TableCell>
-                    <TableCell className="text-right font-mono">{l.lineTotal.toString()}</TableCell>
+                {invoice.order ? (
+                  // Order-linked bill: one consolidated row reading the LIVE
+                  // order (meal + current pax) — the stored lines snapshot
+                  // pax at creation, which kept showing stale counts after a
+                  // revision. Money stays exactly as invoiced; the PDF
+                  // renders the same row.
+                  <TableRow>
+                    <TableCell>
+                      {MEAL_LABEL[invoice.order.mealType] ?? invoice.order.mealType} catering — {invoice.order.code}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">{invoice.order.headcount ?? "—"} pax</TableCell>
+                    <TableCell className="text-right font-mono">
+                      {invoice.order.headcount
+                        ? toDecimal(invoice.subtotal).div(invoice.order.headcount).toDecimalPlaces(2).toString()
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {toDecimal(invoice.subtotal).gt(0)
+                        ? toDecimal(invoice.taxTotal).div(toDecimal(invoice.subtotal)).times(100).toDecimalPlaces(1).toString()
+                        : "0"}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">{invoice.grandTotal.toString()}</TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  invoice.lines.map((l) => (
+                    <TableRow key={l.id}>
+                      <TableCell>{l.description}</TableCell>
+                      <TableCell className="text-right font-mono">{l.quantity.toString()} {l.unit}</TableCell>
+                      <TableCell className="text-right font-mono">{l.unitPrice.toString()}</TableCell>
+                      <TableCell className="text-right font-mono">{l.gstRatePct.toString()}</TableCell>
+                      <TableCell className="text-right font-mono">{l.lineTotal.toString()}</TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
 

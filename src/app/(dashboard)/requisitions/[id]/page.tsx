@@ -132,6 +132,32 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
         }
       />
 
+      {/* The menu being cooked — same panel as the raise page, so the chef
+          editing a draft (and the store issuing) sees the dishes without
+          flipping back to the order. */}
+      {requisition.order && requisition.order.items.length > 0 && (
+        <section className="mb-4 rounded-2xl border border-ik-rule bg-ik-card p-4 shadow-ik-card">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Cooking for</h3>
+            <span className="text-[12.5px] font-medium text-ik-ink">
+              {requisition.order.headcount} pax · {requisition.order.mealType.replace("_", " ")} ·{" "}
+              {formatIST(requisition.order.eventDate, "EEE d MMM, HH:mm")}
+            </span>
+          </div>
+          <ul className="flex flex-wrap gap-1.5">
+            {requisition.order.items.map((it) => (
+              <li
+                key={it.id}
+                className="rounded-full bg-ik-paper-alt px-2.5 py-1 text-[12px] text-ik-ink ring-1 ring-ik-rule"
+              >
+                <span className="font-medium">{it.dish.name}</span>
+                <span className="text-ik-ink-3"> · {it.portions.toString()}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {isStore && hasAwaiting && (
         <div className="mb-4 rounded-md border border-amber bg-amber-wash p-3 text-[13px] text-ik-ink-2">
           <strong>Some items are short.</strong> Hit <em>Raise purchase order</em> to buy them — the

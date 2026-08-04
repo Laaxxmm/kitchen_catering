@@ -1064,7 +1064,14 @@ export async function getChefRequisition(id: string) {
       order: {
         select: {
           id: true, code: true, status: true, eventDate: true,
+          headcount: true, mealType: true,
           customer: { select: { id: true, name: true } },
+          // The menu being cooked — shown above the lines so the chef edits
+          // the draft against the actual dishes (same panel as the raise page).
+          items: {
+            select: { id: true, portions: true, dish: { select: { name: true } } },
+            orderBy: { sortOrder: "asc" },
+          },
         },
       },
       createdBy: { select: { name: true } },
