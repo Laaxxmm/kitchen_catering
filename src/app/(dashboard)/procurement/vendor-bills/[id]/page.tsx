@@ -7,8 +7,10 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { auth } from "@/server/auth";
 import {
+  applyVendorAdvanceToBill,
   approveVendorBill,
   getVendorBill,
+  listOpenVendorAdvances,
   markVendorBillPaid,
   matchVendorBill,
 } from "@/server/actions/procurement";
@@ -39,8 +41,13 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
       bill.status === VendorBillStatus.PENDING_MATCH ||
       bill.status === VendorBillStatus.DISCREPANCY) &&
     (role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS);
-  const canApprove = (bill.status === VendorBillStatus.MATCHED || bill.status === VendorBillStatus.DISCREPANCY) && (role === Role.ADMIN || role === Role.MANAGER);
+  // Accounts approve supplier bills too (client item #12) — mirrors
+  // BILL_APPROVE_ROLES in the action; PO approval stays admin/manager.
+  const canApprove = (bill.status === VendorBillStatus.MATCHED || bill.status === VendorBillStatus.DISCREPANCY) && (role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS);
   const canPay = bill.status === VendorBillStatus.APPROVED && (role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS);
+  // Unapplied advances for this supplier — offered on payable bills so money
+  // already handed over settles the bill instead of being paid twice.
+  const openAdvances = canPay ? await listOpenVendorAdvances(bill.vendorId) : [];
 
   async function doMatch() {
     "use server";
@@ -66,6 +73,10 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
   async function doReverse(paymentId: string, reason: string) {
     "use server";
     return await reverseVendorBillPayment({ paymentId, reason });
+  }
+  async function doApplyAdvance(advanceId: string) {
+    "use server";
+    return await applyVendorAdvanceToBill(advanceId, id);
   }
 
   let discrepancies: Array<{ line: string; field: string; poValue?: string; billValue: string; delta?: string }> = [];
@@ -206,6 +217,33 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
           title="Supplier-bill attachments"
         />
       </section>
+
+      {openAdvances.length > 0 && (
+        <section className="mt-6 rounded-2xl border border-brand-200 bg-brand-50 p-4 shadow-ik-card">
+          <h3 className="mb-1 font-medium text-[14px] text-ik-ink">Advances already paid to {bill.vendor.name}</h3>
+          <p className="mb-2 text-[12.5px] text-ik-ink-2">
+            Applying an advance posts it as a payment on this bill — don&apos;t also record it below.
+          </p>
+          <div className="grid gap-2">
+            {openAdvances.map((a) => (
+              <div key={a.id} className="flex flex-wrap items-center gap-3 text-[13px]">
+                <span className="font-mono">{formatINR(a.amount)}</span>
+                <span className="text-ik-ink-3">
+                  {formatIST(a.paidAt, "yyyy-MM-dd")} · {a.method}
+                  {a.po?.poNo ? ` · for ${a.po.poNo}` : ""}
+                  {a.reference ? ` · ref ${a.reference}` : ""}
+                </span>
+                <ActionResultButton
+                  action={doApplyAdvance.bind(null, a.id)}
+                  successMessage="Advance applied to this bill"
+                >
+                  Apply to this bill
+                </ActionResultButton>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {canPay && <BillPaymentForm outstanding={Number(bill.grandTotal) - Number(bill.amountPaid)} onSubmit={doPay} />}
     </>

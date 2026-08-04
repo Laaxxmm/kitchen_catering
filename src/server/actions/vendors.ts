@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Role, VendorApprovalStatus, VendorCategory, VendorPaymentTerms } from "@prisma/client";
+import { Role, VendorApprovalStatus, VendorCategory, VendorPaymentTerms, VendorPOStatus } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { VendorInput, type VendorInputT } from "@/lib/validators";
@@ -283,16 +283,29 @@ export type VendorTimelineEntry =
 
 export async function getVendorHistory(vendorId: string) {
   await requireRole(READ_ROLES);
-  const bills = await db.vendorBill.findMany({
-    where: { vendorId },
-    include: {
-      payments: {
-        where: { reversedAt: null },
-        orderBy: { paidAt: "asc" },
+  const [bills, unbilledPos] = await Promise.all([
+    db.vendorBill.findMany({
+      where: { vendorId },
+      include: {
+        payments: {
+          where: { reversedAt: null },
+          orderBy: { paidAt: "asc" },
+        },
       },
-    },
-    orderBy: { issueDate: "asc" },
-  });
+      orderBy: { issueDate: "asc" },
+    }),
+    // Goods received but no bill entered yet. Without this the tab reads as
+    // if nothing is owed on those POs — the "outstanding doesn't match what
+    // we received" complaint.
+    db.vendorPO.findMany({
+      where: {
+        vendorId,
+        status: { in: [VendorPOStatus.PARTIALLY_RECEIVED, VendorPOStatus.RECEIVED, VendorPOStatus.CLOSED] },
+        bills: { none: {} },
+      },
+      select: { grandTotal: true },
+    }),
+  ]);
 
   // Build chronological timeline (oldest -> newest), then reverse for
   // display. Running balance accumulates across all bills + payments.
@@ -346,12 +359,15 @@ export async function getVendorHistory(vendorId: string) {
       });
     }
   }
+  const unbilledValue = unbilledPos.reduce((s, p) => s.plus(toDecimal(p.grandTotal)), toDecimal(0));
   return {
     timeline: out.reverse(),
     totals: {
       billed: totalBilled.toDecimalPlaces(2).toString(),
       paid: totalPaid.toDecimalPlaces(2).toString(),
       outstanding: running.toDecimalPlaces(2).toString(),
+      unbilledCount: unbilledPos.length,
+      unbilledValue: unbilledValue.toDecimalPlaces(2).toString(),
     },
   };
 }

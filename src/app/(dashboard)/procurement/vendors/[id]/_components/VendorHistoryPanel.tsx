@@ -32,6 +32,16 @@ export async function VendorHistoryPanel({ vendorId }: { vendorId: string }) {
           />
         </div>
       </div>
+      {totals.unbilledCount > 0 && (
+        <p className="mb-3 rounded-md border border-amber bg-amber-wash px-3 py-2 text-[12.5px] text-amber-700">
+          ⚠ {totals.unbilledCount} received PO{totals.unbilledCount === 1 ? "" : "s"} worth{" "}
+          <span className="font-mono">{formatINR(totals.unbilledValue)}</span> have no supplier bill entered yet —
+          they are NOT counted in the totals above.{" "}
+          <Link href="/procurement/vendor-bills/new" className="text-brand hover:underline">
+            Enter the bill →
+          </Link>
+        </p>
+      )}
       {timeline.length === 0 ? (
         <p className="text-[12.5px] text-ik-ink-3">
           No bills or payments recorded against this vendor yet.

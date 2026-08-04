@@ -36,7 +36,12 @@ export default async function VendorBillsPage({
         eyebrow="Procurement"
         title="Vendor bills"
         description="Bills from suppliers. 3-way match (bill ↔ PO ↔ GRN), then approve and mark paid when the payment goes out."
-        actions={canMark ? <Link href="/procurement/vendor-bills/new"><Button>New bill</Button></Link> : undefined}
+        actions={canMark ? (
+          <div className="flex gap-2">
+            <Link href="/procurement/advances/new"><Button variant="outline">Record advance</Button></Link>
+            <Link href="/procurement/vendor-bills/new"><Button>New bill</Button></Link>
+          </div>
+        ) : undefined}
       />
       <form method="get" className="mb-4 flex flex-wrap items-end gap-2">
         <div className="grid gap-1">
