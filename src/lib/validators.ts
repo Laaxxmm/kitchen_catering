@@ -1067,3 +1067,37 @@ export {
   TaskPriority,
   TaskStatus,
 };
+
+// =====================================================================
+// ORDER TEMPLATE (recurring orders — manager only)
+// =====================================================================
+
+export const OrderTemplateInput = z.object({
+  name: z.string().trim().min(2).max(120),
+  customerId: z.string().min(1),
+  channel: z.nativeEnum(OrderChannel),
+  mealType: z.nativeEnum(MealType),
+  headcount: z.coerce.number().int().min(1).max(100000),
+  packageTotal: decimalString.nullable().optional(),
+  deliveryAddress: z.string().max(500).nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  items: z
+    .array(z.object({ dishId: z.string().min(1), portions: decimalString }))
+    .max(200),
+});
+export type OrderTemplateInputT = z.infer<typeof OrderTemplateInput>;
+
+// =====================================================================
+// VENDOR ADVANCE (money paid before the bill exists)
+// =====================================================================
+
+export const VendorAdvanceInput = z.object({
+  vendorId: z.string().min(1),
+  poId: z.string().nullable().optional(),
+  amount: decimalString,
+  method: z.nativeEnum(PaymentMethod),
+  reference: z.string().max(120).nullable().optional(),
+  notes: z.string().max(1000).nullable().optional(),
+  paidAt: z.string().min(1),
+});
+export type VendorAdvanceInputT = z.infer<typeof VendorAdvanceInput>;

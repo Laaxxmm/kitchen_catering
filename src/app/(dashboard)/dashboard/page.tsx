@@ -685,6 +685,7 @@ export default async function DashboardPage({
     { key: "customers", icon: "customers", label: "Customers", href: "/customers", heroSub: "Quotes & contacts" },
   ];
   const moreActions = [
+    { label: "Recurring orders", href: "/orders/templates" },
     { label: "Draft quote", href: "/quotes/new" },
     { label: "Add customer", href: "/customers/new" },
     { label: "Schedule delivery", href: "/deliveries/new" },

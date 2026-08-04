@@ -4,13 +4,18 @@ import { createCustomer, listCustomers } from "@/server/actions/customers";
 import { listDishes } from "@/server/actions/dishes";
 import { createOrder } from "@/server/actions/orders";
 import { gateRolePage } from "@/server/rbac";
+import { getOrderTemplate } from "@/server/actions/order-templates";
 import { OrderForm } from "../_components/OrderForm";
 import type { OrderCreateInputT } from "@/lib/validators";
 import type { ActionResultWith } from "@/lib/action-result";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewOrderPage() {
+export default async function NewOrderPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ templateId?: string }>;
+}) {
   // SALES (+ MANAGER + ADMIN) take catering orders; the F&B Service team
   // (role DELIVERY, FNB_SERVICE its retired alias) takes room-service / à la
   // carte / management orders. Other roles hitting this URL directly get
@@ -24,6 +29,39 @@ export default async function NewOrderPage() {
     inHouseOnly ? Promise.resolve([]) : listCustomers({ active: true }),
     listDishes({ active: true }),
   ]);
+
+  // Recurring template (?templateId=): manager/admin land here from
+  // /orders/templates with everything prefilled — they only touch the date.
+  const { templateId } = await searchParams;
+  const canUseTemplate =
+    session.user.role === Role.ADMIN || session.user.role === Role.MANAGER;
+  const template =
+    templateId && canUseTemplate ? await getOrderTemplate(templateId) : null;
+  const templateDefaults = template
+    ? {
+        customerId: template.customerId,
+        channel: template.channel,
+        mealType: template.mealType,
+        headcount: template.headcount,
+        packageTotal: template.packageTotal?.toString() ?? undefined,
+        deliveryAddress: template.deliveryAddress ?? undefined,
+        notes: template.notes ?? undefined,
+        // Priced at each dish's CURRENT catalogue rate — a template stores
+        // dishes + portions, never prices, so rate changes flow through.
+        items: template.items
+          .map((it) => {
+            const dish = dishes.find((d) => d.id === it.dishId);
+            if (!dish) return null;
+            return {
+              dishId: it.dishId,
+              portions: it.portions.toString(),
+              unitPrice: dish.unitPrice.toString(),
+              gstRatePct: dish.gstRatePct.toString(),
+            };
+          })
+          .filter((x): x is NonNullable<typeof x> => x !== null),
+      }
+    : undefined;
 
   async function submit(input: OrderCreateInputT) {
     "use server";
@@ -85,10 +123,11 @@ export default async function NewOrderPage() {
     <>
       <PageHeader
         eyebrow="Sales · Orders"
-        title="New order"
+        title={template ? `New order — ${template.name}` : "New order"}
         description="Saves as DRAFT. Submit from the detail page to send for manager approval — the manager signs off before the chef sees it."
       />
       <OrderForm
+        defaults={templateDefaults}
         inHouseOnly={inHouseOnly}
         customers={customers.map((c) => ({ id: c.id, name: c.name, stateCode: c.stateCode }))}
         dishes={dishes.map((d) => ({

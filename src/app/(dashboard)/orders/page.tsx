@@ -161,6 +161,9 @@ export default async function OrdersPage({
             {(role === Role.ADMIN || role === Role.MANAGER || role === Role.SALES) && (
               <a href="/api/export/orders"><Button variant="outline">Download Excel</Button></a>
             )}
+            {(role === Role.ADMIN || role === Role.MANAGER) && (
+              <Link href="/orders/templates"><Button variant="outline">Recurring orders</Button></Link>
+            )}
             {canCreate && <Link href="/orders/new"><Button>New order</Button></Link>}
           </div>
         }

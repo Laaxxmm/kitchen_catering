@@ -458,6 +458,8 @@ model User {
   banquetRequisitionsFulfilled BanquetRequisition[]   @relation("BanquetRequisitionFulfilledBy")
   staffAllocationsMade         OrderStaffAllocation[] @relation("StaffAllocationBy")
   orderRevisionsMade           OrderRevision[]        @relation("OrderRevisionRevisedBy")
+  orderTemplatesCreated        OrderTemplate[]        @relation("OrderTemplateCreatedBy")
+  vendorAdvancesRecorded       VendorAdvance[]        @relation("VendorAdvanceRecordedBy")
   leftoverReturnsRecorded      OrderLeftoverReturn[]  @relation("LeftoverReturnBy")
 
   productionItemsHandedOver ProductionJobItem[] @relation("ProductionItemHandedOverBy")
@@ -546,9 +548,10 @@ model Customer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  orders   Order[]
-  quotes   Quote[]
-  invoices CustomerInvoice[]
+  orders         Order[]
+  quotes         Quote[]
+  invoices       CustomerInvoice[]
+  orderTemplates OrderTemplate[]
 
   @@unique([name, gstin])
   @@index([name])
@@ -589,6 +592,7 @@ model Dish {
   orderItems         OrderItem[]
   quoteLines         QuoteLine[]
   productionJobItems ProductionJobItem[]
+  templateItems      OrderTemplateItem[]
 
   @@index([active])
   @@index([category])
@@ -1327,7 +1331,8 @@ model Vendor {
 
   purchaseOrders        VendorPO[]
   bills                 VendorBill[]
-  preferredByIngredient Ingredient[] @relation("PreferredVendor")
+  preferredByIngredient Ingredient[]    @relation("PreferredVendor")
+  advances              VendorAdvance[]
 
   @@index([active])
   @@index([category])
@@ -1430,9 +1435,10 @@ model VendorPO {
   createdAt              DateTime        @default(now())
   updatedAt              DateTime        @updatedAt
 
-  lines VendorPOLine[]
-  grns  GRN[]
-  bills VendorBill[]
+  lines    VendorPOLine[]
+  grns     GRN[]
+  bills    VendorBill[]
+  advances VendorAdvance[]
 
   @@index([status])
   @@index([vendorId, issueDate])
@@ -1532,8 +1538,9 @@ model VendorBill {
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
-  lines    VendorBillLine[]
-  payments VendorBillPayment[]
+  lines           VendorBillLine[]
+  payments        VendorBillPayment[]
+  advancesApplied VendorAdvance[]
 
   @@index([status])
   @@index([vendorId, issueDate])
@@ -2658,4 +2665,63 @@ model OrderRevision {
   createdAt           DateTime @default(now())
 
   @@index([orderId, createdAt])
+}
+
+// Manager-defined recurring order template: pick it, tweak the date, order.
+// Create/edit/remove is ADMIN/MANAGER only (client item #2).
+model OrderTemplate {
+  id              String              @id @default(cuid())
+  name            String
+  customerId      String
+  customer        Customer            @relation(fields: [customerId], references: [id])
+  channel         OrderChannel
+  mealType        MealType
+  headcount       Int
+  packageTotal    Decimal?            @db.Decimal(14, 2)
+  deliveryAddress String?
+  notes           String?
+  active          Boolean             @default(true)
+  createdById     String
+  createdBy       User                @relation("OrderTemplateCreatedBy", fields: [createdById], references: [id])
+  items           OrderTemplateItem[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([active])
+}
+
+model OrderTemplateItem {
+  id         String        @id @default(cuid())
+  templateId String
+  template   OrderTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  dishId     String
+  dish       Dish          @relation(fields: [dishId], references: [id])
+  portions   Decimal       @db.Decimal(12, 2)
+  sortOrder  Int
+
+  @@index([templateId])
+}
+
+// Money paid to a supplier BEFORE their bill exists (client item #12).
+// Recorded against the vendor (optionally earmarked to a PO); later applied
+// to a bill, which posts a real VendorBillPayment for the amount.
+model VendorAdvance {
+  id              String        @id @default(cuid())
+  vendorId        String
+  vendor          Vendor        @relation(fields: [vendorId], references: [id])
+  poId            String?
+  po              VendorPO?     @relation(fields: [poId], references: [id])
+  amount          Decimal       @db.Decimal(14, 2)
+  method          PaymentMethod
+  reference       String?
+  notes           String?
+  paidAt          DateTime
+  recordedById    String
+  recordedBy      User          @relation("VendorAdvanceRecordedBy", fields: [recordedById], references: [id])
+  appliedToBillId String?
+  appliedToBill   VendorBill?   @relation(fields: [appliedToBillId], references: [id])
+  appliedAt       DateTime?
+  createdAt       DateTime      @default(now())
+
+  @@index([vendorId, appliedToBillId])
 }
