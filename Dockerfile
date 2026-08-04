@@ -19,7 +19,10 @@ RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 
 # Lockfile + schema (the Prisma postinstall runs `prisma generate`).
-COPY package.json package-lock.json* ./
+# .npmrc must ride along: it carries legacy-peer-deps=true, without which
+# npm ci ERESOLVEs on next-auth's peerOptional nodemailer<=8 vs our
+# patched nodemailer 9 (this exact miss broke every deploy 29 Jul–4 Aug).
+COPY package.json package-lock.json* .npmrc ./
 COPY prisma ./prisma
 
 RUN npm ci
