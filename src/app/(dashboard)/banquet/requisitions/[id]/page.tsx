@@ -12,15 +12,12 @@ import {
   cancelBanquetRequisitionLine,
   getBanquetRequisition,
   issueBanquetRequisitionLine,
-  markBanquetLineAwaitingProcurement,
-  markBanquetLinesAwaitingProcurement,
+  sendBanquetRequisitionLineToProcurement,
 } from "@/server/actions/banquet";
 import { acknowledgeRevisedDocument } from "@/server/actions/orders";
-import { listVendors } from "@/server/actions/vendors";
 import { db } from "@/server/db";
 import { formatIST } from "@/lib/time";
-import { LineFulfilControls, type VendorOption } from "./_components/LineFulfilControls";
-import { BulkProcureProvider } from "./_components/BulkProcure";
+import { LineFulfilControls } from "./_components/LineFulfilControls";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 import {
   RevisionBanner,
@@ -60,27 +57,14 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
     ((isCreator && !requisition.lines.some((l) => Number(l.issuedQty.toString()) > 0)) ||
       isStoreClose);
 
-  // One PO for every short line, same screen the kitchen uses. Counted with
-  // the same filter the prefill applies (still open, still short, not
-  // already back-linked to a PO line) so the button and the screen agree.
+  // One PO for every line the store flagged out-of-stock, same screen the
+  // kitchen uses. Counted with the exact filter the prefill applies (flagged,
+  // not already back-linked to a PO line) so the button and the screen agree.
   const shortLineCount = requisition.lines.filter(
     (l) =>
-      l.vendorPOLineId == null &&
-      l.status !== BanquetRequisitionLineStatus.ISSUED &&
-      l.status !== BanquetRequisitionLineStatus.CANCELLED &&
-      Number(l.requestedQty.toString()) - Number(l.issuedQty.toString()) > 0,
+      l.status === BanquetRequisitionLineStatus.AWAITING_PROCUREMENT && l.vendorPOLineId == null,
   ).length;
   const canRaisePO = canFulfil && !!role && PO_ROLES.includes(role) && shortLineCount > 0;
-
-  // Vendor picker for the per-line "Raise PO for shortfall" — only fetched
-  // when the viewer can actually fulfil lines.
-  const vendors: VendorOption[] = canFulfil
-    ? (await listVendors({ active: true })).map((v) => ({
-        id: v.id,
-        code: v.code,
-        name: v.name,
-      }))
-    : [];
 
   // getBanquetRequisition doesn't carry the order's revision stamps, so read
   // them here. Skipped for a cancelled requisition — nothing left to chase,
@@ -101,22 +85,11 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
     "use server";
     return await issueBanquetRequisitionLine({ requisitionLineId: lineId, issueQty: qty });
   }
-  async function doRaisePO(lineId: string, vendorId: string, unitPrice: string) {
+  // Flags the line only — no PO. The store then raises one PO for every
+  // flagged line via the header link above.
+  async function doSendToProcurement(lineId: string, reason: string) {
     "use server";
-    return await markBanquetLineAwaitingProcurement({
-      requisitionLineId: lineId,
-      vendorId,
-      unitPrice: unitPrice || "0",
-    });
-  }
-  // One PO for several ticked lines, one vendor — the selection lives in
-  // BulkProcureProvider (client), this is just the server entry point.
-  async function doRaiseBulkPO(
-    lines: { requisitionLineId: string; unitPrice: string }[],
-    vendorId: string,
-  ) {
-    "use server";
-    return await markBanquetLinesAwaitingProcurement({ requisitionId: id, vendorId, lines });
+    return await sendBanquetRequisitionLineToProcurement({ requisitionLineId: lineId, reason });
   }
   async function doAmendQty(lineId: string, newQty: string, reason: string) {
     "use server";
@@ -193,64 +166,61 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
         </div>
       )}
 
-      <BulkProcureProvider vendors={vendors} onRaiseBulkPO={doRaiseBulkPO}>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Item</TableHead>
-              <TableHead className="text-right">Requested</TableHead>
-              <TableHead className="text-right">Issued</TableHead>
-              <TableHead className="text-right">Remaining</TableHead>
-              <TableHead className="text-right">In stock</TableHead>
-              <TableHead>Status</TableHead>
-              {canFulfil && <TableHead>Action</TableHead>}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {requisition.lines.map((l) => {
-              const requested = l.requestedQty.toString();
-              const issued = l.issuedQty.toString();
-              const remaining = (Number(requested) - Number(issued)).toString();
-              return (
-                <TableRow key={l.id}>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Item</TableHead>
+            <TableHead className="text-right">Requested</TableHead>
+            <TableHead className="text-right">Issued</TableHead>
+            <TableHead className="text-right">Remaining</TableHead>
+            <TableHead className="text-right">In stock</TableHead>
+            <TableHead>Status</TableHead>
+            {canFulfil && <TableHead>Action</TableHead>}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {requisition.lines.map((l) => {
+            const requested = l.requestedQty.toString();
+            const issued = l.issuedQty.toString();
+            const remaining = (Number(requested) - Number(issued)).toString();
+            return (
+              <TableRow key={l.id}>
+                <TableCell>
+                  {l.item.name}
+                  {l.item.sku && <span className="text-ik-ink-3"> · {l.item.sku}</span>}
+                </TableCell>
+                <TableCell className="text-right font-mono">{requested} {l.item.unit}</TableCell>
+                <TableCell className="text-right font-mono">{issued}</TableCell>
+                <TableCell className="text-right font-mono">{remaining}</TableCell>
+                <TableCell className="text-right font-mono">{l.item.currentStock.toString()}</TableCell>
+                <TableCell><StatusBadge status={l.status} /></TableCell>
+                {canFulfil && (
                   <TableCell>
-                    {l.item.name}
-                    {l.item.sku && <span className="text-ik-ink-3"> · {l.item.sku}</span>}
+                    <LineFulfilControls
+                      lineId={l.id}
+                      itemName={l.item.name}
+                      unit={l.item.unit}
+                      requestedQty={requested}
+                      issuedQty={issued}
+                      inStock={l.item.currentStock.toString()}
+                      status={l.status}
+                      poLink={
+                        l.vendorPOLine
+                          ? { poId: l.vendorPOLine.poId, poNo: l.vendorPOLine.po.poNo }
+                          : null
+                      }
+                      onIssue={doIssue}
+                      onSendToProcurement={doSendToProcurement}
+                      onCancel={doCancelLine}
+                      onAmendQty={doAmendQty}
+                    />
                   </TableCell>
-                  <TableCell className="text-right font-mono">{requested} {l.item.unit}</TableCell>
-                  <TableCell className="text-right font-mono">{issued}</TableCell>
-                  <TableCell className="text-right font-mono">{remaining}</TableCell>
-                  <TableCell className="text-right font-mono">{l.item.currentStock.toString()}</TableCell>
-                  <TableCell><StatusBadge status={l.status} /></TableCell>
-                  {canFulfil && (
-                    <TableCell>
-                      <LineFulfilControls
-                        lineId={l.id}
-                        itemName={l.item.name}
-                        unit={l.item.unit}
-                        requestedQty={requested}
-                        issuedQty={issued}
-                        inStock={l.item.currentStock.toString()}
-                        status={l.status}
-                        vendors={vendors}
-                        poLink={
-                          l.vendorPOLine
-                            ? { poId: l.vendorPOLine.poId, poNo: l.vendorPOLine.po.poNo }
-                            : null
-                        }
-                        onIssue={doIssue}
-                        onRaisePO={doRaisePO}
-                        onCancel={doCancelLine}
-                        onAmendQty={doAmendQty}
-                      />
-                    </TableCell>
-                  )}
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </BulkProcureProvider>
+                )}
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
 
       {canCancel && (
         <div className="mt-6 max-w-sm">

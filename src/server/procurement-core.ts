@@ -6,7 +6,6 @@ import {
   VendorPOStatus,
 } from "@prisma/client";
 import { indefineStateCode } from "@/lib/org";
-import { recomputeBanquetReqStatus } from "@/server/banquet-core";
 import { computeLine, summarise } from "@/lib/gst";
 import { nextVendorPONumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
@@ -135,46 +134,27 @@ export async function createVendorPOTx(
   }
 
   // Same back-link for banquet (F&B) requisition lines (?banquetReqId=
-  // prefill flow). Unlike chef lines these are still PENDING /
-  // PARTIALLY_ISSUED when the PO is raised, so linking ALSO flips them to
-  // AWAITING_PROCUREMENT — the exact end state
-  // markBanquetLineAwaitingProcurement produces for the one-line control.
-  // Guards: line still open, not already on a PO (a stale prefill or a
+  // prefill flow). Like chef lines these are already AWAITING_PROCUREMENT —
+  // the store flags the shortfall on the requisition
+  // (sendBanquetRequisitionLineToProcurement) and only then raises the PO —
+  // so linking just records WHICH PO line is buying it.
+  // Guards: line still flagged, not already on a PO (a stale prefill or a
   // second tap can't rewire it), and the PO line must buy that line's own
   // item — otherwise GRN would post stock for item A and re-open a line
   // waiting on item B.
-  const linkedBanquetLineIds: string[] = [];
   for (let idx = 0; idx < input.lines.length; idx++) {
     const banquetReqLineId = input.lines[idx].banquetReqLineId;
     const banquetItemId = input.lines[idx].banquetItemId;
     if (!banquetReqLineId || !banquetItemId) continue;
-    const linked = await tx.banquetRequisitionLine.updateMany({
+    await tx.banquetRequisitionLine.updateMany({
       where: {
         id: banquetReqLineId,
         itemId: banquetItemId,
         vendorPOLineId: null,
-        status: {
-          in: [
-            BanquetRequisitionLineStatus.PENDING,
-            BanquetRequisitionLineStatus.PARTIALLY_ISSUED,
-          ],
-        },
-      },
-      data: {
         status: BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
-        vendorPOLineId: created.lines[idx].id,
       },
+      data: { vendorPOLineId: created.lines[idx].id },
     });
-    if (linked.count > 0) linkedBanquetLineIds.push(banquetReqLineId);
-  }
-  if (linkedBanquetLineIds.length > 0) {
-    const reqs = await tx.banquetRequisitionLine.findMany({
-      where: { id: { in: linkedBanquetLineIds } },
-      select: { requisitionId: true },
-    });
-    for (const reqId of new Set(reqs.map((r) => r.requisitionId))) {
-      await recomputeBanquetReqStatus(tx, reqId, userId);
-    }
   }
 
   await tx.auditLog.create({

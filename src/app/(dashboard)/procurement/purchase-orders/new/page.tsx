@@ -83,21 +83,25 @@ export default async function NewVendorPOPage({
       })
     : null;
 
-  // Same flow off an F&B (banquet) requisition: one PO for every short line
-  // instead of one PO per line via the row control. Dedupe mirrors the
-  // kitchen one — a line already back-linked to a PO line is left out so the
-  // store doesn't order the same shortfall twice.
+  // Same flow off an F&B (banquet) requisition, and the same filter as the
+  // kitchen above: only lines the store actually flagged out-of-stock
+  // (AWAITING_PROCUREMENT) and not yet back-linked to a PO line. Taking every
+  // still-short line instead pre-filled items nobody had flagged, and counting
+  // any back-linked line as "already on a PO" also counted ones long since
+  // received and issued.
   const banquetShortLines = banquetReq
     ? banquetReq.lines.filter(
         (l) =>
-          l.vendorPOLineId == null &&
-          l.status !== BanquetRequisitionLineStatus.ISSUED &&
-          l.status !== BanquetRequisitionLineStatus.CANCELLED &&
-          toDecimal(l.requestedQty).minus(toDecimal(l.issuedQty)).gt(0),
+          l.status === BanquetRequisitionLineStatus.AWAITING_PROCUREMENT &&
+          l.vendorPOLineId == null,
       )
     : [];
   const banquetAlreadyOnPO = banquetReq
-    ? banquetReq.lines.filter((l) => l.vendorPOLineId != null).length
+    ? banquetReq.lines.filter(
+        (l) =>
+          l.status === BanquetRequisitionLineStatus.AWAITING_PROCUREMENT &&
+          l.vendorPOLineId != null,
+      ).length
     : 0;
   if (banquetReq && banquetShortLines.length > 0) {
     // Banquet items carry no cost on the catalogue — the nearest thing to a
@@ -116,8 +120,8 @@ export default async function NewVendorPOPage({
       ingredientId: "",
       banquetItemId: l.itemId,
       chefReqLineId: null,
-      // Back-link — createVendorPOTx flips the line to AWAITING_PROCUREMENT
-      // and points its vendorPOLineId here, so GRN acceptance re-opens it.
+      // M16: back-link — createVendorPOTx points this line's vendorPOLineId
+      // at the PO line, so GRN acceptance re-opens it.
       banquetReqLineId: l.id as string | null,
       sku: l.item.sku ?? "",
       description: l.item.name,
@@ -262,10 +266,9 @@ export default async function NewVendorPOPage({
           Prices are pre-filled from what was last paid for each item —{" "}
           <strong>edit them</strong> to match the supplier&apos;s quote. Buying some of these from a
           different supplier? <strong>Untick</strong> them below — they stay on the requisition and you
-          raise a second PO for them straight after. Creating the PO marks these
-          lines &ldquo;awaiting procurement&rdquo;; the store can issue them again once the goods
-          arrive. The total decides the approval: under ₹5,000 the manager signs off; ₹5,000 and
-          above needs admin.
+          raise a second PO for them straight after. The store can issue these lines again once the
+          goods arrive and the GRN is recorded. The total decides the approval: under ₹5,000 the
+          manager signs off; ₹5,000 and above needs admin.
         </div>
       )}
 

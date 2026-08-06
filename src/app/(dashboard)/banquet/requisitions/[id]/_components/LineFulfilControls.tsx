@@ -9,14 +9,7 @@ import { Decimal } from "decimal.js";
 import { Button } from "@/components/ui/button";
 import { isNextNavigationError } from "@/lib/next-error";
 import type { ActionResult } from "@/lib/action-result";
-import { useBulkProcure } from "./BulkProcure";
 import { planBanquetLineAmend } from "./amend-qty";
-
-export interface VendorOption {
-  id: string;
-  code: string;
-  name: string;
-}
 
 interface Props {
   lineId: string;
@@ -26,12 +19,10 @@ interface Props {
   issuedQty: string;
   inStock: string;
   status: BanquetRequisitionLineStatus;
-  /** Active vendors for the "Raise PO for shortfall" picker. */
-  vendors: VendorOption[];
   /** The PO already buying this line's shortfall, if one was raised. */
   poLink: { poId: string; poNo: string } | null;
   onIssue: (lineId: string, qty: string) => Promise<ActionResult>;
-  onRaisePO: (lineId: string, vendorId: string, unitPrice: string) => Promise<ActionResult>;
+  onSendToProcurement: (lineId: string, reason: string) => Promise<ActionResult>;
   onCancel: (lineId: string, reason: string) => Promise<ActionResult>;
   onAmendQty: (lineId: string, newQty: string, reason: string) => Promise<ActionResult>;
 }
@@ -44,21 +35,16 @@ export function LineFulfilControls({
   issuedQty,
   inStock,
   status,
-  vendors,
   poLink,
   onIssue,
-  onRaisePO,
+  onSendToProcurement,
   onCancel,
   onAmendQty,
 }: Props) {
-  const bulk = useBulkProcure();
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [showPartial, setShowPartial] = useState(false);
   const [partialQty, setPartialQty] = useState("");
-  const [showPO, setShowPO] = useState(false);
-  const [vendorId, setVendorId] = useState("");
-  const [unitPrice, setUnitPrice] = useState("");
   const [showAmend, setShowAmend] = useState(false);
   const [amendQty, setAmendQty] = useState(requestedQty);
   const [amendReason, setAmendReason] = useState("");
@@ -89,17 +75,6 @@ export function LineFulfilControls({
         toast.error(err instanceof Error ? err.message : "Action failed");
       }
     });
-  }
-
-  function confirmRaisePO() {
-    if (!vendorId) {
-      toast.error("Pick the vendor to raise the PO on");
-      return;
-    }
-    call(
-      () => onRaisePO(lineId, vendorId, unitPrice.trim() === "" ? "0" : unitPrice.trim()),
-      `PO raised for ${itemName} — track it under My purchase orders`,
-    );
   }
 
   // Order revised (10 → 20 pax): raise the ask on THIS line and the store
@@ -180,13 +155,6 @@ export function LineFulfilControls({
 
   const wasAwaitingProcurement = status === BanquetRequisitionLineStatus.AWAITING_PROCUREMENT;
   const stockIsBack = stockDec.gt(0);
-  // Only a still-open, still-short line can go on a batch PO — same test the
-  // server applies before it plans the PO lines.
-  const bulkEligible =
-    !!bulk &&
-    remaining.gt(0) &&
-    (status === BanquetRequisitionLineStatus.PENDING ||
-      status === BanquetRequisitionLineStatus.PARTIALLY_ISSUED);
 
   return (
     <div className="flex flex-col gap-1 text-[12.5px]">
@@ -202,18 +170,6 @@ export function LineFulfilControls({
         )
       )}
       <div className="flex flex-wrap items-center gap-1">
-        {bulkEligible && bulk && (
-          <label className="flex items-center gap-1 text-[11.5px] text-ik-ink-3">
-            <input
-              type="checkbox"
-              checked={bulk.selected.some((l) => l.lineId === lineId)}
-              onChange={() =>
-                bulk.toggle({ lineId, itemName, unit, shortfall: remaining.toString() })
-              }
-            />
-            Buy with others
-          </label>
-        )}
         {fullPossible && (
           <Button
             type="button"
@@ -267,7 +223,7 @@ export function LineFulfilControls({
             )}
             {stockDec.lte(0) && (
               <span className="text-[10.5px] text-ik-ink-3">
-                Nothing in stock — raise a PO for the shortfall instead
+                Nothing in stock — flag it for a purchase order instead
               </span>
             )}
           </span>
@@ -281,61 +237,21 @@ export function LineFulfilControls({
           </Link>
         )}
         {amendControl}
-        {!wasAwaitingProcurement && !showPO && (
+        {/* Flag only — the PO itself is raised from the header link, one
+            vendor for every flagged line (same route as the kitchen). */}
+        {!wasAwaitingProcurement && (
           <Button
             type="button"
             size="sm"
             variant="outline"
             disabled={pending}
-            onClick={() => setShowPO(true)}
+            onClick={() => {
+              const reason = prompt("Why does this need buying? (e.g. not enough in stock)");
+              if (reason && reason.trim()) call(() => onSendToProcurement(lineId, reason.trim()));
+            }}
           >
-            Raise PO for shortfall
+            Out of stock — needs PO
           </Button>
-        )}
-        {!wasAwaitingProcurement && showPO && (
-          <span className="flex flex-col gap-0.5">
-            <span className="flex flex-wrap items-center gap-1">
-              <select
-                value={vendorId}
-                onChange={(e) => setVendorId(e.target.value)}
-                className={
-                  "h-7 max-w-48 rounded border bg-ik-card px-1 " +
-                  (vendorId ? "border-ik-rule" : "border-amber")
-                }
-              >
-                <option value="">Pick vendor…</option>
-                {vendors.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.code} · {v.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="number"
-                step="any"
-                min="0"
-                placeholder="₹/unit (est.)"
-                value={unitPrice}
-                onChange={(e) => setUnitPrice(e.target.value)}
-                className="h-7 w-24 rounded border border-ik-rule bg-ik-card px-1 text-right font-mono"
-              />
-              <Button type="button" size="sm" disabled={pending} onClick={confirmRaisePO}>
-                Confirm
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={pending}
-                onClick={() => setShowPO(false)}
-              >
-                Cancel
-              </Button>
-            </span>
-            <span className="text-[10.5px] text-ik-ink-3">
-              Raises a real purchase order for the shortfall — price is an estimate, management corrects it at approval.
-            </span>
-          </span>
         )}
         {/* Can't-provide escape hatch: cancel this one item with a reason so
             the rest of the requisition still issues and rolls up instead of

@@ -78,8 +78,8 @@ const REQ_LINE_OPEN: BanquetRequisitionLineStatus[] = [
 
 /**
  * Cancel a set of banquet requisitions with their still-open lines, then deal
- * with any vendor PO those lines spawned for a shortfall (see
- * markBanquetLineAwaitingProcurement):
+ * with any vendor PO those lines spawned for a shortfall (raised from
+ * /procurement/purchase-orders/new?banquetReqId=):
  *   - DRAFT / PENDING_APPROVAL PO → auto-cancel inline (same VENDOR_PO_CANCELLED
  *     audit + reason) since nothing's been ordered yet;
  *   - APPROVED / SENT / PARTIALLY_RECEIVED → left alone but returned as
