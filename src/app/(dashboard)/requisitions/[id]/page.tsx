@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { auth } from "@/server/auth";
 import {
   addChefRequisitionLine,
+  amendChefRequisitionLineQty,
   cancelChefRequisition,
   getChefRequisition,
   issueChefRequisitionLine,
@@ -24,6 +25,7 @@ import { ORDER_KITCHEN_ROLES } from "@/server/rbac";
 import { formatIST } from "@/lib/time";
 import { LineFulfilControls } from "./_components/LineFulfilControls";
 import { DraftAddLine, DraftLineControls } from "./_components/DraftEditControls";
+import { AmendQtyControl } from "./_components/AmendQtyControl";
 import { RevisionBanner, revisionOrderSelect } from "./_components/RevisionBanner";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
@@ -93,6 +95,10 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
     "use server";
     return await updateChefRequisitionLineQty(lineId, qty);
   }
+  async function doAmendQty(lineId: string, qty: string, reason: string) {
+    "use server";
+    return await amendChefRequisitionLineQty(lineId, qty, reason);
+  }
 
   const canSubmit = isChef && requisition.status === ChefRequisitionStatus.DRAFT;
   // Two closers (mirrors the server guards in cancelChefRequisition):
@@ -118,6 +124,14 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
   const canCancel = creatorCanCancel || storeCanClose;
   const canFulfil =
     isStore &&
+    (requisition.status === ChefRequisitionStatus.SUBMITTED ||
+      requisition.status === ChefRequisitionStatus.PARTIALLY_ISSUED);
+  // Order revised after submit: the chef raises the requested qty on a line
+  // and the store issues only the difference. Mirrors the server gate in
+  // amendChefRequisitionLineQty — a closed requisition can't be re-opened
+  // this way (nothing could be issued against it), so no control is offered.
+  const canAmend =
+    isChef &&
     (requisition.status === ChefRequisitionStatus.SUBMITTED ||
       requisition.status === ChefRequisitionStatus.PARTIALLY_ISSUED);
   // Short lines the store has flagged as out-of-stock → ready to put on a PO.
@@ -230,6 +244,7 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
             <TableHead className="text-right">Issued</TableHead>
             <TableHead className="text-right">On hand</TableHead>
             <TableHead>Status</TableHead>
+            {canAmend && <TableHead>Need more?</TableHead>}
             {(canFulfil || canEditDraft) && <TableHead>Action</TableHead>}
           </TableRow>
         </TableHeader>
@@ -246,6 +261,22 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
               <TableCell className="text-right font-mono">{l.issuedQty.toString()}</TableCell>
               <TableCell className="text-right font-mono">{l.ingredient.onHandQty.toString()}</TableCell>
               <TableCell><StatusBadge status={l.status} /></TableCell>
+              {canAmend && (
+                <TableCell>
+                  {l.status === ChefRequisitionLineStatus.CANCELLED ? (
+                    <span className="text-[12px] text-ik-ink-3">—</span>
+                  ) : (
+                    <AmendQtyControl
+                      lineId={l.id}
+                      requestedQty={l.requestedQty.toString()}
+                      issuedQty={l.issuedQty.toString()}
+                      unit={l.unit}
+                      status={l.status}
+                      onAmend={doAmendQty}
+                    />
+                  )}
+                </TableCell>
+              )}
               {canFulfil && (
                 <TableCell>
                   <LineFulfilControls

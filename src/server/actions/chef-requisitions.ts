@@ -40,6 +40,9 @@ import { toDecimal } from "@/lib/money";
 import { createNotification, notifyRoles } from "@/server/notification-core";
 import { deferAfterResponse } from "@/server/defer";
 import { createProductionJobForOrder } from "./production-jobs";
+// Pure rules for the post-submit quantity amend, shared with the chef's
+// inline control on the requisition page so both agree on what's allowed.
+import { decideAmend } from "@/app/(dashboard)/requisitions/[id]/_components/amend-rules";
 
 
 // =====================================================================
@@ -372,6 +375,149 @@ export async function updateChefRequisitionLineQty(lineId: string, qty: string):
   } catch (err) {
     return actionFailure(err);
   }
+}
+
+/**
+ * Raise (or trim) a line's requested quantity AFTER the requisition is with
+ * the store — the order was revised from 10 pax to 20, the chef already got 5
+ * of something and now needs 10. Nothing is re-issued: issueChefRequisitionLine
+ * works off `requestedQty − issuedQty`, so raising the number simply re-opens
+ * that difference on the SAME line for the store to issue.
+ *
+ * Separate from updateChefRequisitionLineQty, which stays DRAFT-only — the
+ * draft editor has no issued stock to reason about.
+ */
+export async function amendChefRequisitionLineQty(
+  lineId: string,
+  newQty: string,
+  reason: string,
+): Promise<ActionResult> {
+  try {
+    return await amendChefRequisitionLineQtyInner(lineId, newQty, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function amendChefRequisitionLineQtyInner(
+  lineId: string,
+  newQty: string,
+  reason: string,
+): Promise<{ ok: true }> {
+  const session = await requireRole(REQUISITION_CREATE_ROLES);
+  if (!reason?.trim()) throw new ActionError("A reason is required to change the quantity.");
+
+  const result = await db.$transaction(async (tx) => {
+    // Same lock order as the issue / cancel / send-to-procurement paths —
+    // line, then requisition, then (inside the recompute) the order. Any
+    // other order deadlocks against a store keeper issuing this line.
+    await tx.$executeRaw`SELECT 1 FROM "ChefRequisitionLine" WHERE "id" = ${lineId} FOR UPDATE`;
+    const line = await tx.chefRequisitionLine.findUnique({
+      where: { id: lineId },
+      include: {
+        ingredient: { select: { name: true } },
+        requisition: {
+          select: { id: true, status: true, orderId: true, requisitionNo: true },
+        },
+      },
+    });
+    if (!line) throw new ActionError("Requisition line not found");
+    if (line.requisition.status === ChefRequisitionStatus.DRAFT) {
+      throw new ActionError("This requisition is still a draft — edit the line directly.");
+    }
+    // A closed requisition can't be re-opened this way: the store is refused
+    // at issue time on anything but SUBMITTED / PARTIALLY_ISSUED, so the
+    // shortfall would be unfillable. Raise a fresh requisition instead.
+    if (
+      line.requisition.status !== ChefRequisitionStatus.SUBMITTED &&
+      line.requisition.status !== ChefRequisitionStatus.PARTIALLY_ISSUED
+    ) {
+      throw new ActionError(
+        `This requisition is ${humanizeStatus(line.requisition.status)} — raise a new one for the extra.`,
+      );
+    }
+
+    const decision = decideAmend({
+      currentQty: line.requestedQty.toString(),
+      newQty,
+      issuedQty: line.issuedQty.toString(),
+      lineStatus: line.status,
+    });
+    if (!decision.ok) throw new ActionError(decision.error);
+
+    await tx.$executeRaw`SELECT 1 FROM "ChefRequisition" WHERE "id" = ${line.requisition.id} FOR UPDATE`;
+    // Guarded on the exact numbers the decision was made against.
+    const updated = await tx.chefRequisitionLine.updateMany({
+      where: { id: lineId, status: line.status, issuedQty: line.issuedQty },
+      data: { requestedQty: decision.qty, status: decision.status },
+    });
+    if (updated.count === 0) throw new ActionError("This line just changed — refresh and try again.");
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "CHEF_REQUISITION_LINE_QTY_AMENDED",
+        entity: "ChefRequisitionLine",
+        entityId: lineId,
+        payloadHash: sha256Json({
+          from: line.requestedQty.toString(),
+          to: decision.qty,
+          issued: line.issuedQty.toString(),
+          reason: reason.trim(),
+        }),
+      },
+    });
+
+    // Only when the line's status actually moved: the requisition roll-up and
+    // the order advance are computed purely from line statuses, so an amend
+    // that leaves the status alone can't change either — and calling it anyway
+    // would stamp a SUBMITTED requisition as PARTIALLY_ISSUED with nothing
+    // issued. Never rewinds the order (recomputeReqAndAdvance only advances).
+    const advance =
+      decision.status !== line.status
+        ? await recomputeReqAndAdvance(tx, line.requisition.id, line.requisition.orderId, session.user.id)
+        : null;
+
+    return {
+      reqId: line.requisition.id,
+      requisitionNo: line.requisition.requisitionNo,
+      orderId: line.requisition.orderId,
+      ingredientName: line.ingredient.name,
+      unit: line.unit,
+      from: line.requestedQty.toString(),
+      to: decision.qty,
+      extra: toDecimal(decision.qty).minus(toDecimal(line.issuedQty)).toString(),
+      onPO: decision.status === ChefRequisitionLineStatus.AWAITING_PROCUREMENT,
+      shortfall: advance?.shortfall ?? null,
+    };
+  });
+
+  // The store is the one who now has to hand over the difference.
+  deferAfterResponse("chef-line-amend:notify", () =>
+    notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+      kind: "GENERIC",
+      title: `${result.ingredientName} changed to ${result.to} ${result.unit} on ${result.requisitionNo}`,
+      body:
+        `Was ${result.from} ${result.unit}. Still to issue: ${result.extra} ${result.unit}. ` +
+        `Reason: ${reason.trim()}` +
+        (result.onPO
+          ? " — this line is on a purchase order, which may no longer cover the full amount."
+          : ""),
+      // Per new quantity, so a second raise on the same line notifies again.
+      dedupeKey: `chef-line-amend:${lineId}:${result.to}`,
+      link: `/requisitions/${result.reqId}`,
+    }),
+  );
+  if (result.shortfall) notifyShortfallAdvance(result.shortfall);
+
+  revalidatePath("/requisitions");
+  revalidatePath(`/requisitions/${result.reqId}`);
+  revalidatePath("/queue/issuing");
+  if (result.orderId) {
+    revalidatePath("/kitchen");
+    revalidatePath(`/orders/${result.orderId}`);
+  }
+  return { ok: true };
 }
 
 // =====================================================================

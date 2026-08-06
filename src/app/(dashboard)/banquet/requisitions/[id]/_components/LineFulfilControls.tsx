@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { isNextNavigationError } from "@/lib/next-error";
 import type { ActionResult } from "@/lib/action-result";
 import { useBulkProcure } from "./BulkProcure";
+import { planBanquetLineAmend } from "./amend-qty";
 
 export interface VendorOption {
   id: string;
@@ -32,6 +33,7 @@ interface Props {
   onIssue: (lineId: string, qty: string) => Promise<ActionResult>;
   onRaisePO: (lineId: string, vendorId: string, unitPrice: string) => Promise<ActionResult>;
   onCancel: (lineId: string, reason: string) => Promise<ActionResult>;
+  onAmendQty: (lineId: string, newQty: string, reason: string) => Promise<ActionResult>;
 }
 
 export function LineFulfilControls({
@@ -47,6 +49,7 @@ export function LineFulfilControls({
   onIssue,
   onRaisePO,
   onCancel,
+  onAmendQty,
 }: Props) {
   const bulk = useBulkProcure();
   const [pending, startTransition] = useTransition();
@@ -56,6 +59,9 @@ export function LineFulfilControls({
   const [showPO, setShowPO] = useState(false);
   const [vendorId, setVendorId] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
+  const [showAmend, setShowAmend] = useState(false);
+  const [amendQty, setAmendQty] = useState(requestedQty);
+  const [amendReason, setAmendReason] = useState("");
 
   const remaining = new Decimal(requestedQty).minus(new Decimal(issuedQty));
   const stockDec = new Decimal(inStock);
@@ -96,8 +102,80 @@ export function LineFulfilControls({
     );
   }
 
+  // Order revised (10 → 20 pax): raise the ask on THIS line and the store
+  // issues only the difference. Hidden exactly where the server refuses —
+  // cancelled, or a PO already out at the old quantity.
+  const amendPlan = planBanquetLineAmend({ requestedQty, issuedQty, newQty: amendQty, unit, lineStatus: status });
+  // The box opens pre-filled with the current qty, which is a legitimate
+  // refusal ("already requesting 5") — don't shout it before they've typed.
+  const amendTouched = amendQty !== requestedQty;
+  const canAmend =
+    status !== BanquetRequisitionLineStatus.CANCELLED &&
+    status !== BanquetRequisitionLineStatus.AWAITING_PROCUREMENT;
+  const amendControl = !canAmend ? null : !showAmend ? (
+    <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => setShowAmend(true)}>
+      Change qty…
+    </Button>
+  ) : (
+    <span className="flex flex-col gap-0.5">
+      <span className="flex flex-wrap items-center gap-1">
+        <input
+          type="number"
+          step="any"
+          min="0.001"
+          value={amendQty}
+          onChange={(e) => setAmendQty(e.target.value)}
+          className={
+            "h-7 w-24 rounded border bg-ik-card px-1 text-right font-mono " +
+            (amendPlan.ok || !amendTouched ? "border-ik-rule" : "border-alert")
+          }
+        />
+        <span className="text-[10.5px] text-ik-ink-3">
+          {unit} · {issuedQty} already issued
+        </span>
+        <input
+          type="text"
+          placeholder="Reason (required)"
+          value={amendReason}
+          onChange={(e) => setAmendReason(e.target.value)}
+          className="h-7 w-40 rounded border border-ik-rule bg-ik-card px-1"
+        />
+        <Button
+          type="button"
+          size="sm"
+          disabled={pending || !amendPlan.ok || !amendReason.trim()}
+          onClick={() =>
+            call(
+              () => onAmendQty(lineId, amendQty, amendReason.trim()),
+              `${itemName} changed to ${amendQty} ${unit} — the store has been told`,
+            )
+          }
+        >
+          Save
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={pending}
+          onClick={() => {
+            setShowAmend(false);
+            setAmendQty(requestedQty);
+            setAmendReason("");
+          }}
+        >
+          Cancel
+        </Button>
+      </span>
+      {!amendPlan.ok && amendTouched && (
+        <span className="text-[10.5px] text-alert">{amendPlan.error}</span>
+      )}
+    </span>
+  );
+
   if (status === BanquetRequisitionLineStatus.ISSUED || status === BanquetRequisitionLineStatus.CANCELLED) {
-    return <span className="text-[12px] text-ik-ink-3">—</span>;
+    // Fully issued still amends — that's how the extra five get requested.
+    return amendControl ?? <span className="text-[12px] text-ik-ink-3">—</span>;
   }
 
   const wasAwaitingProcurement = status === BanquetRequisitionLineStatus.AWAITING_PROCUREMENT;
@@ -202,6 +280,7 @@ export function LineFulfilControls({
             PO raised ({poLink.poNo}) →
           </Link>
         )}
+        {amendControl}
         {!wasAwaitingProcurement && !showPO && (
           <Button
             type="button"

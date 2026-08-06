@@ -12,10 +12,14 @@ import type { ActionResult } from "@/lib/action-result";
 // line's quantity, remove a line, add a missing ingredient. Server actions
 // re-check the DRAFT status + role; these controls only render on drafts.
 
-function useCall() {
+export function useCall() {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  function call(fn: () => Promise<ActionResult>, done: () => void = () => {}) {
+  function call(
+    fn: () => Promise<ActionResult>,
+    done: () => void = () => {},
+    successMessage = "Saved",
+  ) {
     startTransition(async () => {
       try {
         const res = await fn();
@@ -23,7 +27,7 @@ function useCall() {
           toast.error(res.error);
           return;
         }
-        toast.success("Saved");
+        toast.success(successMessage);
         done();
         router.refresh();
       } catch (err) {

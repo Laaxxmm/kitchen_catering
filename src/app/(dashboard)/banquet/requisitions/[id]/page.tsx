@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { auth } from "@/server/auth";
 import {
+  amendBanquetRequisitionLineQty,
   cancelBanquetRequisition,
   cancelBanquetRequisitionLine,
   getBanquetRequisition,
@@ -116,6 +117,10 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
   ) {
     "use server";
     return await markBanquetLinesAwaitingProcurement({ requisitionId: id, vendorId, lines });
+  }
+  async function doAmendQty(lineId: string, newQty: string, reason: string) {
+    "use server";
+    return await amendBanquetRequisitionLineQty(lineId, newQty, reason);
   }
   async function doCancelLine(lineId: string, reason: string) {
     "use server";
@@ -236,6 +241,7 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
                         onIssue={doIssue}
                         onRaisePO={doRaisePO}
                         onCancel={doCancelLine}
+                        onAmendQty={doAmendQty}
                       />
                     </TableCell>
                   )}

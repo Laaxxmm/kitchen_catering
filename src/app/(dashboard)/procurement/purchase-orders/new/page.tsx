@@ -169,6 +169,15 @@ export default async function NewVendorPOPage({
   // just picks the right supplier themselves.
   const suggestedVendorId: string | null = null;
 
+  // Buying one requisition from two suppliers: the form sends the user back
+  // to this same URL for the lines it left off, which pre-fill again because
+  // the ones just ordered are now back-linked to a PO line (filters above).
+  const requisitionHref = reqId
+    ? `/procurement/purchase-orders/new?reqId=${encodeURIComponent(reqId)}`
+    : banquetReqId
+      ? `/procurement/purchase-orders/new?banquetReqId=${encodeURIComponent(banquetReqId)}`
+      : null;
+
   async function create(input: {
     vendorId: string;
     orderId: string | null;
@@ -177,12 +186,19 @@ export default async function NewVendorPOPage({
     expectedDate: string | undefined;
     notes: string | null;
     lines: Array<{ ingredientId: string | null; banquetItemId: string | null; chefReqLineId: string | null; banquetReqLineId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
+    /** Prefilled lines were left off this PO on purpose. */
+    moreToOrder?: boolean;
   }) {
     "use server";
     // input.lines already carry banquetItemId; createVendorPO parses via
     // VendorPOCreateInput (which includes it) so it forwards untouched.
-    const r = await createVendorPO(input);
+    const { moreToOrder, ...poInput } = input;
+    const r = await createVendorPO(poInput);
     if (!r.ok) return r;
+    // Split order: hand the id back instead of redirecting, so the form can
+    // offer the next PO for the remainder rather than stranding the user on
+    // the PO it just created.
+    if (moreToOrder) return { ok: true as const, id: r.id };
     redirect(`/procurement/purchase-orders/${r.id}`);
   }
 
@@ -230,8 +246,9 @@ export default async function NewVendorPOPage({
           )}{" "}
           Prices are pre-filled from
           each item&apos;s average cost — <strong>edit them</strong> to match the supplier&apos;s
-          quote. The total decides the approval: under ₹5,000 the manager signs off; ₹5,000 and above
-          needs admin.
+          quote. Buying some of these from a different supplier? <strong>Untick</strong> them below —
+          they stay on the requisition and you raise a second PO for them straight after. The total
+          decides the approval: under ₹5,000 the manager signs off; ₹5,000 and above needs admin.
         </div>
       )}
 
@@ -243,7 +260,9 @@ export default async function NewVendorPOPage({
             <> {banquetAlreadyOnPO} other short item{banquetAlreadyOnPO === 1 ? " is" : "s are"} already on an earlier PO and {banquetAlreadyOnPO === 1 ? "was" : "were"} left out so they aren&apos;t ordered twice.</>
           )}{" "}
           Prices are pre-filled from what was last paid for each item —{" "}
-          <strong>edit them</strong> to match the supplier&apos;s quote. Creating the PO marks these
+          <strong>edit them</strong> to match the supplier&apos;s quote. Buying some of these from a
+          different supplier? <strong>Untick</strong> them below — they stay on the requisition and you
+          raise a second PO for them straight after. Creating the PO marks these
           lines &ldquo;awaiting procurement&rdquo;; the store can issue them again once the goods
           arrive. The total decides the approval: under ₹5,000 the manager signs off; ₹5,000 and
           above needs admin.
@@ -279,6 +298,7 @@ export default async function NewVendorPOPage({
         canFreeText={viewerRole === Role.ADMIN || viewerRole === Role.MANAGER}
         initialVendorId={suggestedVendorId}
         initialLines={prefillLines}
+        requisitionHref={requisitionHref}
       />
     </>
   );

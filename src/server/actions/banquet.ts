@@ -37,6 +37,7 @@ import {
   backLinkBanquetPOLines,
   planBanquetProcurementLines,
 } from "@/lib/validators";
+import { planBanquetLineAmend } from "@/app/(dashboard)/banquet/requisitions/[id]/_components/amend-qty";
 import {
   ActionError,
   actionFailure,
@@ -1151,6 +1152,136 @@ async function cancelBanquetRequisitionLineInner(
       }),
     );
   }
+
+  revalidatePath("/banquet/requisitions");
+  revalidatePath(`/banquet/requisitions/${result.reqId}`);
+  revalidatePath("/banquet");
+  return { ok: true };
+}
+
+/**
+ * F&B revises the quantity on a line of a live requisition — the order went
+ * from 10 to 20 pax after the store already issued against the old number.
+ * The issue path computes remaining as requestedQty − issuedQty, so raising
+ * requestedQty is all it takes: the shortfall reappears on the SAME line and
+ * the store issues only the difference, no second document. The line's status
+ * follows the new numbers, so a fully ISSUED line drops back to
+ * PARTIALLY_ISSUED and lands in the store's queue again.
+ * Parity with amendChefRequisitionLineQty on the kitchen side.
+ */
+export async function amendBanquetRequisitionLineQty(
+  lineId: string,
+  newQty: string,
+  reason: string,
+): Promise<ActionResult> {
+  try {
+    return await amendBanquetRequisitionLineQtyInner(lineId, newQty, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function amendBanquetRequisitionLineQtyInner(
+  lineId: string,
+  newQty: string,
+  reason: string,
+): Promise<{ ok: true }> {
+  const session = await requireRole(REQUISITION_ROLES);
+  if (!reason?.trim()) throw new ActionError("A reason is required to change the quantity.");
+
+  const result = await db.$transaction(async (tx) => {
+    // Same lock order as the issue / cancel / procurement paths: line, parent.
+    await tx.$executeRaw`SELECT 1 FROM "BanquetRequisitionLine" WHERE "id" = ${lineId} FOR UPDATE`;
+    const line = await tx.banquetRequisitionLine.findUnique({
+      where: { id: lineId },
+      include: {
+        item: { select: { name: true, unit: true } },
+        requisition: { select: { id: true, status: true, requisitionNo: true, createdById: true } },
+      },
+    });
+    if (!line) throw new ActionError("Requisition line not found");
+    if (line.status === BanquetRequisitionLineStatus.CANCELLED) {
+      throw new ActionError("This item is cancelled — its quantity can't be changed.");
+    }
+    // A line with a PO out stays amendable: planBanquetLineAmend leaves it at
+    // AWAITING_PROCUREMENT so GRN acceptance still re-opens it. Refusing would
+    // strand F&B mid-revision with no way forward; instead the store is warned
+    // below that the PO no longer covers the whole need. Same rule as the
+    // kitchen side (decideAmend in requisitions/[id]/_components/amend-rules).
+    const poAlreadyOut = line.status === BanquetRequisitionLineStatus.AWAITING_PROCUREMENT;
+    if (
+      line.requisition.status !== BanquetRequisitionStatus.SUBMITTED &&
+      line.requisition.status !== BanquetRequisitionStatus.PARTIALLY_ISSUED
+    ) {
+      throw new ActionError(
+        `Cannot change a ${line.requisition.status.toLowerCase()} requisition`,
+      );
+    }
+
+    await tx.$executeRaw`SELECT 1 FROM "BanquetRequisition" WHERE "id" = ${line.requisition.id} FOR UPDATE`;
+
+    const before = line.requestedQty.toString();
+    const plan = planBanquetLineAmend({
+      requestedQty: before,
+      issuedQty: line.issuedQty.toString(),
+      newQty,
+      unit: line.item.unit,
+      lineStatus: line.status,
+    });
+    if (!plan.ok) throw new ActionError(plan.error);
+
+    const changed = await tx.banquetRequisitionLine.updateMany({
+      where: { id: lineId, requestedQty: line.requestedQty, status: line.status },
+      data: { requestedQty: plan.newQty, status: plan.status },
+    });
+    if (changed.count === 0) {
+      throw new ActionError("Someone else just changed this item — refresh and try again.");
+    }
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "BANQUET_REQUISITION_LINE_QTY_AMENDED",
+        entity: "BanquetRequisitionLine",
+        entityId: lineId,
+        payloadHash: sha256Json({
+          item: line.item.name,
+          before,
+          after: plan.newQty,
+          issuedQty: line.issuedQty.toString(),
+          status: plan.status,
+          reason: reason.trim(),
+        }),
+      },
+    });
+
+    await recomputeBanquetReqStatus(tx, line.requisition.id, session.user.id);
+
+    return {
+      reqId: line.requisition.id,
+      requisitionNo: line.requisition.requisitionNo,
+      itemName: line.item.name,
+      unit: line.item.unit,
+      before,
+      after: plan.newQty,
+      delta: new Decimal(plan.newQty).minus(new Decimal(before)),
+    };
+  });
+
+  // The store is the one who has to act on a raise — tell them the extra, not
+  // the new total, since that's what they still have to hand over.
+  const raised = result.delta.gt(0);
+  deferAfterResponse("banquet-line-amend:notify", () =>
+    notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+      kind: "GENERIC",
+      title: raised
+        ? `Issue ${result.delta.toString()} ${result.unit} more ${result.itemName} (${result.requisitionNo})`
+        : `${result.itemName} cut to ${result.after} ${result.unit} on ${result.requisitionNo}`,
+      body: `F&B changed the request from ${result.before} to ${result.after} ${result.unit} — ${reason.trim()}`,
+      link: `/banquet/requisitions/${result.reqId}`,
+      dedupeKey: `banquet-line-amend:${lineId}:${result.after}`,
+    }),
+  );
 
   revalidatePath("/banquet/requisitions");
   revalidatePath(`/banquet/requisitions/${result.reqId}`);

@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Combobox, type ComboOption } from "@/components/ui/combobox";
 import { isNextNavigationError } from "@/lib/next-error";
-import type { ActionResult } from "@/lib/action-result";
+import type { ActionResultWith } from "@/lib/action-result";
 
 interface Vendor { id: string; name: string; code: string; stateCode: string }
 interface Ingredient { id: string; sku: string; name: string; unit: string; gstRatePct: string }
@@ -24,6 +24,9 @@ interface DraftLine {
   chefReqLineId?: string | null;
   /** Banquet requisition line this PO line is buying for (?banquetReqId=). */
   banquetReqLineId?: string | null;
+  /** Only prefilled rows carry this. false = shown but left off this PO, so
+   *  the item stays on the requisition for a second supplier's PO. */
+  included?: boolean;
   sku: string;
   description: string;
   unit: string;
@@ -48,7 +51,10 @@ interface Props {
     expectedDate: string | undefined;
     notes: string | null;
     lines: Array<{ ingredientId: string | null; banquetItemId: string | null; chefReqLineId: string | null; banquetReqLineId: string | null; sku: string; description: string; unit: string; quantity: string; unitPrice: string; gstRatePct: string }>;
-  }) => Promise<ActionResult | void>;
+    /** Prefilled rows were left off this PO — the caller skips its redirect
+     *  and returns the new PO id so we can offer the next one. */
+    moreToOrder?: boolean;
+  }) => Promise<ActionResultWith<{ id?: string }> | void>;
   // Pre-fill when the PO is being spun out of an approved PR — the lines
   // come straight from the request so the user only has to fill in prices.
   initialVendorId?: string | null;
@@ -63,13 +69,16 @@ interface Props {
    *  transport charges. Everyone else must pick items from the dropdown —
    *  free-typed items are where the duplicate catalogue entries came from. */
   canFreeText?: boolean;
+  /** The ?reqId=/?banquetReqId= URL this prefill came from — offered again
+   *  after saving when some prefilled rows were left for another supplier. */
+  requisitionHref?: string | null;
 }
 
 function emptyLine(): DraftLine {
   return { ingredientId: "", banquetItemId: "", chefReqLineId: null, banquetReqLineId: null, sku: "", description: "", unit: "kg", quantity: "1", unitPrice: "0", gstRatePct: "5" };
 }
 
-export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders = [], initialOrderId, onSubmit, initialVendorId, initialLines, onQuickAddVendor, canFreeText = false }: Props) {
+export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders = [], initialOrderId, onSubmit, initialVendorId, initialLines, onQuickAddVendor, canFreeText = false, requisitionHref = null }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [vendorOptions, setVendorOptions] = useState(vendors);
@@ -106,14 +115,27 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
   const [placeOfSupplyStateCode, setPos] = useState("29");
   const [expectedDate, setExpectedDate] = useState("");
   const [notes, setNotes] = useState("");
+  // Prefilled rows arrive ticked, so "order the lot from one supplier" is
+  // unchanged. Unticking leaves the row on screen (and on the requisition)
+  // but off this PO — that's how one requisition is split across suppliers.
   const [lines, setLines] = useState<DraftLine[]>(
-    initialLines && initialLines.length > 0 ? initialLines : [emptyLine()],
+    initialLines && initialLines.length > 0
+      ? initialLines.map((l) => ({ ...l, included: true }))
+      : [emptyLine()],
   );
+  // `included` is defined on prefilled rows only; manual rows always go on.
+  const prefilledCount = lines.filter((l) => l.included !== undefined).length;
+  const onThisPO = lines.filter((l) => l.included === true).length;
+  const leftForLater = prefilledCount - onThisPO;
+  // Set on a split save, where the server hands back the id instead of
+  // redirecting — see the panel this renders below.
+  const [createdPOId, setCreatedPOId] = useState<string | null>(null);
 
   const totals = useMemo(() => {
     let subtotal = new Decimal(0);
     let tax = new Decimal(0);
     for (const l of lines) {
+      if (l.included === false) continue;
       const q = new Decimal(l.quantity || "0");
       const u = new Decimal(l.unitPrice || "0");
       const g = new Decimal(l.gstRatePct || "0").div(100);
@@ -173,9 +195,12 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!vendorId) return toast.error("Pick a vendor");
-    // Rows that are entirely empty are ignored; a row with content but a
+    // Unticked rows are left for another supplier's PO; of the rest, rows
+    // that are entirely empty are ignored, but a row with content and a
     // missing/zero quantity is an error, not a silent drop.
-    const touched = lines.filter((l) => l.description.trim() || l.sku.trim() || l.quantity.trim() || l.unitPrice.trim());
+    const touched = lines.filter(
+      (l) => l.included !== false && (l.description.trim() || l.sku.trim() || l.quantity.trim() || l.unitPrice.trim()),
+    );
     for (const l of touched) {
       if (!canFreeText && !l.ingredientId && !l.banquetItemId) {
         return toast.error("Pick each item from the list — free-typed items aren't allowed.");
@@ -195,10 +220,20 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
       unitPrice: l.unitPrice.trim() || "0",
       gstRatePct: (l.gstRatePct ?? "").trim() || "0",
     }));
-    if (payload.length === 0) return toast.error("Add at least one line");
+    if (payload.length === 0) {
+      return toast.error(
+        prefilledCount > 0
+          ? "Nothing is ticked — tick the items going on this purchase order, or add a line."
+          : "Add at least one line",
+      );
+    }
+    // Only worth staying on the page when there is a requisition to go back
+    // to for the rest (the low-stock prefill has none).
+    const moreToOrder = leftForLater > 0 && !!requisitionHref;
     startTransition(async () => {
       try {
         const res = await onSubmit({
+          moreToOrder,
           vendorId,
           orderId: orderId || null,
           procurementType,
@@ -222,11 +257,38 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
           toast.error(res.error);
           return;
         }
+        // A split save returns instead of redirecting: show where to go next.
+        if (res && res.ok && res.id) setCreatedPOId(res.id);
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });
+  }
+
+  if (createdPOId && requisitionHref) {
+    const nextPOHref = requisitionHref;
+    return (
+      <div className="mx-auto grid max-w-4xl gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
+        <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Purchase order created</h3>
+        <p className="text-[13px] text-ik-ink-2">
+          {onThisPO} item{onThisPO === 1 ? "" : "s"} {onThisPO === 1 ? "is" : "are"} on it. The other{" "}
+          {leftForLater} {leftForLater === 1 ? "is" : "are"} still on the requisition — raise the next
+          purchase order for {leftForLater === 1 ? "it" : "them"} with the other supplier.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {/* Full page load, not router.push: this is the URL we are already
+              on, and a soft navigation would re-use the cached pre-fill and
+              offer the items we just ordered a second time. */}
+          <Button type="button" onClick={() => { window.location.href = nextPOHref; }}>
+            Raise the next PO for the remaining {leftForLater}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => router.push(`/procurement/purchase-orders/${createdPOId}`)}>
+            View the PO just created
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -334,8 +396,16 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
       </section>
 
       <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="font-medium text-[14px] text-ik-ink">Lines</h3>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <h3 className="font-medium text-[14px] text-ik-ink">Lines</h3>
+            {prefilledCount > 0 && (
+              <span className="text-[11.5px] text-ik-ink-3">
+                {onThisPO} of {prefilledCount} item{prefilledCount === 1 ? "" : "s"} on this order
+                {leftForLater > 0 ? ` — ${leftForLater} left for another supplier` : ""}
+              </span>
+            )}
+          </div>
           <Button type="button" size="sm" variant="outline" onClick={() => setLines((p) => [...p, emptyLine()])}>+ Add line</Button>
         </div>
         <p className="mb-3 rounded border border-ik-rule bg-ik-paper-alt p-2 text-[11.5px] text-ik-ink-2">
@@ -349,6 +419,9 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
           <table className="w-full text-[12.5px]">
             <thead className="border-b border-ik-rule text-left text-ik-ink-3">
               <tr>
+                {prefilledCount > 0 && (
+                  <th className="w-8 whitespace-nowrap py-1 pr-2" title="Tick the items going on this purchase order">On PO</th>
+                )}
                 <th className="py-1 pr-2">Ingredient (optional)</th>
                 <th className="py-1 pr-2">SKU</th>
                 <th className="py-1 pr-2">Description</th>
@@ -365,7 +438,20 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
                 const sub = new Decimal(l.quantity || "0").times(new Decimal(l.unitPrice || "0"));
                 const tax = sub.times(new Decimal(l.gstRatePct || "0").div(100));
                 return (
-                  <tr key={idx} className="border-b border-ik-rule">
+                  <tr key={idx} className={"border-b border-ik-rule" + (l.included === false ? " opacity-50" : "")}>
+                    {prefilledCount > 0 && (
+                      <td className="py-1 pr-2">
+                        {l.included !== undefined && (
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={l.included}
+                            aria-label={`Put ${l.description || "this item"} on this purchase order`}
+                            onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, included: e.target.checked } : x))}
+                          />
+                        )}
+                      </td>
+                    )}
                     <td className="py-1 pr-2 min-w-[220px]">
                       <Combobox
                         value={l.banquetItemId ? `bq:${l.banquetItemId}` : l.ingredientId ? `ing:${l.ingredientId}` : ""}
@@ -405,15 +491,19 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
                     <td className="py-1 pr-2"><input type="number" step="0.01" min="0" value={l.unitPrice} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, unitPrice: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
                     <td className="py-1 pr-2"><input type="number" step="0.01" min="0" value={l.gstRatePct} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, gstRatePct: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
                     <td className="py-1 pr-2 text-right font-mono">{sub.plus(tax).toDecimalPlaces(2).toString()}</td>
-                    <td><button type="button" className="text-alert" onClick={() => setLines((p) => p.filter((_, i) => i !== idx))}>×</button></td>
+                    {/* Prefilled rows are un-ticked, not deleted — the item
+                        has to stay visible so it can go on the next PO. */}
+                    <td>{l.included === undefined && <button type="button" className="text-alert" onClick={() => setLines((p) => p.filter((_, i) => i !== idx))}>×</button>}</td>
                   </tr>
                 );
               })}
             </tbody>
+            {/* Totals cover the ticked rows only — they set the approval tier,
+                so an un-ticked row must not inflate them. */}
             <tfoot className="font-mono">
-              <tr><td colSpan={7} className="py-1 pr-2 text-right text-ik-ink-3">Est. subtotal</td><td className="py-1 pr-2 text-right">{totals.subtotal.toString()}</td><td></td></tr>
-              <tr><td colSpan={7} className="py-1 pr-2 text-right text-ik-ink-3">Est. tax</td><td className="py-1 pr-2 text-right">{totals.tax.toString()}</td><td></td></tr>
-              <tr className="font-medium"><td colSpan={7} className="py-1 pr-2 text-right">Est. total</td><td className="py-1 pr-2 text-right">₹{totals.total.toString()}</td><td></td></tr>
+              <tr><td colSpan={prefilledCount > 0 ? 8 : 7} className="py-1 pr-2 text-right text-ik-ink-3">Est. subtotal</td><td className="py-1 pr-2 text-right">{totals.subtotal.toString()}</td><td></td></tr>
+              <tr><td colSpan={prefilledCount > 0 ? 8 : 7} className="py-1 pr-2 text-right text-ik-ink-3">Est. tax</td><td className="py-1 pr-2 text-right">{totals.tax.toString()}</td><td></td></tr>
+              <tr className="font-medium"><td colSpan={prefilledCount > 0 ? 8 : 7} className="py-1 pr-2 text-right">Est. total</td><td className="py-1 pr-2 text-right">₹{totals.total.toString()}</td><td></td></tr>
             </tfoot>
           </table>
         </div>
@@ -423,6 +513,24 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
         <Label htmlFor="notes">Notes</Label>
         <Textarea id="notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </div>
+
+      {requisitionHref && prefilledCount > 0 && (
+        <p className="max-w-2xl rounded-md border border-amber bg-amber-wash p-2 text-[12px] text-ik-ink-2">
+          {leftForLater > 0 ? (
+            <>
+              Only the {onThisPO} ticked item{onThisPO === 1 ? "" : "s"} go on this purchase order. The
+              other {leftForLater} stay on the requisition — after you create this PO you can raise a
+              second one for {leftForLater === 1 ? "it" : "them"} with the other supplier straight away.
+            </>
+          ) : (
+            <>
+              All {prefilledCount} item{prefilledCount === 1 ? "" : "s"} go on this purchase order.
+              Buying some of them from a different supplier? Untick those rows — they stay on the
+              requisition and you raise a second PO for them right after this one.
+            </>
+          )}
+        </p>
+      )}
 
       <div className="flex gap-2">
         <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create draft PO"}</Button>
