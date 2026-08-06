@@ -65,11 +65,26 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
           </div>
         }
       />
+      {/* The approve control lives IN the banner, not only in the header
+          actions — a manager reading "needs an admin or manager's approval"
+          must be able to act on it right there. Non-approvers get the same
+          banner minus the button, so nobody is left at a dead end. */}
       {isPending && (
-        <div className="mb-4 rounded-md border border-ik-rule bg-ik-card p-3 text-[13px] text-ik-ink-2">
-          <span className="font-medium text-gold">Pending approval</span> — this vendor was added by
-          the store and needs an admin or manager&apos;s approval before purchase orders can be
-          raised on them.
+        <div className="mb-4 rounded-md border border-amber bg-amber-wash p-3 text-[13px] text-amber-700">
+          <strong>Pending approval:</strong> this supplier was added by the store, and an admin or
+          manager must approve them before purchase orders can be raised on them.
+          {canApprove ? (
+            <div className="mt-3">
+              <ActionResultButton action={approve} successMessage="Vendor approved — POs can now be raised">
+                Approve vendor
+              </ActionResultButton>
+            </div>
+          ) : (
+            <div className="mt-2">
+              An admin and manager have already been notified. As soon as one of them approves, your
+              purchase order on this supplier can be submitted — the draft stays saved until then.
+            </div>
+          )}
         </div>
       )}
       <DetailTabs

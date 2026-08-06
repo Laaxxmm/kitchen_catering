@@ -223,12 +223,15 @@ export async function listPendingVendors() {
   });
 }
 
-export async function listVendors(opts: { query?: string; active?: boolean; category?: VendorCategory } = {}) {
+export async function listVendors(
+  opts: { query?: string; active?: boolean; category?: VendorCategory; pendingOnly?: boolean } = {},
+) {
   await requireRole(READ_ROLES);
   return db.vendor.findMany({
     where: {
       ...(opts.active !== undefined ? { active: opts.active } : {}),
       ...(opts.category ? { category: opts.category } : {}),
+      ...(opts.pendingOnly ? { approvalStatus: VendorApprovalStatus.PENDING_APPROVAL } : {}),
       ...(opts.query
         ? {
             OR: [
