@@ -21,6 +21,11 @@ import { nextProductionJobNo } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { formatIST } from "@/lib/time";
 import { ActionError, actionFailure, type ActionResult } from "@/server/action-result";
+import {
+  JOB_ADVANCE_FROM,
+  ORDER_ADVANCE_FROM,
+  productionCompletion,
+} from "@/server/production-completion";
 import { deferAfterResponse } from "@/server/defer";
 import { createNotification, notifyRoles } from "@/server/notification-core";
 import { isImmediateChannel } from "@/lib/order-channels";
@@ -144,20 +149,18 @@ async function startProductionItemInner(itemId: string): Promise<{ ok: true }> {
       );
     }
 
-    // If this is the first item in PREP, cascade the parent job.
-    const job = await tx.productionJob.findUnique({
-      where: { id: item.jobId },
-      select: { id: true, status: true, actualStart: true },
+    // If this is the first item in PREP, cascade the parent job. Guarded
+    // updateMany rather than findUnique-then-update: two chefs starting two
+    // dishes at once must not both write, and the guard also stops the write
+    // rewinding a job that already moved past QUEUED.
+    await tx.productionJob.updateMany({
+      where: { id: item.jobId, status: ProductionJobStatus.QUEUED },
+      data: { status: ProductionJobStatus.PREP },
     });
-    if (job && job.status === ProductionJobStatus.QUEUED) {
-      await tx.productionJob.update({
-        where: { id: job.id },
-        data: {
-          status: ProductionJobStatus.PREP,
-          actualStart: job.actualStart ?? new Date(),
-        },
-      });
-    }
+    await tx.productionJob.updateMany({
+      where: { id: item.jobId, actualStart: null },
+      data: { actualStart: new Date() },
+    });
 
     await tx.auditLog.create({
       data: {
@@ -247,6 +250,155 @@ function notifyImmediateOrderCooked(n: CookedServePayload): void {
   });
 }
 
+// ─── Completion sync (the self-healing core) ──────────────────────────────
+
+interface CompletionSync {
+  orderId: string;
+  /** THIS call performed the order flip — so it owns the audit + notify. */
+  orderAdvanced: boolean;
+  cooked: CookedServePayload | null;
+}
+
+/**
+ * Re-derive "this job is finished" from the ACTUAL item rows and advance the
+ * job and the order with two INDEPENDENT guarded writes.
+ *
+ * This is deliberately not conditional on anything the caller just did. If a
+ * previous click flipped the job but not the order (the ORD-26-27-0085 bug —
+ * the order cascade used to be nested inside `jobUpdated.count > 0`, so a job
+ * that was already READY skipped it silently), the next call to this function
+ * from ANY path finishes the job off. Stuck orders clear themselves.
+ *
+ * Both writes stay guarded `updateMany` + count check, so two chefs tapping at
+ * once still can't double-transition, and neither write can rewind a status or
+ * resurrect a job/order that was cancelled (CANCELLED is in neither
+ * *_ADVANCE_FROM list).
+ */
+async function syncJobAndOrderCompletion(
+  tx: Prisma.TransactionClient,
+  jobId: string,
+): Promise<CompletionSync> {
+  const job = await tx.productionJob.findUnique({
+    where: { id: jobId },
+    select: {
+      orderId: true,
+      status: true,
+      items: { select: { status: true } },
+      order: { select: { status: true } },
+    },
+  });
+  if (!job) return { orderId: "", orderAdvanced: false, cooked: null };
+
+  const decision = productionCompletion(
+    job.items.map((it) => it.status),
+    job.status,
+    job.order.status,
+  );
+
+  if (decision.advanceJob) {
+    await tx.productionJob.updateMany({
+      where: { id: jobId, status: { in: JOB_ADVANCE_FROM } },
+      data: { status: ProductionJobStatus.READY, actualReady: new Date() },
+    });
+  }
+
+  if (!decision.advanceOrder) {
+    return { orderId: job.orderId, orderAdvanced: false, cooked: null };
+  }
+
+  const orderFlip = await tx.order.updateMany({
+    where: { id: job.orderId, status: { in: ORDER_ADVANCE_FROM } },
+    data: { status: OrderStatus.READY },
+  });
+  // count 0 = a concurrent tap advanced it in the same instant. The order is
+  // READY either way; that call owns the audit + notification, not this one.
+  return {
+    orderId: job.orderId,
+    orderAdvanced: orderFlip.count > 0,
+    cooked: orderFlip.count > 0 ? await collectCookedServe(tx, job.orderId) : null,
+  };
+}
+
+/**
+ * Manual "finish this job off" — the kitchen board's one-tap fix for a job
+ * that reads READY while its order hasn't caught up, and the recovery path
+ * `handToDelivery` calls before it refuses. Runs exactly the same sync the
+ * automatic paths run, so it can never do something they couldn't.
+ *
+ * Returns `{ok:true}` when the order IS at READY afterwards, and a readable
+ * `{ok:false,error}` when it genuinely can't get there — never a silent no-op.
+ */
+export async function syncProductionJobCompletion(jobId: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole([...ORDER_KITCHEN_ROLES, Role.MANAGER]);
+
+    // Return the outcome OUT of the transaction rather than assigning to
+    // captured `let`s — keeps the post-commit branching honest.
+    const out = await db.$transaction(async (tx) => {
+      const job = await tx.productionJob.findUnique({
+        where: { id: jobId },
+        select: {
+          orderId: true,
+          items: { select: { status: true } },
+          order: { select: { code: true } },
+        },
+      });
+      if (!job) throw new ActionError("Production job not found");
+      const live = job.items.filter((it) => it.status !== ProductionJobItemStatus.CANCELLED);
+
+      const sync = await syncJobAndOrderCompletion(tx, jobId);
+      if (sync.orderAdvanced) {
+        await tx.auditLog.create({
+          data: {
+            userId: session.user.id,
+            action: "ORDER_MARKED_READY",
+            entity: "Order",
+            entityId: job.orderId,
+          },
+        });
+      }
+      const after = await tx.order.findUnique({
+        where: { id: job.orderId },
+        select: { status: true },
+      });
+      return {
+        sync,
+        orderId: job.orderId,
+        orderCode: job.order.code,
+        orderStatus: after?.status ?? null,
+        itemsTotal: live.length,
+        itemsReady: live.filter((it) => it.status === ProductionJobItemStatus.READY).length,
+      };
+    });
+
+    if (out.sync.cooked) notifyImmediateOrderCooked(out.sync.cooked);
+    revalidatePath("/dashboard");
+    revalidatePath("/kitchen");
+    revalidatePath("/orders");
+    revalidatePath(`/orders/${out.orderId}`);
+
+    if (out.orderStatus === OrderStatus.READY) return { ok: true };
+    if (out.itemsTotal === 0) {
+      return {
+        ok: false,
+        error: `Order ${out.orderCode} has no dishes left to cook — nothing to send to dispatch.`,
+      };
+    }
+    if (out.itemsReady < out.itemsTotal) {
+      return {
+        ok: false,
+        error: `${out.itemsTotal - out.itemsReady} of ${out.itemsTotal} dishes still cooking — mark them ready first.`,
+      };
+    }
+    return {
+      ok: false,
+      error: `Order ${out.orderCode} is ${out.orderStatus ?? "missing"} — the kitchen can't advance it from here. Ask a manager.`,
+    };
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
 export async function markProductionItemReady(itemId: string): Promise<ActionResult> {
   try {
     return await markProductionItemReadyInner(itemId);
@@ -261,10 +413,9 @@ async function markProductionItemReadyInner(itemId: string): Promise<{ ok: true 
   await db.$transaction(async (tx) => {
     const item = await tx.productionJobItem.findUnique({
       where: { id: itemId },
-      select: { id: true, status: true, jobId: true },
+      select: { jobId: true },
     });
     if (!item) throw new ActionError("Production item not found");
-    if (item.status === ProductionJobItemStatus.READY) return;
 
     // Guarded transition: only a live (QUEUED / IN_PROGRESS) item can be
     // marked ready. A concurrent double-tap (already READY) or a CANCELLED
@@ -277,62 +428,38 @@ async function markProductionItemReadyInner(itemId: string): Promise<{ ok: true 
       },
       data: { status: ProductionJobItemStatus.READY, readyAt: new Date() },
     });
-    if (updated.count === 0) return;
-
-    // If every sibling item is READY, mark the job READY and cascade order.
-    const siblings = await tx.productionJobItem.findMany({
-      where: { jobId: item.jobId },
-      select: { id: true, status: true },
-    });
-    const allReady = siblings.every((s) =>
-      s.id === item.id ? true : s.status === ProductionJobItemStatus.READY || s.status === ProductionJobItemStatus.CANCELLED,
-    );
-    if (allReady) {
-      // Guarded cascade: only a live job (not one cancelled with its order)
-      // flips to READY, and the order only advances from a production state.
-      // This stops a stale last-item tap resurrecting a cancelled order.
-      const jobUpdated = await tx.productionJob.updateMany({
-        where: {
-          id: item.jobId,
-          status: {
-            in: [
-              ProductionJobStatus.QUEUED,
-              ProductionJobStatus.PREP,
-              ProductionJobStatus.COOKING,
-            ],
-          },
+    if (updated.count > 0) {
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "PRODUCTION_ITEM_READY",
+          entity: "ProductionJobItem",
+          entityId: itemId,
         },
-        data: { status: ProductionJobStatus.READY, actualReady: new Date() },
       });
-      if (jobUpdated.count > 0) {
-        const job = await tx.productionJob.findUnique({
-          where: { id: item.jobId },
-          select: { orderId: true },
-        });
-        if (job) {
-          // Cascade order: IN_PREP / READY_FOR_PRODUCTION -> READY
-          const orderFlip = await tx.order.updateMany({
-            where: {
-              id: job.orderId,
-              status: { in: [OrderStatus.IN_PREP, OrderStatus.READY_FOR_PRODUCTION] },
-            },
-            data: { status: OrderStatus.READY },
-          });
-          if (orderFlip.count > 0) cooked = await collectCookedServe(tx, job.orderId);
-        }
-      }
     }
 
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "PRODUCTION_ITEM_READY",
-        entity: "ProductionJobItem",
-        entityId: itemId,
-      },
-    });
+    // Runs whether or not this click changed the item. A double-tap, a
+    // retried request or an item that was already READY still re-checks the
+    // real condition and advances anything left behind — that is the
+    // self-healing property, and dropping it is what stranded the order.
+    const sync = await syncJobAndOrderCompletion(tx, item.jobId);
+    if (sync.orderAdvanced) {
+      cooked = sync.cooked;
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "ORDER_MARKED_READY",
+          entity: "Order",
+          entityId: sync.orderId,
+        },
+      });
+    }
   });
   if (cooked) notifyImmediateOrderCooked(cooked);
+  // /dashboard too: this path can advance the ORDER, and the chef work-screen
+  // there is the other half of the two screens that used to disagree.
+  revalidatePath("/dashboard");
   revalidatePath("/kitchen");
   revalidatePath("/orders");
   return { ok: true };
@@ -382,6 +509,7 @@ async function completeOrderHandoverIfAllHanded(
       order: {
         select: {
           id: true, code: true, channel: true, roomNumber: true,
+          handedToDeliveryAt: true,
           customer: { select: { name: true } },
         },
       },
@@ -389,16 +517,40 @@ async function completeOrderHandoverIfAllHanded(
   });
   if (!job) return null;
   const live = job.items.filter((it) => it.status !== ProductionJobItemStatus.CANCELLED);
+  // Not everything is out of the kitchen yet — a normal partial tick, not a
+  // failure. The order-level stamp lands when the last dish is ticked.
   if (live.length === 0 || live.some((it) => !it.handedOverAt)) return null;
 
+  // Everything has physically left the counter, so every dish is READY by
+  // definition (markItemHandedOver refuses otherwise). If the order hasn't
+  // caught up to READY, bring it up FIRST — otherwise the guarded stamp below
+  // matches zero rows and the chef is told nothing while the order rots.
+  await syncJobAndOrderCompletion(tx, jobId);
+  // (Only event-delivery channels reach handover — the chef screen hides it
+  // for in-house channels — so the "cooked, ready to serve" ping that sync can
+  // return is null here by construction and nothing is dropped.)
+
   // Guarded stamp — mirrors handToDelivery: only a READY order that hasn't
-  // been stamped yet. A concurrent tap (or an order that already moved on)
-  // matches zero rows and skips the audit + notify.
+  // been stamped yet. A concurrent tap matches zero rows and skips the
+  // audit + notify.
   const updated = await tx.order.updateMany({
     where: { id: job.orderId, status: OrderStatus.READY, handedToDeliveryAt: null },
     data: { handedToDeliveryAt: new Date() },
   });
-  if (updated.count === 0) return null;
+  if (updated.count === 0) {
+    const now = await tx.order.findUnique({
+      where: { id: job.orderId },
+      select: { status: true, handedToDeliveryAt: true },
+    });
+    // Already stamped (double-tap, or a sibling path won the race) — the
+    // handover really is complete, so this is a genuine no-op.
+    if (now?.handedToDeliveryAt) return null;
+    // Otherwise it failed for a reason the chef must see, not a silent null.
+    // The whole transaction rolls back, so this tick was NOT recorded.
+    throw new ActionError(
+      `Every dish on ${job.order.code} is handed over, but the order is ${now?.status ?? "missing"} and can't be sent to dispatch — nothing was recorded. Refresh, or ask a manager.`,
+    );
+  }
   await tx.auditLog.create({
     data: {
       userId,
@@ -633,9 +785,15 @@ async function startCookingOrderInner(orderId: string): Promise<{ ok: true }> {
         where: { jobId, status: ProductionJobItemStatus.QUEUED },
         data: { status: ProductionJobItemStatus.IN_PROGRESS, startedAt: new Date() },
       });
-      await tx.productionJob.update({
-        where: { id: jobId },
-        data: { status: ProductionJobStatus.PREP, actualStart: new Date() },
+      // Guarded: a plain update here would rewind a COOKING/READY job back to
+      // PREP (and reset actualStart) on a re-tap of "Start cooking".
+      await tx.productionJob.updateMany({
+        where: { id: jobId, status: ProductionJobStatus.QUEUED },
+        data: { status: ProductionJobStatus.PREP },
+      });
+      await tx.productionJob.updateMany({
+        where: { id: jobId, actualStart: null },
+        data: { actualStart: new Date() },
       });
     }
     await tx.auditLog.create({
@@ -671,33 +829,68 @@ async function markOrderCookedInner(orderId: string): Promise<{ ok: true }> {
   const session = await requireRole([...ORDER_KITCHEN_ROLES, Role.MANAGER]);
   let cooked: CookedServePayload | null = null;
   await db.$transaction(async (tx) => {
-    // Status guard in the WHERE clause — see startCookingOrder.
-    const updated = await tx.order.updateMany({
-      where: {
-        id: orderId,
-        status: { in: [OrderStatus.IN_PREP, OrderStatus.READY_FOR_PRODUCTION] },
-      },
-      data: { status: OrderStatus.READY },
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { status: true },
     });
-    if (updated.count === 0) {
-      const order = await tx.order.findUnique({ where: { id: orderId }, select: { status: true } });
-      if (!order) throw new ActionError("Order not found");
+    if (!order) throw new ActionError("Order not found");
+    // READY is ACCEPTED here, not rejected. An order that already advanced
+    // while its job/items lagged behind must still be finishable from this
+    // button; the old code threw "Cannot mark ready from status READY" and
+    // left the kitchen with no way to reconcile the two screens.
+    if (
+      !ORDER_ADVANCE_FROM.includes(order.status) &&
+      order.status !== OrderStatus.READY
+    ) {
       throw new ActionError(
         `Cannot mark ready from status ${order.status} — refresh the page.`,
       );
     }
-    cooked = await collectCookedServe(tx, orderId);
-    const job = await tx.productionJob.findFirst({ where: { orderId } });
+
+    const job = await tx.productionJob.findFirst({
+      where: { orderId },
+      select: { id: true },
+    });
     if (job) {
+      // Only live, not-yet-ready dishes: re-running must not overwrite an
+      // existing readyAt, and must not resurrect a cancelled dish.
       await tx.productionJobItem.updateMany({
-        where: { jobId: job.id, status: { not: ProductionJobItemStatus.CANCELLED } },
+        where: {
+          jobId: job.id,
+          status: {
+            in: [ProductionJobItemStatus.QUEUED, ProductionJobItemStatus.IN_PROGRESS],
+          },
+        },
         data: { status: ProductionJobItemStatus.READY, readyAt: new Date() },
       });
-      await tx.productionJob.update({
-        where: { id: job.id },
-        data: { status: ProductionJobStatus.READY, actualReady: new Date() },
+      // Job and order each advance through their own guarded write — the job
+      // flip is no longer a precondition for the order flip.
+      const sync = await syncJobAndOrderCompletion(tx, job.id);
+      cooked = sync.cooked;
+      if (!sync.orderAdvanced) {
+        const after = await tx.order.findUnique({
+          where: { id: orderId },
+          select: { status: true },
+        });
+        // READY = an idempotent re-tap, nothing new to log. Anything else
+        // means there was nothing cookable here — don't report success.
+        if (after?.status !== OrderStatus.READY) {
+          throw new ActionError(
+            "Every dish on this order is cancelled — there's nothing to mark ready.",
+          );
+        }
+        return;
+      }
+    } else {
+      // Legacy order with no production job: flip it directly, still guarded.
+      const updated = await tx.order.updateMany({
+        where: { id: orderId, status: { in: ORDER_ADVANCE_FROM } },
+        data: { status: OrderStatus.READY },
       });
+      if (updated.count === 0) return; // lost the race / already READY.
+      cooked = await collectCookedServe(tx, orderId);
     }
+
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -832,6 +1025,9 @@ export async function listProductionJobs(
       order: {
         select: {
           id: true, code: true, eventDate: true, channel: true, handedToDeliveryAt: true,
+          // The board compares this against the JOB status to spot a job that
+          // finished while its order was left behind.
+          status: true,
           customer: { select: { name: true } },
         },
       },

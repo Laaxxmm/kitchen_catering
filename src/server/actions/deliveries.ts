@@ -32,7 +32,10 @@ import { sha256Json } from "@/lib/audit";
 import { istToUtc } from "@/lib/time";
 import { channelWantsFeedback, isEventDeliveryChannel, EVENT_DELIVERY_CHANNEL_LIST } from "@/lib/order-channels";
 import { notifyRoles } from "@/server/notification-core";
-import { markAllItemsHandedOver } from "@/server/actions/production-jobs";
+import {
+  markAllItemsHandedOver,
+  syncProductionJobCompletion,
+} from "@/server/actions/production-jobs";
 
 // Off-site catering orders (banquet / ODC / packed) move through these
 // statuses once they're confirmed and in the kitchen, up to the moment
@@ -117,12 +120,6 @@ async function handToDeliveryInner(orderId: string): Promise<{ ok: true }> {
     revalidatePath("/kitchen");
     return { ok: true };
   }
-  if (order.status !== OrderStatus.READY) {
-    // Still cooking — genuinely not ready.
-    throw new ActionError(
-      `Order ${order.code} isn't ready to dispatch yet (it's ${STATUS_LABEL[order.status].toLowerCase()}).`,
-    );
-  }
   // Itemized handover: when the order's production job tracks per-dish
   // items, the handover is driven dish by dish (markItemHandedOver) and the
   // order-level stamp completes when the LAST item is ticked. The old
@@ -140,14 +137,32 @@ async function handToDeliveryInner(orderId: string): Promise<{ ok: true }> {
   });
   const liveItems =
     job?.items.filter((it) => it.status !== ProductionJobItemStatus.CANCELLED) ?? [];
-  if (job && liveItems.length > 0) {
-    const allReady = liveItems.every(
-      (it) => it.status === ProductionJobItemStatus.READY,
-    );
-    if (!allReady) {
-      const pending = liveItems.filter((it) => !it.handedOverAt).length;
+  const allReady =
+    liveItems.length > 0 &&
+    liveItems.every((it) => it.status === ProductionJobItemStatus.READY);
+
+  if (order.status !== OrderStatus.READY) {
+    // Every dish IS cooked but the order was left behind by an earlier
+    // partial cascade — heal it and carry on rather than refusing. This is
+    // the recovery path for orders already stuck in production.
+    if (job && allReady) {
+      const synced = await syncProductionJobCompletion(job.id);
+      if (!synced.ok) throw new ActionError(synced.error);
+    } else {
+      // Genuinely still cooking.
       throw new ActionError(
-        `Tick each dish as it's handed over — ${pending} of ${liveItems.length} still pending`,
+        `Order ${order.code} isn't ready to dispatch yet (it's ${STATUS_LABEL[order.status].toLowerCase()}).`,
+      );
+    }
+  }
+
+  if (job && liveItems.length > 0) {
+    if (!allReady) {
+      const notReady = liveItems.filter(
+        (it) => it.status !== ProductionJobItemStatus.READY,
+      ).length;
+      throw new ActionError(
+        `Cook and mark every dish ready before handing over — ${notReady} of ${liveItems.length} still cooking`,
       );
     }
     const res = await markAllItemsHandedOver(job.id);

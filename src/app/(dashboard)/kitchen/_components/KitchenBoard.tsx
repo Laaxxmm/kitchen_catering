@@ -8,11 +8,16 @@ import { Button } from "@/components/ui/button";
 import { formatIST } from "@/lib/time";
 import { isNextNavigationError } from "@/lib/next-error";
 import type { ActionResult } from "@/lib/action-result";
-import { startCookingOrder, markOrderCooked } from "@/server/actions/production-jobs";
+import {
+  startCookingOrder,
+  markOrderCooked,
+  syncProductionJobCompletion,
+} from "@/server/actions/production-jobs";
 import { handToDelivery } from "@/server/actions/deliveries";
 import { markInHouseServed } from "@/server/actions/orders";
 import { isImmediateChannel } from "@/lib/order-channels";
-import type { OrderChannel, ProductionJobItemStatus } from "@prisma/client";
+import { STATUS_LABEL } from "@/lib/order-status";
+import type { OrderChannel, OrderStatus, ProductionJobItemStatus } from "@prisma/client";
 import { HandoverChecklist } from "@/components/ik/HandoverChecklist";
 
 type Stage = "QUEUED" | "PREP" | "COOKING" | "READY";
@@ -33,6 +38,8 @@ export interface KitchenJob {
   status: Stage;
   code: string;
   channel: OrderChannel;
+  /** The ORDER's status — a READY job whose order isn't READY is stuck. */
+  orderStatus: OrderStatus;
   handedToDelivery: boolean;
   customerName: string;
   scheduledReady: string;
@@ -130,9 +137,15 @@ function JobCard({ job }: { job: KitchenJob }) {
   // with per-dish items get the handover checklist instead of a button:
   // each dish is ticked as it's physically handed over.
   const inHouse = isImmediateChannel(job.channel);
-  const itemizedHandover = isReady && !inHouse && job.items.length > 0;
+  // The contradiction that stranded ORD-26-27-0085 for 223 hours: the job
+  // reads READY (every dish ticked) while the ORDER never advanced, so the
+  // order is invisible to dispatch and looks "done" here. Say so, and offer
+  // the one-tap fix instead of a card that looks finished.
+  const orderStuck = isReady && job.orderStatus !== "READY";
+  const itemizedHandover = isReady && !orderStuck && !inHouse && job.items.length > 0;
   let action: { label: string; fn: () => Promise<unknown>; msg: string } | null;
-  if (job.status === "QUEUED") action = { label: "Start cooking", fn: () => startCookingOrder(job.orderId), msg: "Cooking started" };
+  if (orderStuck) action = { label: "Send order to dispatch", fn: () => syncProductionJobCompletion(job.id), msg: "Order advanced — dispatch can see it now" };
+  else if (job.status === "QUEUED") action = { label: "Start cooking", fn: () => startCookingOrder(job.orderId), msg: "Cooking started" };
   else if (isReady && inHouse) action = { label: "Mark served", fn: () => markInHouseServed(job.orderId), msg: "Served — ready to bill" };
   else if (itemizedHandover) action = null; // checklist below drives it
   else if (isReady && job.handedToDelivery) action = { label: "✓ Delivery informed", fn: () => handToDelivery(job.orderId), msg: "Delivery reminded" };
@@ -142,7 +155,12 @@ function JobCard({ job }: { job: KitchenJob }) {
   const primaryAction = action;
 
   return (
-    <div className={"rounded-md border bg-ik-card p-3 " + (isReady ? "border-positive/50" : "border-ik-rule")}>
+    <div
+      className={
+        "rounded-md border bg-ik-card p-3 " +
+        (orderStuck ? "border-amber" : isReady ? "border-positive/50" : "border-ik-rule")
+      }
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate text-[13.5px] font-medium text-ik-ink">{job.customerName}</div>
@@ -171,6 +189,19 @@ function JobCard({ job }: { job: KitchenJob }) {
         </div>
         <span className="whitespace-nowrap">{readyCount}/{job.items.length} ready · {portions} pax</span>
       </div>
+
+      {/* Cooking finished but the order never advanced — the state that made
+          two screens disagree. Name it, and give the chef the fix. */}
+      {orderStuck && (
+        <div className="mt-2.5 rounded border border-amber bg-amber-wash p-2 text-[11.5px]">
+          <div className="font-medium text-amber">Cooked, but not sent to dispatch</div>
+          <p className="mt-0.5 text-ik-ink-2">
+            All {job.items.length} dish{job.items.length === 1 ? "" : "es"} are ticked, but order{" "}
+            {job.code} is still <strong>{STATUS_LABEL[job.orderStatus].toLowerCase()}</strong> — the
+            delivery team can&apos;t see it yet. Tap below to finish it off.
+          </p>
+        </div>
+      )}
 
       {/* Per-dish handover checklist replaces the one-shot dispatch button
           — tick each dish the moment it's physically handed to delivery. */}

@@ -173,6 +173,8 @@ export default async function KitchenPage({
             status: j.status as "QUEUED" | "PREP" | "COOKING" | "READY",
             code: j.order.code,
             channel: j.order.channel,
+            // Drives the "job finished but the order never advanced" warning.
+            orderStatus: j.order.status,
             handedToDelivery: j.order.handedToDeliveryAt != null,
             customerName: j.order.customer.name,
             scheduledReady: j.scheduledReady.toISOString(),
