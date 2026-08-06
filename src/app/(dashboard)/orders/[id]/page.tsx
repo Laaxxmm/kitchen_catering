@@ -25,8 +25,10 @@ import { isEventDeliveryChannel, isImmediateChannel, isPackagePricedChannel } fr
 import { computeRevisionBand, type RevisionBand } from "@/lib/order-revision";
 import {
   FORCE_DELIVERABLE_ORDER_STATUSES,
+  KITCHEN_COMMITTED_STATUSES,
   REQUISITION_ELIGIBLE_ORDER_STATUSES,
   REVISABLE_ORDER_STATUSES,
+  STATUS_LABEL,
 } from "@/lib/order-status";
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
@@ -295,6 +297,18 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               <Link href={`/orders/${order.id}/revise`}>
                 <Button variant="outline">Revise order</Button>
               </Link>
+            )}
+            {/* Past the point of no return, the button stays visible but dead
+                with the reason on it — silently hiding it just sends people
+                hunting for a control they remember being there. */}
+            {isSales && KITCHEN_COMMITTED_STATUSES.includes(order.status) && (
+              <Button
+                variant="outline"
+                disabled
+                title={`Already ${STATUS_LABEL[order.status].toLowerCase()} — ingredients are issued and the kitchen is working to these numbers. Speak to the chef directly.`}
+              >
+                Revise order — already {STATUS_LABEL[order.status].toLowerCase()}
+              </Button>
             )}
             {/* Tax invoice is generated manually by accounts/admin/manager
                 once the order has been delivered. They then download +

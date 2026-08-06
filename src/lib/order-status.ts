@@ -17,10 +17,12 @@ export const INACTIVE_ORDER_STATUSES: OrderStatus[] = [
 
 /**
  * Statuses in which a confirmed order can still be revised (client changed
- * pax). Everything from the approval gates up to READY — once the food is
- * out for delivery (or the order is terminal) it's too late. Shared between
- * the reviseOrder action and the UI that shows/hides the "Revise order"
- * entry points, so they can't drift apart.
+ * pax). The line is drawn where the kitchen commits physical work: once an
+ * order is ready to cook the ingredients are already issued against the old
+ * numbers, and once it is cooking or cooked the food itself is wrong — a
+ * revision there cannot be honoured, only recorded, which reads to the
+ * manager as if it worked. Shared between the reviseOrder action and the UI
+ * that shows/hides the "Revise order" entry points, so they can't drift.
  */
 export const REVISABLE_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.PENDING_ADMIN_APPROVAL,
@@ -28,9 +30,30 @@ export const REVISABLE_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.CHANGES_PROPOSED_BY_CHEF,
   OrderStatus.CHEF_REQUISITION_PENDING,
   OrderStatus.ISSUING,
+];
+
+/**
+ * Past revising, but only because the kitchen has started — as opposed to
+ * cancelled/delivered/terminal. These get a specific "the kitchen already
+ * has this" explanation rather than a bare "too late".
+ */
+export const KITCHEN_COMMITTED_STATUSES: OrderStatus[] = [
   OrderStatus.READY_FOR_PRODUCTION,
   OrderStatus.IN_PREP,
   OrderStatus.READY,
+];
+
+/**
+ * Orders a purchase order may still be raised against — anything the kitchen
+ * is actively working on, INCLUDING once it is cooking. Deliberately not
+ * REVISABLE_ORDER_STATUSES: buying a missing ingredient for an order that is
+ * already in the pan is normal and necessary, whereas re-cutting that order's
+ * quantities is not. The two lists used to be one, so narrowing the revise
+ * rule quietly emptied this dropdown.
+ */
+export const PROCURABLE_ORDER_STATUSES: OrderStatus[] = [
+  ...REVISABLE_ORDER_STATUSES,
+  ...KITCHEN_COMMITTED_STATUSES,
 ];
 
 /**

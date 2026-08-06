@@ -8,7 +8,7 @@ import { createVendorPO } from "@/server/actions/procurement";
 import { getChefRequisition } from "@/server/actions/chef-requisitions";
 import { gateRolePage } from "@/server/rbac";
 import { db } from "@/server/db";
-import { REVISABLE_ORDER_STATUSES } from "@/lib/order-status";
+import { PROCURABLE_ORDER_STATUSES } from "@/lib/order-status";
 import { toDecimal } from "@/lib/money";
 import { VendorPOForm } from "./_components/VendorPOForm";
 
@@ -36,7 +36,7 @@ export default async function NewVendorPOPage({
     // that's when a PO is being raised for them. Direct scoped query is
     // fine here: the page gate above is ADMIN/MANAGER/STORE_KEEPER.
     db.order.findMany({
-      where: { status: { in: REVISABLE_ORDER_STATUSES } },
+      where: { status: { in: PROCURABLE_ORDER_STATUSES } },
       select: { id: true, code: true, customer: { select: { name: true } } },
       orderBy: { eventDate: "asc" },
       take: 200,

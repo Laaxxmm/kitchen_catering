@@ -41,6 +41,7 @@ import {
 import {
   FORCE_DELIVERABLE_ORDER_STATUSES,
   INACTIVE_ORDER_STATUSES,
+  KITCHEN_COMMITTED_STATUSES,
   REVISABLE_ORDER_STATUSES,
   STATUS_LABEL,
 } from "@/lib/order-status";
@@ -489,7 +490,11 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
     });
     if (!order) throw new ActionError("Order not found");
     if (!REVISABLE_ORDER_STATUSES.includes(order.status)) {
-      throw new ActionError(`Too late — the order is ${STATUS_LABEL[order.status].toLowerCase()}`);
+      throw new ActionError(
+        KITCHEN_COMMITTED_STATUSES.includes(order.status)
+          ? `This order can't be revised — it is already ${STATUS_LABEL[order.status].toLowerCase()}. The ingredients are issued and the kitchen is working to these numbers. Speak to the chef directly, and record what actually went out after the event.`
+          : `Too late — the order is ${STATUS_LABEL[order.status].toLowerCase()}`,
+      );
     }
 
     // 24-hour rule: close to the event the kitchen has already planned and

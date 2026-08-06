@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { gateRolePage } from "@/server/rbac";
 import { getOrder, reviseOrder } from "@/server/actions/orders";
 import { listDishes } from "@/server/actions/dishes";
-import { REVISABLE_ORDER_STATUSES, STATUS_LABEL } from "@/lib/order-status";
+import { KITCHEN_COMMITTED_STATUSES, REVISABLE_ORDER_STATUSES, STATUS_LABEL } from "@/lib/order-status";
 import { isPackagePricedChannel } from "@/lib/order-channels";
 import { formatIST } from "@/lib/time";
 import { ReviseOrderForm } from "./_components/ReviseOrderForm";
@@ -49,6 +49,7 @@ export default async function ReviseOrderPage({ params }: { params: Promise<{ id
   }
 
   const revisable = REVISABLE_ORDER_STATUSES.includes(order.status);
+  const kitchenCommitted = KITCHEN_COMMITTED_STATUSES.includes(order.status);
 
   // Inline dish creator — counter sales sell ad-hoc items; the manager adds
   // the dish here and it lands straight on the revision. createDish gates
@@ -84,8 +85,21 @@ export default async function ReviseOrderPage({ params }: { params: Promise<{ id
       />
       {!revisable ? (
         <div className="rounded-md border border-amber bg-amber-wash p-4 text-[13px] text-ik-ink">
-          Too late — the order is <strong>{STATUS_LABEL[order.status].toLowerCase()}</strong>. Quantities
-          can only be revised while the order is still in the kitchen&apos;s hands (up to “ready”).
+          {kitchenCommitted ? (
+            <>
+              This order can&apos;t be revised — it is already{" "}
+              <strong>{STATUS_LABEL[order.status].toLowerCase()}</strong>. The ingredients have been
+              issued and the kitchen is working to these numbers, so a change here would be recorded
+              but not actually cooked. Speak to the chef directly, and record what really went out
+              after the event.
+            </>
+          ) : (
+            <>
+              Too late — the order is <strong>{STATUS_LABEL[order.status].toLowerCase()}</strong>.
+              Quantities can only be revised while the order is still being approved or having its
+              ingredients raised.
+            </>
+          )}
         </div>
       ) : (
         <ReviseOrderForm
