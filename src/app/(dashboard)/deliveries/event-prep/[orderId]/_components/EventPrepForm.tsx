@@ -221,7 +221,11 @@ export function EventPrepForm({ order, items, ledger }: { order: Order; items: I
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="text-[12px] font-medium text-ik-ink-2">Cutlery &amp; arrangements needed</div>
           <div className="flex items-center gap-2">
-            <Link href="/banquet/request" className="text-[11.5px] text-brand hover:underline">Don&apos;t have it? Request from store</Link>
+            {/* Carry the order through so the requisition is linked to this
+                event — it used to land on a blank form where the event was an
+                optional dropdown people forgot, and the store then had no idea
+                which event the request was for. */}
+            <Link href={`/banquet/request?orderId=${order.id}`} className="text-[11.5px] text-brand hover:underline">Don&apos;t have it? Request from store</Link>
             <Button size="sm" variant="outline" onClick={addLine}>+ Add item</Button>
           </div>
         </div>

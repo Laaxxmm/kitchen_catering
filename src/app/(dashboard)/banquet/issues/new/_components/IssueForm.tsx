@@ -135,7 +135,12 @@ export function IssueForm({ items, events }: { items: Item[]; events: EventOptio
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-[12px] font-medium text-ik-ink-2">Items issued</div>
           <div className="flex items-center gap-2">
-            <Link href="/banquet/request" className="text-[11.5px] text-brand hover:underline">
+            {/* Carry the picked event through, so the requisition reaches the
+                store already linked to it. */}
+            <Link
+              href={orderId ? `/banquet/request?orderId=${orderId}` : "/banquet/request"}
+              className="text-[11.5px] text-brand hover:underline"
+            >
               Don&apos;t have it? Request from store
             </Link>
             <Button size="sm" variant="outline" onClick={addLine}>+ Add item</Button>

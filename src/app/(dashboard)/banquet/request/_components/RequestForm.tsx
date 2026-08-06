@@ -20,11 +20,20 @@ interface Line { itemId: string; qty: string }
  * store keeper then fulfils it line by line. Mirrors the chef standalone
  * requisition form.
  */
-export function RequestForm({ items, events }: { items: Item[]; events: Event[] }) {
+export function RequestForm({
+  items,
+  events,
+  lockedOrder = null,
+}: {
+  items: Item[];
+  events: Event[];
+  /** Set when the form was opened from an order's event-prep screen. */
+  lockedOrder?: { id: string; code: string; customerName: string } | null;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [lines, setLines] = useState<Line[]>([{ itemId: "", qty: "" }]);
-  const [orderId, setOrderId] = useState("");
+  const [orderId, setOrderId] = useState(lockedOrder?.id ?? "");
   const [notes, setNotes] = useState("");
 
   function addLine() { setLines((l) => [...l, { itemId: "", qty: "" }]); }
@@ -101,18 +110,30 @@ export function RequestForm({ items, events }: { items: Item[]; events: Event[] 
 
       <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:grid-cols-2">
         <div className="grid gap-1.5">
-          <Label htmlFor="order">Event / order (optional)</Label>
-          <select
-            id="order"
-            value={orderId}
-            onChange={(e) => setOrderId(e.target.value)}
-            className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
-          >
-            <option value="">— No order —</option>
-            {events.map((e) => (
-              <option key={e.id} value={e.id}>{e.code} · {e.customerName}</option>
-            ))}
-          </select>
+          <Label htmlFor="order">Event / order</Label>
+          {lockedOrder ? (
+            <div className="flex h-9 items-center rounded-md border border-ik-rule bg-ik-paper-alt px-2 text-[13px] text-ik-ink">
+              <span className="font-mono">{lockedOrder.code}</span>
+              <span className="ml-2 truncate text-ik-ink-2">{lockedOrder.customerName}</span>
+            </div>
+          ) : (
+            <select
+              id="order"
+              value={orderId}
+              onChange={(e) => setOrderId(e.target.value)}
+              className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
+            >
+              <option value="">— No order —</option>
+              {events.map((e) => (
+                <option key={e.id} value={e.id}>{e.code} · {e.customerName}</option>
+              ))}
+            </select>
+          )}
+          {lockedOrder && (
+            <span className="text-[11px] text-ik-ink-3">
+              Linked to the event you came from — the store sees which event this is for.
+            </span>
+          )}
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="note">Note (optional)</Label>

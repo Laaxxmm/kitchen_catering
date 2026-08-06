@@ -806,6 +806,22 @@ export async function listBanquetEvents() {
   }));
 }
 
+/**
+ * One event for the request form's locked order chip. Used when the F&B
+ * team arrives from an order's event-prep screen: the order is already
+ * known, so it is shown rather than picked. Looked up directly instead of
+ * searched in listBanquetEvents() — that list is capped and drops inactive
+ * orders, and a miss there would silently unlink the requisition.
+ */
+export async function getBanquetEvent(orderId: string) {
+  await requireRole(READ_ROLES);
+  const o = await db.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, code: true, customer: { select: { name: true } } },
+  });
+  return o ? { id: o.id, code: o.code, customerName: o.customer.name } : null;
+}
+
 // ─── Banquet requisitions (F&B → store, line-by-line fulfilment) ─────────
 //
 // Replaces the old free-text requestGoodsFromStore Task. F&B service raises a
