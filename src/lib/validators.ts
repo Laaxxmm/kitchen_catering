@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Decimal } from "decimal.js";
 import {
   ApprovalDecision,
   ChefRequisitionLineStatus,
@@ -1016,6 +1017,95 @@ export const BanquetRequisitionAwaitingInput = z.object({
   unitPrice: decimalString.optional(),
   reason: z.string().max(500).nullable().optional(),
 });
+
+// Same thing for several short lines at once: the store ticks the items it
+// wants from one supplier and gets ONE draft PO carrying all of them, instead
+// of one PO per line. Per-line estimated price, one vendor for the batch.
+export const BanquetRequisitionBulkAwaitingLineInput = z.object({
+  requisitionLineId: z.string().min(1),
+  unitPrice: decimalString.optional(),
+});
+
+export const BanquetRequisitionBulkAwaitingInput = z.object({
+  requisitionId: z.string().min(1),
+  vendorId: z.string().min(1, "Pick the vendor to raise the PO on"),
+  lines: z.array(BanquetRequisitionBulkAwaitingLineInput).min(1, "Tick at least one item"),
+  reason: z.string().max(500).nullable().optional(),
+});
+
+/** One requisition line as the procurement planner needs to see it. */
+export type BanquetProcurementSource = {
+  requisitionLineId: string;
+  itemId: string;
+  sku: string | null;
+  name: string;
+  unit: string;
+  requestedQty: string;
+  issuedQty: string;
+  unitPrice?: string | null;
+};
+
+/** A PO line to create, still carrying the requisition line it came from. */
+export type BanquetProcurementPlanLine = {
+  requisitionLineId: string;
+  banquetItemId: string;
+  sku: string;
+  description: string;
+  unit: string;
+  quantity: string;
+  unitPrice: string;
+  gstRatePct: string;
+};
+
+/**
+ * Turn the picked requisition lines into PO lines — shortfall = requested
+ * minus issued, blank price defaulted. Pure, and it lives here rather than in
+ * banquet.ts because that file is "use server" (every export must be an async
+ * action) — this is the piece worth unit-testing.
+ */
+export function planBanquetProcurementLines(
+  sources: BanquetProcurementSource[],
+): BanquetProcurementPlanLine[] {
+  return sources.map((s) => {
+    const shortfall = new Decimal(s.requestedQty).minus(new Decimal(s.issuedQty));
+    if (shortfall.lte(0)) {
+      throw new Error(`${s.name}: nothing still short on this line — nothing to buy.`);
+    }
+    return {
+      requisitionLineId: s.requisitionLineId,
+      banquetItemId: s.itemId,
+      sku: s.sku ?? "",
+      description: s.name,
+      unit: s.unit,
+      quantity: shortfall.toString(),
+      // decimalString lets "" through (a legitimate "not provided") — a blank
+      // here would crash the money math in createVendorPOTx.
+      unitPrice: (s.unitPrice ?? "").trim() || "0",
+      gstRatePct: "0",
+    };
+  });
+}
+
+/**
+ * Pair each planned line with the PO line that was created for it.
+ * createVendorPOTx writes sortOrder = input index and returns lines ordered by
+ * it, so index i ↔ index i — but a wrong back-link silently breaks the GRN
+ * flip-back, so the item id is verified instead of trusted.
+ */
+export function backLinkBanquetPOLines<T extends { id: string; banquetItemId: string | null }>(
+  plan: BanquetProcurementPlanLine[],
+  poLines: T[],
+): { requisitionLineId: string; poLineId: string }[] {
+  if (poLines.length !== plan.length) {
+    throw new Error("The purchase order came back with a different number of lines — aborting.");
+  }
+  return plan.map((p, i) => {
+    if (poLines[i].banquetItemId !== p.banquetItemId) {
+      throw new Error(`Purchase order line ${i + 1} is for the wrong item — aborting.`);
+    }
+    return { requisitionLineId: p.requisitionLineId, poLineId: poLines[i].id };
+  });
+}
 
 // Bulk stock count — same shape as the kitchen's InventoryAuditPostInput:
 // each line sets an item's on-hand to the physically counted quantity.

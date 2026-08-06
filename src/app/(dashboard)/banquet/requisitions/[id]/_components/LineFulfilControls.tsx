@@ -9,6 +9,7 @@ import { Decimal } from "decimal.js";
 import { Button } from "@/components/ui/button";
 import { isNextNavigationError } from "@/lib/next-error";
 import type { ActionResult } from "@/lib/action-result";
+import { useBulkProcure } from "./BulkProcure";
 
 export interface VendorOption {
   id: string;
@@ -19,6 +20,7 @@ export interface VendorOption {
 interface Props {
   lineId: string;
   itemName: string;
+  unit: string;
   requestedQty: string;
   issuedQty: string;
   inStock: string;
@@ -29,11 +31,13 @@ interface Props {
   poLink: { poId: string; poNo: string } | null;
   onIssue: (lineId: string, qty: string) => Promise<ActionResult>;
   onRaisePO: (lineId: string, vendorId: string, unitPrice: string) => Promise<ActionResult>;
+  onCancel: (lineId: string, reason: string) => Promise<ActionResult>;
 }
 
 export function LineFulfilControls({
   lineId,
   itemName,
+  unit,
   requestedQty,
   issuedQty,
   inStock,
@@ -42,7 +46,9 @@ export function LineFulfilControls({
   poLink,
   onIssue,
   onRaisePO,
+  onCancel,
 }: Props) {
+  const bulk = useBulkProcure();
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [showPartial, setShowPartial] = useState(false);
@@ -96,6 +102,13 @@ export function LineFulfilControls({
 
   const wasAwaitingProcurement = status === BanquetRequisitionLineStatus.AWAITING_PROCUREMENT;
   const stockIsBack = stockDec.gt(0);
+  // Only a still-open, still-short line can go on a batch PO — same test the
+  // server applies before it plans the PO lines.
+  const bulkEligible =
+    !!bulk &&
+    remaining.gt(0) &&
+    (status === BanquetRequisitionLineStatus.PENDING ||
+      status === BanquetRequisitionLineStatus.PARTIALLY_ISSUED);
 
   return (
     <div className="flex flex-col gap-1 text-[12.5px]">
@@ -111,6 +124,18 @@ export function LineFulfilControls({
         )
       )}
       <div className="flex flex-wrap items-center gap-1">
+        {bulkEligible && bulk && (
+          <label className="flex items-center gap-1 text-[11.5px] text-ik-ink-3">
+            <input
+              type="checkbox"
+              checked={bulk.selected.some((l) => l.lineId === lineId)}
+              onChange={() =>
+                bulk.toggle({ lineId, itemName, unit, shortfall: remaining.toString() })
+              }
+            />
+            Buy with others
+          </label>
+        )}
         {fullPossible && (
           <Button
             type="button"
@@ -233,6 +258,24 @@ export function LineFulfilControls({
             </span>
           </span>
         )}
+        {/* Can't-provide escape hatch: cancel this one item with a reason so
+            the rest of the requisition still issues and rolls up instead of
+            freezing here. */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          className="border-alert/40 text-alert hover:bg-alert-wash"
+          onClick={() => {
+            const reason = prompt(
+              "Cancel this item — why can't it be provided? (e.g. discontinued, client removed it)",
+            );
+            if (reason && reason.trim()) call(() => onCancel(lineId, reason.trim()));
+          }}
+        >
+          Cancel item
+        </Button>
       </div>
     </div>
   );

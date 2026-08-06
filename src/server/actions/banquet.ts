@@ -29,10 +29,13 @@ import {
   BanquetIssueInput,
   BanquetReceiptInput,
   BanquetRequisitionAwaitingInput,
+  BanquetRequisitionBulkAwaitingInput,
   BanquetRequisitionInput,
   BanquetRequisitionIssueInput,
   BanquetReturnInput,
   BanquetStockCountInput,
+  backLinkBanquetPOLines,
+  planBanquetProcurementLines,
 } from "@/lib/validators";
 import {
   ActionError,
@@ -1035,14 +1038,134 @@ async function issueBanquetRequisitionLineInner(raw: unknown): Promise<{ ok: tru
 }
 
 /**
- * Raise a real vendor PO for a short requisition line. Atomically (one tx):
- * creates a DRAFT VendorPO for the shortfall (one line linked to the
- * BanquetItem via banquetItemId), flips the requisition line to
- * AWAITING_PROCUREMENT with vendorPOLineId pointing at the new PO line, and
- * recomputes the parent status. The PO then rides the normal procurement
- * lifecycle (submit → tiered approval → send → GRN); GRN acceptance posts a
- * BanquetReceipt, bumps banquet stock and flips the line back to PENDING so
- * the store can issue it (see createGRN in procurement.ts).
+ * Store cancels a single requisition line it can't provide (item discontinued,
+ * event dropped it, damaged stock) with a mandatory reason — the F&B parity of
+ * cancelChefRequisitionLine (chef-requisitions.ts:697). The line becomes
+ * CANCELLED, which counts as the store having ACTED on it, so the rest of the
+ * requisition still issues and rolls up instead of freezing on this item.
+ * Already-issued qty on a part-issued line stays issued.
+ */
+export async function cancelBanquetRequisitionLine(
+  lineId: string,
+  reason: string,
+): Promise<ActionResult> {
+  try {
+    return await cancelBanquetRequisitionLineInner(lineId, reason);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function cancelBanquetRequisitionLineInner(
+  lineId: string,
+  reason: string,
+): Promise<{ ok: true }> {
+  const session = await requireRole(REQUISITION_ROLES);
+  if (!reason?.trim()) throw new ActionError("A reason is required to cancel an item.");
+
+  const result = await db.$transaction(async (tx) => {
+    // Same lock order as the issue path: line row first, then the parent.
+    await tx.$executeRaw`SELECT 1 FROM "BanquetRequisitionLine" WHERE "id" = ${lineId} FOR UPDATE`;
+    const line = await tx.banquetRequisitionLine.findUnique({
+      where: { id: lineId },
+      include: {
+        item: { select: { name: true } },
+        requisition: { select: { id: true, status: true, requisitionNo: true, createdById: true } },
+      },
+    });
+    if (!line) throw new ActionError("Requisition line not found");
+    if (line.status === BanquetRequisitionLineStatus.ISSUED) {
+      throw new ActionError("This item is already fully issued — nothing to cancel.");
+    }
+    if (line.status === BanquetRequisitionLineStatus.CANCELLED) {
+      throw new ActionError("This item is already cancelled.");
+    }
+    if (
+      line.requisition.status !== BanquetRequisitionStatus.SUBMITTED &&
+      line.requisition.status !== BanquetRequisitionStatus.PARTIALLY_ISSUED
+    ) {
+      throw new ActionError(
+        `Cannot change a ${line.requisition.status.toLowerCase()} requisition`,
+      );
+    }
+
+    await tx.$executeRaw`SELECT 1 FROM "BanquetRequisition" WHERE "id" = ${line.requisition.id} FOR UPDATE`;
+    await tx.banquetRequisitionLine.update({
+      where: { id: lineId },
+      data: {
+        status: BanquetRequisitionLineStatus.CANCELLED,
+        notes: `Cancelled by store: ${reason.trim()}`,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "BANQUET_REQUISITION_LINE_CANCELLED",
+        entity: "BanquetRequisitionLine",
+        entityId: lineId,
+        payloadHash: sha256Json({ reason: reason.trim(), item: line.item.name }),
+      },
+    });
+
+    await recomputeBanquetReqStatus(tx, line.requisition.id, session.user.id);
+
+    return {
+      reqId: line.requisition.id,
+      requisitionNo: line.requisition.requisitionNo,
+      createdById: line.requisition.createdById,
+      itemName: line.item.name,
+    };
+  });
+
+  // Tell the requester an item won't come so they can plan around it. Skipped
+  // when they cancelled it themselves (F&B roles can fulfil their own).
+  if (result.createdById !== session.user.id) {
+    deferAfterResponse("banquet-line-cancel:notify", () =>
+      createNotification({
+        userId: result.createdById,
+        kind: "GENERIC",
+        title: `${result.itemName} cancelled on ${result.requisitionNo}`,
+        body: `The store couldn't provide it — reason: ${reason.trim()}.`,
+        link: `/banquet/requisitions/${result.reqId}`,
+        dedupeKey: `banquet-line-cancel:${lineId}`,
+      }),
+    );
+  }
+
+  revalidatePath("/banquet/requisitions");
+  revalidatePath(`/banquet/requisitions/${result.reqId}`);
+  revalidatePath("/banquet");
+  return { ok: true };
+}
+
+/**
+ * Raise ONE real vendor PO covering one or more short requisition lines.
+ * Atomically (one tx): creates a DRAFT VendorPO with a line per picked
+ * requisition line (linked to the BanquetItem via banquetItemId), flips each
+ * requisition line to AWAITING_PROCUREMENT with vendorPOLineId pointing at ITS
+ * own PO line, and recomputes the parent status once. The PO then rides the
+ * normal procurement lifecycle (submit → tiered approval → send → GRN); GRN
+ * acceptance posts a BanquetReceipt, bumps banquet stock and flips the lines
+ * back to PENDING so the store can issue them (see createGRN in
+ * procurement.ts).
+ *
+ * Buying six short items from one supplier used to mean six draft POs (one per
+ * line) — this is the one-PO batch the store asked for.
+ */
+export async function markBanquetLinesAwaitingProcurement(
+  raw: unknown,
+): Promise<ActionResultWith<{ poId: string; poNo: string }>> {
+  try {
+    return await markBanquetLinesAwaitingProcurementInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+/**
+ * Single-line form of the above, kept for the per-line "Raise PO for
+ * shortfall" control (and its current signature/callers). Thin wrapper: it
+ * finds the line's parent and calls the batch core with one entry.
  */
 export async function markBanquetLineAwaitingProcurement(raw: unknown): Promise<ActionResult> {
   try {
@@ -1053,112 +1176,170 @@ export async function markBanquetLineAwaitingProcurement(raw: unknown): Promise<
 }
 
 async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ ok: true }> {
-  const session = await requireRole(REQUISITION_ROLES);
+  await requireRole(REQUISITION_ROLES);
   const input = BanquetRequisitionAwaitingInput.parse(raw);
+  // Only to find the parent — the core re-locks the line, re-checks its
+  // status and verifies it really belongs to this requisition.
+  const line = await db.banquetRequisitionLine.findUnique({
+    where: { id: input.requisitionLineId },
+    select: { requisitionId: true },
+  });
+  if (!line) throw new ActionError("Requisition line not found");
+  return await markBanquetLinesAwaitingProcurementInner({
+    requisitionId: line.requisitionId,
+    vendorId: input.vendorId,
+    reason: input.reason ?? null,
+    lines: [{ requisitionLineId: input.requisitionLineId, unitPrice: input.unitPrice }],
+  });
+}
+
+async function markBanquetLinesAwaitingProcurementInner(
+  raw: unknown,
+): Promise<{ ok: true; poId: string; poNo: string }> {
+  const session = await requireRole(REQUISITION_ROLES);
+  const input = BanquetRequisitionBulkAwaitingInput.parse(raw);
+  const lineIds = input.lines.map((l) => l.requisitionLineId);
+  if (new Set(lineIds).size !== lineIds.length) {
+    throw new ActionError("The same item is ticked twice — refresh and try again.");
+  }
 
   const result = await db.$transaction(async (tx) => {
-    // M12: lock the line row before reading so two "Raise PO" taps serialise —
+    // M12: lock the line rows before reading so two "Raise PO" taps serialise —
     // the loser waits, then the status check / guarded flip below rejects it
-    // instead of spawning a second draft PO for the same shortfall.
-    await tx.$executeRaw`SELECT 1 FROM "BanquetRequisitionLine" WHERE "id" = ${input.requisitionLineId} FOR UPDATE`;
-    const line = await tx.banquetRequisitionLine.findUnique({
-      where: { id: input.requisitionLineId },
-      include: {
-        requisition: { select: { id: true, status: true, requisitionNo: true, createdById: true } },
-        item: { select: { id: true, name: true, sku: true, unit: true } },
-      },
-    });
-    if (!line) throw new ActionError("Requisition line not found");
-    if (
-      line.status !== BanquetRequisitionLineStatus.PENDING &&
-      line.status !== BanquetRequisitionLineStatus.PARTIALLY_ISSUED
-    ) {
-      throw new ActionError("Only pending or part-issued lines can be sent to procurement");
+    // instead of spawning a second draft PO for the same shortfall. Locked in
+    // a stable order (as lockBanquetItemRows does) so two overlapping batches
+    // can't deadlock; then the parent, same order as the issue/cancel paths.
+    for (const id of [...lineIds].sort()) {
+      await tx.$executeRaw`SELECT 1 FROM "BanquetRequisitionLine" WHERE "id" = ${id} FOR UPDATE`;
     }
-    if (
-      line.requisition.status !== BanquetRequisitionStatus.SUBMITTED &&
-      line.requisition.status !== BanquetRequisitionStatus.PARTIALLY_ISSUED
-    ) {
-      throw new ActionError(
-        `Cannot change a ${line.requisition.status.toLowerCase()} requisition`,
-      );
-    }
-    const shortfall = new Decimal(line.requestedQty.toString()).minus(
-      new Decimal(line.issuedQty.toString()),
-    );
-    if (shortfall.lte(0)) throw new ActionError("No shortfall to procure");
+    await tx.$executeRaw`SELECT 1 FROM "BanquetRequisition" WHERE "id" = ${input.requisitionId} FOR UPDATE`;
 
-    // Real DRAFT PO for the shortfall, same tx — the shared creation core
+    const req = await tx.banquetRequisition.findUnique({
+      where: { id: input.requisitionId },
+      select: { id: true, status: true, requisitionNo: true, createdById: true },
+    });
+    if (!req) throw new ActionError("Requisition not found");
+    if (
+      req.status !== BanquetRequisitionStatus.SUBMITTED &&
+      req.status !== BanquetRequisitionStatus.PARTIALLY_ISSUED
+    ) {
+      throw new ActionError(`Cannot change a ${req.status.toLowerCase()} requisition`);
+    }
+
+    const rows = await tx.banquetRequisitionLine.findMany({
+      where: { id: { in: lineIds } },
+      include: { item: { select: { id: true, name: true, sku: true, unit: true } } },
+    });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    // Kept in the order the store ticked them — the PO lines come back in that
+    // same order, which is what the back-link below relies on.
+    const plan = planBanquetProcurementLines(
+      input.lines.map((entry) => {
+        const line = byId.get(entry.requisitionLineId);
+        if (!line) throw new ActionError("Requisition line not found");
+        if (line.requisitionId !== req.id) {
+          throw new ActionError("That item isn't on this requisition — refresh and try again.");
+        }
+        if (
+          line.status !== BanquetRequisitionLineStatus.PENDING &&
+          line.status !== BanquetRequisitionLineStatus.PARTIALLY_ISSUED
+        ) {
+          throw new ActionError(
+            `${line.item.name}: only pending or part-issued lines can be sent to procurement`,
+          );
+        }
+        return {
+          requisitionLineId: line.id,
+          itemId: line.itemId,
+          sku: line.item.sku,
+          name: line.item.name,
+          unit: line.item.unit,
+          requestedQty: line.requestedQty.toString(),
+          issuedQty: line.issuedQty.toString(),
+          unitPrice: entry.unitPrice,
+        };
+      }),
+    );
+
+    // ONE DRAFT PO for the whole batch, same tx — the shared creation core
     // computes totals, audits VENDOR_PO_CREATED and returns the line ids.
     // The caller's gate (REQUISITION_ROLES) governs this banquet-initiated
     // PO; it then rides the normal submit → approve lifecycle.
+    // banquetReqLineId is deliberately NOT passed: the core's own back-link
+    // skips silently on a race, and we want the guarded flip below to fail loud.
     const po = await createVendorPOTx(tx, session.user.id, {
       vendorId: input.vendorId,
       procurementType: "STANDARD",
       placeOfSupplyStateCode: indefineStateCode(),
-      notes: `For banquet requisition ${line.requisition.requisitionNo} — ${line.item.name} shortfall`,
-      lines: [
-        {
-          banquetItemId: line.item.id,
-          sku: line.item.sku ?? "",
-          description: line.item.name,
-          unit: line.item.unit,
-          quantity: shortfall.toString(),
-          unitPrice: input.unitPrice ?? "0",
-          gstRatePct: "0",
-        },
-      ],
+      notes:
+        plan.length === 1
+          ? `For banquet requisition ${req.requisitionNo} — ${plan[0].description} shortfall`
+          : `For banquet requisition ${req.requisitionNo} — shortfall on ${plan.length} items`,
+      // Same order as `plan` — createVendorPOTx keeps it (sortOrder = index),
+      // which is what backLinkBanquetPOLines then verifies item by item.
+      lines: plan.map((l) => ({
+        banquetItemId: l.banquetItemId,
+        sku: l.sku,
+        description: l.description,
+        unit: l.unit,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        gstRatePct: l.gstRatePct,
+      })),
     });
-    const poLine = po.lines[0];
-    if (!poLine) throw new ActionError("PO was created without lines — aborting");
+    const backLinks = backLinkBanquetPOLines(plan, po.lines);
 
     // M12: guarded flip — only a still-open line moves. If a concurrent tap
-    // already sent it to procurement (count 0) we abort, rolling back the PO
+    // already sent one to procurement (count 0) we abort, rolling back the PO
     // just created in this tx so no orphan draft is left behind.
-    const flipped = await tx.banquetRequisitionLine.updateMany({
-      where: {
-        id: line.id,
-        status: {
-          in: [
-            BanquetRequisitionLineStatus.PENDING,
-            BanquetRequisitionLineStatus.PARTIALLY_ISSUED,
-          ],
+    for (const link of backLinks) {
+      const flipped = await tx.banquetRequisitionLine.updateMany({
+        where: {
+          id: link.requisitionLineId,
+          status: {
+            in: [
+              BanquetRequisitionLineStatus.PENDING,
+              BanquetRequisitionLineStatus.PARTIALLY_ISSUED,
+            ],
+          },
         },
-      },
-      data: {
-        status: BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
-        notes: input.reason ?? line.notes,
-        vendorPOLineId: poLine.id,
-      },
-    });
-    if (flipped.count === 0) {
-      throw new ActionError("A purchase is already running for this line — refresh.");
+        data: {
+          status: BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
+          notes: input.reason?.trim() || undefined,
+          vendorPOLineId: link.poLineId,
+        },
+      });
+      if (flipped.count === 0) {
+        throw new ActionError("A purchase is already running for one of these items — refresh.");
+      }
     }
 
-    await recomputeBanquetReqStatus(tx, line.requisition.id, session.user.id);
+    await recomputeBanquetReqStatus(tx, req.id, session.user.id);
 
+    // One audit row for the batch (the PO's own VENDOR_PO_CREATED row carries
+    // the money side); it's a requisition-level event, hence the entity.
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
         action: "BANQUET_LINE_AWAITING_PROCUREMENT",
-        entity: "BanquetRequisitionLine",
-        entityId: line.id,
+        entity: "BanquetRequisition",
+        entityId: req.id,
         payloadHash: sha256Json({
-          shortfall: shortfall.toString(),
+          lines: backLinks,
           reason: input.reason ?? null,
           vendorId: input.vendorId,
           poId: po.id,
-          poLineId: poLine.id,
         }),
       },
     });
     return {
-      reqId: line.requisition.id,
-      requisitionNo: line.requisition.requisitionNo,
-      createdById: line.requisition.createdById,
-      itemName: line.item.name,
-      shortfall: shortfall.toString(),
-      unit: line.item.unit,
+      reqId: req.id,
+      requisitionNo: req.requisitionNo,
+      createdById: req.createdById,
+      summary:
+        plan.length === 1
+          ? `${plan[0].quantity} ${plan[0].unit} ${plan[0].description}`
+          : `${plan.length} items`,
       poId: po.id,
       poNo: po.poNo,
     };
@@ -1171,7 +1352,7 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
     notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
       kind: "GENERIC",
       title: `PO ${result.poNo} raised for ${result.requisitionNo}`,
-      body: `${result.shortfall} ${result.unit} ${result.itemName} — submit it for approval, then record the GRN when goods arrive.`,
+      body: `${result.summary} — submit it for approval, then record the GRN when goods arrive.`,
       link: `/procurement/purchase-orders/${result.poId}`,
       dedupeKey: `banquet-line-procure:${result.poId}`,
     }),
@@ -1182,8 +1363,8 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
       createNotification({
         userId: result.createdById,
         kind: "GENERIC",
-        title: `${result.itemName} is being procured (${result.requisitionNo})`,
-        body: `The store is short ${result.shortfall} ${result.unit} — purchase order ${result.poNo} has been raised; you'll get it once goods arrive.`,
+        title: `${result.summary} being procured (${result.requisitionNo})`,
+        body: `The store is short — purchase order ${result.poNo} has been raised; you'll get it once goods arrive.`,
         link: `/banquet/requisitions/${result.reqId}`,
         dedupeKey: `banquet-line-procure-req:${result.poId}`,
       }),
@@ -1193,7 +1374,7 @@ async function markBanquetLineAwaitingProcurementInner(raw: unknown): Promise<{ 
   revalidatePath("/banquet/requisitions");
   revalidatePath(`/banquet/requisitions/${result.reqId}`);
   revalidatePath("/procurement/purchase-orders");
-  return { ok: true };
+  return { ok: true, poId: result.poId, poNo: result.poNo };
 }
 
 /**
