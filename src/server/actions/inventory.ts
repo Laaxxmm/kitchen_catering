@@ -10,6 +10,7 @@ import {
   IngredientReceiptInput,
   IngredientIssueInput,
 } from "@/lib/validators";
+import { nextGPItemCode } from "@/lib/sequences";
 import { newMovingAverage } from "@/lib/inventory-cost";
 import { unitsEquivalent } from "@/lib/units";
 import { toDecimal } from "@/lib/money";
@@ -102,17 +103,7 @@ async function createIngredientInner(raw: unknown): Promise<{ ok: true; id: stri
   const session = await requireRole(CATALOG_CREATE_ROLES);
   const input = IngredientInput.parse(raw);
 
-  // Friendly duplicate check up front (the DB unique on sku still backstops
-  // this — actionFailure maps its P2002 to a readable message).
-  const dupe = await db.ingredient.findFirst({
-    where: { sku: { equals: input.sku, mode: "insensitive" } },
-    select: { id: true, name: true },
-  });
-  if (dupe) {
-    throw new ActionError(`SKU "${input.sku}" is already used by "${dupe.name}".`);
-  }
-
-  // Block duplicate NAMES too (case-insensitive). Two ingredients with the
+  // Block duplicate NAMES (case-insensitive). Two ingredients with the
   // same name silently split stock — goods received on one are invisible to a
   // requisition pointing at the other (the "1150 received, 0 on hand" bug).
   // Force reuse of the existing item instead of a twin.
@@ -123,15 +114,18 @@ async function createIngredientInner(raw: unknown): Promise<{ ok: true; id: stri
   if (nameDupe) {
     throw new ActionError(
       nameDupe.active
-        ? `An ingredient named "${input.name.trim()}" already exists (SKU ${nameDupe.sku}). Pick it from the list instead of adding a new one.`
-        : `A hidden ingredient named "${input.name.trim()}" already exists (SKU ${nameDupe.sku}). Unhide it from Kitchen stock → Show hidden items instead of adding a new one.`,
+        ? `An ingredient named "${input.name.trim()}" already exists (${nameDupe.sku}). Pick it from the list instead of adding a new one.`
+        : `A hidden ingredient named "${input.name.trim()}" already exists (${nameDupe.sku}). Unhide it from Kitchen stock → Show hidden items instead of adding a new one.`,
     );
   }
 
   const row = await db.$transaction(async (tx) => {
+    // Code is assigned, never typed — the whole point of GP codes is that
+    // nobody invents an identifier for an item that already exists.
+    const sku = await nextGPItemCode(tx);
     const created = await tx.ingredient.create({
       data: {
-        sku: input.sku,
+        sku,
         name: input.name,
         category: input.category ?? null,
         ...(input.subStore ? { subStore: input.subStore } : {}),
@@ -154,7 +148,7 @@ async function createIngredientInner(raw: unknown): Promise<{ ok: true; id: stri
         action: "INGREDIENT_CREATED",
         entity: "Ingredient",
         entityId: created.id,
-        payloadHash: sha256Json({ sku: input.sku, name: input.name }),
+        payloadHash: sha256Json({ sku, name: input.name }),
       },
     });
     return created;
@@ -179,7 +173,7 @@ async function updateIngredientInner(id: string, raw: unknown): Promise<{ ok: tr
     await tx.ingredient.update({
       where: { id },
       data: {
-        sku: input.sku,
+        // No sku: a GP code is permanent once assigned.
         name: input.name,
         category: input.category ?? null,
         ...(input.subStore ? { subStore: input.subStore } : {}),

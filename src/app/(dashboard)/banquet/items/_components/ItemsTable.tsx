@@ -51,7 +51,6 @@ export function ItemsTable({
     startOpen ? { id: undefined } : null,
   );
   const [name, setName] = useState("");
-  const [sku, setSku] = useState("");
   const [category, setCategory] = useState("");
   const [unit, setUnit] = useState("piece");
   const [minStock, setMinStock] = useState("");
@@ -59,13 +58,12 @@ export function ItemsTable({
 
   function startCreate() {
     setEditing({ id: undefined });
-    setName(""); setSku(""); setCategory("");
+    setName(""); setCategory("");
     setUnit("piece"); setMinStock(""); setOpeningStock("");
   }
   function startEdit(it: Item) {
     setEditing(it);
     setName(it.name);
-    setSku(it.sku ?? "");
     setCategory(it.category ?? "");
     setUnit(it.unit);
     setMinStock(it.minStock ?? "");
@@ -83,7 +81,6 @@ export function ItemsTable({
         const res = await upsertBanquetItem(
           {
             name: name.trim(),
-            sku: sku.trim() || null,
             category: category.trim() || null,
             unit: unit.trim() || "piece",
             minStock: minStock.trim() || null,
@@ -152,7 +149,6 @@ export function ItemsTable({
         const res = await upsertBanquetItem(
           {
             name: it.name,
-            sku: it.sku,
             category: it.category,
             unit: it.unit,
             minStock: it.minStock,
@@ -186,8 +182,13 @@ export function ItemsTable({
               <Input id="name" placeholder="e.g. Ripple Tea Cups 100ml" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="sku">SKU</Label>
-              <Input id="sku" value={sku} onChange={(e) => setSku(e.target.value)} />
+              <Label htmlFor="code">Item code</Label>
+              <div id="code" className="flex h-9 items-center font-mono text-[13px] text-ik-ink-2">
+                {editing.sku ?? "—"}
+              </div>
+              <p className="text-[10.5px] text-ik-ink-3">
+                {editing.id ? "Permanent — cannot be changed." : "Assigned automatically on save."}
+              </p>
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="category">Category</Label>
@@ -229,9 +230,9 @@ export function ItemsTable({
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>Code</TableHead>
               <TableHead>Item</TableHead>
               <TableHead>Category</TableHead>
-              <TableHead>SKU</TableHead>
               <TableHead>Unit</TableHead>
               <TableHead className="text-right">In stock</TableHead>
               <TableHead className="text-right">Min</TableHead>
@@ -244,11 +245,11 @@ export function ItemsTable({
               const low = it.minStock !== null && Number(it.currentStock) <= Number(it.minStock);
               return (
                 <TableRow key={it.id}>
+                  <TableCell className="whitespace-nowrap font-mono text-[12px] text-ik-ink-2">{it.sku ?? "—"}</TableCell>
                   <TableCell className="font-medium">{it.name}</TableCell>
                   <TableCell className="text-[11.5px] uppercase tracking-wide text-ik-ink-2">
                     {it.category ?? "—"}
                   </TableCell>
-                  <TableCell className="font-mono text-[11.5px] text-ik-ink-2">{it.sku ?? "—"}</TableCell>
                   <TableCell className="text-[12.5px]">{it.unit}</TableCell>
                   <TableCell className="text-right">
                     <span className={"font-mono " + (low ? "text-alert" : "text-ik-ink")}>{it.currentStock}</span>

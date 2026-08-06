@@ -110,7 +110,7 @@ export default async function IngredientsPage({
         <input
           name="q"
           defaultValue={sp.q ?? ""}
-          placeholder="Search by name or SKU…"
+          placeholder="Search by name or code…"
           className="h-9 w-64 rounded-md border border-ik-rule bg-ik-card px-3 text-[13px]"
         />
         <Button type="submit" variant="outline" size="sm">Search</Button>
@@ -163,6 +163,7 @@ function IngredientTable({
     <Table>
       <TableHeader>
         <TableRow>
+          <TableHead>Code</TableHead>
           <TableHead>Name</TableHead>
           <TableHead className="text-right">On hand</TableHead>
           <TableHead className="text-right">Reorder at</TableHead>
@@ -173,9 +174,9 @@ function IngredientTable({
       <TableBody>
         {rows.map((r) => (
           <TableRow key={r.id}>
+            <TableCell className="whitespace-nowrap font-mono text-[12px] text-ik-ink-2">{r.sku}</TableCell>
             <TableCell>
               <Link href={`/inventory/ingredients/${r.id}`} className="text-brand hover:underline">{r.name}</Link>
-              <span className="ml-2 font-mono text-[11px] text-ik-ink-3">{r.sku}</span>
             </TableCell>
             <TableCell className="text-right font-mono">{r.onHand} <span className="text-ik-ink-3">{r.unit}</span></TableCell>
             <TableCell className="text-right"><ReorderCell id={r.id} value={r.reorder} canEdit={canEdit} /></TableCell>

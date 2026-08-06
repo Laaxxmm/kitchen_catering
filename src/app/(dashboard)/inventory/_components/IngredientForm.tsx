@@ -13,6 +13,8 @@ import type { ActionResultWith } from "@/lib/action-result";
 
 interface Props {
   defaults?: Partial<IngredientInputT>;
+  /** Assigned GP code — shown read-only when editing, absent on create. */
+  code?: string;
   onSubmit: (input: IngredientInputT) => Promise<ActionResultWith<{ id: string }>>;
   submitLabel?: string;
   redirectOnSuccess?: string;
@@ -20,12 +22,11 @@ interface Props {
   hideOpeningFields?: boolean;
 }
 
-export function IngredientForm({ defaults, onSubmit, submitLabel = "Save", redirectOnSuccess, hideOpeningFields }: Props) {
+export function IngredientForm({ defaults, code, onSubmit, submitLabel = "Save", redirectOnSuccess, hideOpeningFields }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const { register, handleSubmit, formState: { errors } } = useForm<IngredientInputT>({
+  const { register, handleSubmit } = useForm<IngredientInputT>({
     defaultValues: {
-      sku: defaults?.sku ?? "",
       name: defaults?.name ?? "",
       category: defaults?.category ?? "",
       unit: defaults?.unit ?? "kg",
@@ -65,9 +66,13 @@ export function IngredientForm({ defaults, onSubmit, submitLabel = "Save", redir
     <form onSubmit={handleSubmit(submit)} className="grid gap-4 max-w-2xl">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="grid gap-1">
-          <Label htmlFor="sku">SKU</Label>
-          <Input id="sku" {...register("sku", { required: true })} />
-          {errors.sku && <span className="text-[11px] text-alert">SKU is required</span>}
+          <Label htmlFor="code">Item code</Label>
+          <div id="code" className="flex h-9 items-center font-mono text-[13px] text-ik-ink-2">
+            {code ?? "—"}
+          </div>
+          <p className="text-[10.5px] text-ik-ink-3">
+            {code ? "Permanent — cannot be changed." : "Assigned automatically on save."}
+          </p>
         </div>
         <div className="grid gap-1 sm:col-span-2">
           <Label htmlFor="name">Name</Label>

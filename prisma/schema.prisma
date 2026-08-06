@@ -673,7 +673,12 @@ enum IngredientSubStore {
 
 model Ingredient {
   id                String             @id @default(cuid())
+  // GP item code (GP-001…) assigned by nextGPItemCode from a counter shared
+  // with BanquetItem — one code never means two different items.
   sku               String             @unique
+  // Whatever `sku` held before the GP codes went in (supplier part numbers,
+  // import codes). Kept so the switch is reversible; nothing reads it.
+  legacySku         String?
   name              String
   category          String? // free-text legacy category — kept for backwards compat
   // Single source of truth for approval routing per the workflow matrix.
@@ -1997,6 +2002,13 @@ model VendorCodeSequence {
   next Int @default(1)
 }
 
+// Shared by BOTH item catalogues (Ingredient + BanquetItem), not FY-scoped:
+// a GP code is permanent and must never mean two different items.
+model GPItemCodeSequence {
+  year Int @id
+  next Int @default(1)
+}
+
 model VendorPONumberSequence {
   year Int @id
   next Int @default(1)
@@ -2403,7 +2415,9 @@ model MaintenanceActivityLine {
 model BanquetItem {
   id           String   @id @default(cuid())
   name         String
+  // GP item code — same counter as Ingredient.sku, see nextGPItemCode.
   sku          String?
+  legacySku    String?
   // Free-text sub-grouping for the catalog: "Packaging", "Tissue",
   // "Tape", "Ketchup", "Cutlery", "Foil"… seeded from the FnB Excel.
   category     String?

@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { isNextNavigationError } from "@/lib/next-error";
 import { createBanquetRequisition } from "@/server/actions/banquet";
 
-interface Item { id: string; name: string; unit: string; currentStock: string }
+interface Item { id: string; sku: string | null; name: string; unit: string; currentStock: string }
 interface Event { id: string; code: string; customerName: string }
 interface Line { itemId: string; qty: string }
 
@@ -78,8 +78,11 @@ export function RequestForm({ items, events }: { items: Item[]; events: Event[] 
                     className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
                   >
                     <option value="">— Pick item —</option>
+                    {/* Code first so the browser's type-ahead finds "GP-045". */}
                     {items.map((x) => (
-                      <option key={x.id} value={x.id}>{x.name} (have {x.currentStock} {x.unit})</option>
+                      <option key={x.id} value={x.id}>
+                        {x.sku ? `${x.sku} · ` : ""}{x.name} (have {x.currentStock} {x.unit})
+                      </option>
                     ))}
                   </select>
                 </div>

@@ -28,7 +28,7 @@ export default async function BanquetRequestPage() {
         }
       />
       <RequestForm
-        items={items.map((i) => ({ id: i.id, name: i.name, unit: i.unit, currentStock: i.currentStock.toString() }))}
+        items={items.map((i) => ({ id: i.id, sku: i.sku, name: i.name, unit: i.unit, currentStock: i.currentStock.toString() }))}
         events={events.map((e) => ({ id: e.id, code: e.code, customerName: e.customerName }))}
       />
     </>

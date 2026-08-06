@@ -35,6 +35,7 @@ async function nextSequenceValue(
     | "GRNNumberSequence"
     | "VendorBillNumberSequence"
     | "VendorCodeSequence"
+    | "GPItemCodeSequence"
     | "PettyCashVoucherNumberSequence",
   storageYear: number,
 ): Promise<number> {
@@ -116,6 +117,21 @@ export async function nextVendorBillNumber(tx: Tx): Promise<string> {
 export async function nextVendorCode(tx: Tx): Promise<string> {
   const n = await nextSequenceValue(tx, "VendorCodeSequence", 0);
   return `V-${String(n).padStart(4, "0")}`;
+}
+
+/** Padded to 3, never truncated — item 1000 is GP-1000, not GP-000. */
+export function formatGPItemCode(n: number): string {
+  return `GP-${String(n).padStart(3, "0")}`;
+}
+
+/**
+ * Item code for BOTH stores — kitchen (Ingredient) and F&B (BanquetItem)
+ * draw from the one GPItemCodeSequence slot (year=0, not FY-scoped), so a
+ * code identifies exactly one item across the whole operation.
+ */
+export async function nextGPItemCode(tx: Tx): Promise<string> {
+  const n = await nextSequenceValue(tx, "GPItemCodeSequence", 0);
+  return formatGPItemCode(n);
 }
 
 // ─── Finance (Phase 3) ───────────────────────────────────────────────────

@@ -114,10 +114,11 @@ export type CustomerGroupInputT = z.infer<typeof CustomerGroupInput>;
 // INGREDIENT
 // =====================================================================
 
+// No `sku`: the GP code is assigned by nextGPItemCode on create and is
+// permanent, so it is never user input on either the create or update path.
 export const IngredientInput = z.object({
   // Trimmed: an untrimmed "Paneer " matched nothing and became a second
   // ingredient, splitting stock away from "Paneer" and stranding GRNs.
-  sku: z.string().trim().min(1).max(40),
   name: z.string().trim().min(1).max(160),
   category: z.string().max(60).nullable().optional(),
   // Sub-store discriminator — drives the per-category requisition
@@ -942,9 +943,9 @@ export const MaintenanceActivityInput = z.object({
 // BANQUET STORE (F&B service-side packaging)
 // =====================================================================
 
+// No `sku` — same as IngredientInput, the GP code is assigned, not typed.
 export const BanquetItemInput = z.object({
   name: z.string().min(2).max(160),
-  sku: z.string().max(60).nullable().optional(),
   category: z.string().max(60).nullable().optional(),
   unit: z.string().min(1).max(20).default("piece"),
   minStock: decimalString.nullable().optional(),

@@ -17,7 +17,7 @@ import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import { EVENT_DELIVERY_CHANNEL_LIST } from "@/lib/order-channels";
 import { createNotification, notifyRoles } from "@/server/notification-core";
 import { deferAfterResponse } from "@/server/defer";
-import { nextBanquetRequisitionNumber } from "@/lib/sequences";
+import { nextBanquetRequisitionNumber, nextGPItemCode } from "@/lib/sequences";
 import {
   cancelBanquetRequisitionsWithPOs,
   lockBanquetItemRows,
@@ -102,7 +102,7 @@ async function upsertBanquetItemInner(
         where: { id },
         data: {
           name: input.name,
-          sku: input.sku ?? null,
+          // No sku: a GP code is permanent once assigned.
           category: input.category ?? null,
           unit: input.unit,
           minStock: input.minStock ? new Prisma.Decimal(input.minStock) : null,
@@ -124,7 +124,8 @@ async function upsertBanquetItemInner(
     const created = await tx.banquetItem.create({
       data: {
         name: input.name,
-        sku: input.sku ?? null,
+        // Same counter as the kitchen catalogue — one code, one item.
+        sku: await nextGPItemCode(tx),
         category: input.category ?? null,
         unit: input.unit,
         minStock: input.minStock ? new Prisma.Decimal(input.minStock) : null,

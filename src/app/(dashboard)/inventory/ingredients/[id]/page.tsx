@@ -71,8 +71,8 @@ export default async function IngredientDetailPage({ params }: { params: Promise
         }
       />
       <IngredientForm
+        code={ingredient.sku}
         defaults={{
-          sku: ingredient.sku,
           name: ingredient.name,
           category: ingredient.category,
           subStore: ingredient.subStore,
