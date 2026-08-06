@@ -22,6 +22,7 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
     notes: string | null;
     termsMd: string | null;
     poRef: string | null;
+    finalHeadcount: number | null;
     lines: Array<{
       description: string;
       hsnSac: string | null;
@@ -42,12 +43,17 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
     <>
       <PageHeader
         eyebrow={`Invoice · ${invoice.invoiceNo} · DRAFT`}
-        title="Edit lines"
-        description="Edit allowed while invoice is in DRAFT only. Issuing the invoice locks the lines."
+        title="Edit lines & pax"
+        description={
+          invoice.approvedAt
+            ? "This invoice is already approved for release. Saving any change withdraws that approval — a manager or admin has to sign it off again before it can go to the customer."
+            : "Edit allowed while invoice is in DRAFT only. Saving sends it to a manager or admin for approval; issuing the invoice locks the lines."
+        }
       />
       <InvoiceLineEditor
         mode="edit"
         customerLabel={invoice.customer.name}
+        finalHeadcount={invoice.finalHeadcount ?? invoice.order?.headcount ?? null}
         defaults={{
           placeOfSupplyStateCode: invoice.placeOfSupplyStateCode,
           dueDate: invoice.dueAt ? invoice.dueAt.toISOString().slice(0, 10) : null,

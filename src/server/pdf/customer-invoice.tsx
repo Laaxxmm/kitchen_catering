@@ -198,13 +198,14 @@ interface InvoicePDFData {
   customer: { name: string; address: string };
 
   /**
-   * LIVE order snapshot at render time (null for adhoc / consolidated folio
-   * invoices, which have no single order). When present the bill prints as
-   * ONE consolidated event line with the CURRENT headcount and meal — the
-   * invoice's own lines are a creation-time snapshot and go stale the moment
-   * the order is revised (100 → 200 pax).
+   * The billed event (null for adhoc / consolidated folio invoices, which
+   * have no single order). When present the bill prints as ONE consolidated
+   * event line. `headcount` must be the INVOICE's own finalHeadcount — the
+   * live order moves after invoicing (100 booked, 120 fed) and the printed
+   * rate is subtotal ÷ headcount, so taking it from anywhere but the
+   * invoice makes the rate disagree with the invoice's own total.
    */
-  order?: { headcount: number; mealType: string } | null;
+  order?: { headcount: number | null; mealType: string } | null;
 
   lines: InvoiceLine[];
   subtotal: string | number;
@@ -234,17 +235,18 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
   const dateStr = data.issuedAt ? formatIST(data.issuedAt, "dd.MM.yyyy") : "";
 
   // An order-linked bill is ONE line — the customer bought a meal for N pax,
-  // not a list of dishes. Pax + meal come from the LIVE order; the taxable
-  // amount stays exactly as invoiced, so the printed rate is the per-head
-  // share of it. Adhoc / folio invoices (no order) keep their own lines.
+  // not a list of dishes. Pax comes from the invoice's own final headcount
+  // and the rate is the per-head share of the taxable amount on this same
+  // document, so the two can never contradict each other.
   const days = 1; // no per-line day count is stored; the client's format defaults to 1
+  const eventPax = data.order?.headcount ?? 0;
   const rows = data.order
     ? [{
         particular: [`${mealLabel(data.order.mealType)} catering`, data.orderCode]
           .filter(Boolean)
           .join(" — "),
-        pax: data.order.headcount,
-        rate: data.order.headcount > 0 ? subtotal / data.order.headcount : subtotal,
+        pax: eventPax > 0 ? eventPax : "",
+        rate: eventPax > 0 ? subtotal / eventPax : subtotal,
         taxable: subtotal,
       }]
     : data.lines.map((l) => ({
@@ -411,11 +413,11 @@ export async function renderCustomerInvoicePDF(input: {
   dueAt?: Date | null;
   orderCode?: string | null;
   /**
-   * Live order fields read at render time — pass these for every order-linked
-   * invoice so the printed pax/meal follow order revisions. Omit for adhoc /
-   * consolidated invoices (they print their own lines).
+   * The billed event — pass `headcount: invoice.finalHeadcount` (never the
+   * live order's), plus the meal, for every order-linked invoice. Omit for
+   * adhoc / consolidated invoices (they print their own lines).
    */
-  order?: { headcount: number; mealType: string } | null;
+  order?: { headcount: number | null; mealType: string } | null;
   placeOfSupplyStateCode: string;
   irn?: string | null;
   ackNo?: string | null;

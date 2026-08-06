@@ -25,9 +25,14 @@ import { isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels
 import { nextCustomerInvoiceNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { computeLine, summarise } from "@/lib/gst";
-import { STATUS_LABEL, humanizeStatus } from "@/lib/order-status";
+import { STATUS_LABEL } from "@/lib/order-status";
 import { toDecimal } from "@/lib/money";
 import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
+import {
+  APPROVAL_CLEARED,
+  approveRefusal,
+  issueRefusal,
+} from "@/lib/customer-invoice-gates";
 import { indefineGstin, indefineCompanyName, indefineStateCode } from "@/lib/org";
 import { eInvoiceEnabled, getEInvoiceProvider } from "@/server/services/e-invoice/provider";
 import { notifyRoles } from "@/server/notification-core";
@@ -40,6 +45,10 @@ import {
 import type { Prisma } from "@prisma/client";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
+// Sign-off before an invoice may go to the customer. Deliberately excludes
+// ACCOUNTS: they prepare and edit the draft, a manager signs it off. One
+// desk doing both is the gap this closes.
+const APPROVE_ROLES = [Role.ADMIN, Role.MANAGER];
 // F&B Service (DELIVERY / retired alias FNB_SERVICE) can view generated
 // bills — the middleware admits them to /invoices/[id] for room-service
 // billing, so the read gate must match or the page crashes for them.
@@ -158,6 +167,9 @@ async function createCustomerInvoiceFromOrderInner(
         issuedAt: new Date(),
         amountPaid: podTotal.toFixed(2),
         orderId,
+        // Pax at the moment of billing. Read the live order later and the
+        // printed rate drifts the instant anyone edits the order.
+        finalHeadcount: order.headcount,
         customerId: order.customer.id,
         placeOfSupplyStateCode: order.placeOfSupplyStateCode,
         subtotal: summary.subtotal.toString(),
@@ -383,7 +395,12 @@ async function createStandaloneCustomerInvoiceInner(
     return invoice;
   });
 
+  // Born a draft — it needs a manager's signature before it can be issued,
+  // so put it in front of them rather than waiting to be found.
+  notifyAwaitingApproval(result.id, "new draft");
+
   revalidatePath("/invoices");
+  revalidatePath("/dashboard");
   return { ok: true, id: result.id, invoiceNo: result.invoiceNo };
 }
 
@@ -395,9 +412,15 @@ interface EditInvoiceInput {
   notes?: string | null;
   termsMd?: string | null;
   poRef?: string | null;
+  /** Pax the invoice is billed for — 100 ordered, 120 turned up. */
+  finalHeadcount?: number | null;
   lines: StandaloneLineInput[];
 }
 
+/**
+ * Edit a draft. Any edit revokes an existing approval: the manager signed
+ * off the numbers they were shown, and these are different numbers.
+ */
 export async function updateDraftInvoice(id: string, input: EditInvoiceInput): Promise<ActionResult> {
   try {
     return await updateDraftInvoiceInner(id, input);
@@ -409,11 +432,14 @@ export async function updateDraftInvoice(id: string, input: EditInvoiceInput): P
 async function updateDraftInvoiceInner(id: string, input: EditInvoiceInput): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
   if (!input.lines || input.lines.length === 0) throw new ActionError("Add at least one line");
+  if (input.finalHeadcount != null && (!Number.isInteger(input.finalHeadcount) || input.finalHeadcount < 0)) {
+    throw new ActionError("Final headcount must be a whole number of pax");
+  }
 
-  await db.$transaction(async (tx) => {
+  const revoked = await db.$transaction(async (tx) => {
     const inv = await tx.customerInvoice.findUnique({
       where: { id },
-      select: { id: true, status: true, placeOfSupplyStateCode: true },
+      select: { id: true, status: true, placeOfSupplyStateCode: true, approvedAt: true },
     });
     if (!inv) throw new ActionError("Invoice not found");
     if (inv.status !== CustomerInvoiceStatus.DRAFT) {
@@ -468,12 +494,16 @@ async function updateDraftInvoiceInner(id: string, input: EditInvoiceInput): Pro
         notes: input.notes ?? null,
         termsMd: input.termsMd ?? null,
         poRef: input.poRef ?? null,
+        ...(input.finalHeadcount !== undefined ? { finalHeadcount: input.finalHeadcount } : {}),
         subtotal: summary.subtotal.toString(),
         cgst: summary.cgst.toString(),
         sgst: summary.sgst.toString(),
         igst: summary.igst.toString(),
         taxTotal: summary.taxTotal.toString(),
         grandTotal: summary.grandTotal.toString(),
+        // The edit sends the invoice back for sign-off. Without this a
+        // manager's ₹50,000 approval would travel with an ₹80,000 invoice.
+        ...APPROVAL_CLEARED,
       },
     });
 
@@ -483,14 +513,55 @@ async function updateDraftInvoiceInner(id: string, input: EditInvoiceInput): Pro
         action: "CUSTOMER_INVOICE_DRAFT_UPDATED",
         entity: "CustomerInvoice",
         entityId: id,
-        payloadHash: sha256Json({ lines: input.lines.length, grandTotal: summary.grandTotal.toString() }),
+        payloadHash: sha256Json({
+          lines: input.lines.length,
+          grandTotal: summary.grandTotal.toString(),
+          finalHeadcount: input.finalHeadcount ?? null,
+          approvalRevoked: inv.approvedAt != null,
+        }),
       },
     });
+    return inv.approvedAt != null;
   });
+
+  // An edit that undid a sign-off has to reach the manager who gave it —
+  // otherwise the invoice silently sits unreleasable. A never-approved
+  // draft is already in their queue and needs no second ping.
+  if (revoked) notifyAwaitingApproval(id, "edited after approval");
 
   revalidatePath("/invoices");
   revalidatePath(`/invoices/${id}`);
+  revalidatePath("/dashboard");
   return { ok: true };
+}
+
+/**
+ * Tell the management desk an invoice is waiting on their signature.
+ * Post-response, like every other notification fan-out here — the saver's
+ * button doesn't wait on N inserts.
+ */
+function notifyAwaitingApproval(id: string, why: string) {
+  const at = Date.now();
+  deferAfterResponse("invoice-approval:notify", async () => {
+    const invoice = await db.customerInvoice.findUnique({
+      where: { id },
+      select: {
+        invoiceNo: true,
+        grandTotal: true,
+        customer: { select: { name: true } },
+        order: { select: { code: true } },
+      },
+    });
+    if (!invoice) return;
+    await notifyRoles(APPROVE_ROLES, {
+      kind: NotificationKind.GENERIC,
+      title: `Invoice ${invoice.invoiceNo} needs your approval`,
+      body: `${invoice.customer.name}${invoice.order ? ` · ${invoice.order.code}` : ""} — ₹${invoice.grandTotal.toString()} (${why}). It can't go to the customer until you approve it.`,
+      link: `/invoices/${id}`,
+      // Timestamped so a later edit → approve → edit cycle notifies again.
+      dedupeKey: `customer-invoice-approval:${id}:${at}`,
+    });
+  });
 }
 
 /**
@@ -553,6 +624,7 @@ export async function createTaxInvoiceForOrderInTx(
       status: CustomerInvoiceStatus.ISSUED,
       issuedAt: new Date(),
       orderId,
+      finalHeadcount: order.headcount,
       customerId: order.customer.id,
       placeOfSupplyStateCode: order.placeOfSupplyStateCode,
       subtotal: summary.subtotal.toString(),
@@ -780,6 +852,67 @@ async function markCustomerInvoicePaidInner(input: MarkPaidInput): Promise<{ ok:
   return { ok: true };
 }
 
+/**
+ * Manager/admin sign-off: this draft may be released to the customer. Only
+ * from DRAFT, and only once — an edit revokes it and it has to be given
+ * again against the new numbers.
+ *
+ * Distinct from the billing hold, which stays as it is: a hold is someone
+ * actively blocking one invoice, approval is the default requirement on
+ * every invoice. An approved invoice that is then held still can't issue.
+ */
+export async function approveCustomerInvoiceForRelease(
+  id: string,
+  note?: string | null,
+): Promise<ActionResult> {
+  try {
+    const session = await requireRole(APPROVE_ROLES);
+    const approvedAt = new Date();
+    await db.$transaction(async (tx) => {
+      const invoice = await tx.customerInvoice.findUnique({
+        where: { id },
+        select: { invoiceNo: true, status: true, approvedAt: true },
+      });
+      if (!invoice) throw new ActionError("Invoice not found");
+      const refusal = approveRefusal({
+        invoiceNo: invoice.invoiceNo,
+        status: invoice.status,
+        approvedAt: invoice.approvedAt,
+      });
+      if (refusal) throw new ActionError(refusal);
+      // State guard: an edit landing mid-click (which clears the approval)
+      // or a second approver both lose the race cleanly rather than
+      // stamping a signature onto numbers that just moved.
+      const updated = await tx.customerInvoice.updateMany({
+        where: { id, status: CustomerInvoiceStatus.DRAFT, approvedAt: null },
+        data: {
+          approvedAt,
+          approvedById: session.user.id,
+          approvalNote: note?.trim() || null,
+        },
+      });
+      if (updated.count === 0) {
+        throw new ActionError("This invoice just changed — refresh the page.");
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "CUSTOMER_INVOICE_APPROVED_FOR_RELEASE",
+          entity: "CustomerInvoice",
+          entityId: id,
+          payloadHash: sha256Json({ note: note?.trim() || null }),
+        },
+      });
+    });
+    revalidatePath("/invoices");
+    revalidatePath(`/invoices/${id}`);
+    revalidatePath("/dashboard");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
 export async function issueCustomerInvoice(id: string): Promise<ActionResult> {
   try {
     return await issueCustomerInvoiceInner(id);
@@ -795,20 +928,25 @@ async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
   await db.$transaction(async (tx) => {
     const invoice = await tx.customerInvoice.findUnique({
       where: { id },
-      select: { status: true, orderId: true, onHoldAt: true, onHoldReason: true },
+      select: {
+        invoiceNo: true, status: true, orderId: true,
+        onHoldAt: true, onHoldReason: true, approvedAt: true,
+      },
     });
     if (!invoice) throw new ActionError("Invoice not found");
-    if (invoice.onHoldAt) {
-      throw new ActionError(
-        `Invoice is on hold: ${invoice.onHoldReason ?? "no reason recorded"} — release the hold first`,
-      );
-    }
-    if (invoice.status !== CustomerInvoiceStatus.DRAFT) {
-      throw new ActionError(`Cannot issue an invoice that's ${humanizeStatus(invoice.status)}`);
-    }
-    // Status guard: a concurrent issue loses the race cleanly.
+    const refusal = issueRefusal({
+      invoiceNo: invoice.invoiceNo,
+      status: invoice.status,
+      onHold: !!invoice.onHoldAt,
+      onHoldReason: invoice.onHoldReason,
+      approvedAt: invoice.approvedAt,
+    });
+    if (refusal) throw new ActionError(refusal);
+    // Status guard: a concurrent issue loses the race cleanly. The
+    // approvedAt clause makes an edit landing mid-click lose it too — the
+    // edit revoked the sign-off, so this issue must not slip through.
     const updated = await tx.customerInvoice.updateMany({
-      where: { id, status: CustomerInvoiceStatus.DRAFT },
+      where: { id, status: CustomerInvoiceStatus.DRAFT, approvedAt: { not: null } },
       data: {
         status: CustomerInvoiceStatus.ISSUED,
         issuedAt: new Date(),
@@ -1218,6 +1356,33 @@ export async function listCustomerInvoices(
 }
 
 /**
+ * Drafts waiting on a manager's signature — feeds the dashboard approvals
+ * board and the "needs approval" section of the invoices list. A draft that
+ * was approved and then edited looks identical to one never approved, which
+ * is the whole point.
+ */
+export async function listCustomerInvoicesAwaitingApproval() {
+  await requireRole(READ_ROLES);
+  return db.customerInvoice.findMany({
+    where: { status: CustomerInvoiceStatus.DRAFT, approvedAt: null },
+    select: {
+      id: true,
+      invoiceNo: true,
+      grandTotal: true,
+      createdAt: true,
+      onHoldAt: true,
+      finalHeadcount: true,
+      customer: { select: { name: true } },
+      order: { select: { code: true } },
+    },
+    // Oldest first — the one that has been waiting longest is the one
+    // holding up a customer's bill.
+    orderBy: { createdAt: "asc" },
+    take: 100,
+  });
+}
+
+/**
  * Billing history for one customer, optionally filtered to a date range.
  * Filters on the commercial date — issuedAt when the invoice was issued,
  * falling back to createdAt for never-issued drafts. `from`/`to` arrive as
@@ -1514,6 +1679,7 @@ export async function getCustomerInvoice(id: string) {
       order: { select: { id: true, code: true, headcount: true, mealType: true } },
       createdBy: { select: { name: true } },
       onHoldBy: { select: { name: true } },
+      approvedBy: { select: { name: true } },
       lines: { orderBy: { sortOrder: "asc" } },
       payments: {
         where: { reversedAt: null },

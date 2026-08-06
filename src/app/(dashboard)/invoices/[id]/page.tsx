@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { auth } from "@/server/auth";
 import {
+  approveCustomerInvoiceForRelease,
   cancelCustomerInvoice,
   emailTaxInvoice,
   getCustomerInvoice,
@@ -50,6 +51,14 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   // banner explains why. Hold/release is the finance desk (WRITE_ROLES).
   const isHeld = !!invoice.onHoldAt;
   const canHold = canIssue;
+  // Release approval — accounts prepare and edit, a manager signs off.
+  const canApprove = role === Role.ADMIN || role === Role.MANAGER;
+  const isApproved = !!invoice.approvedAt;
+  const isDraft = invoice.status === CustomerInvoiceStatus.DRAFT;
+  // Pax the bill is for. The invoice's own snapshot first — the live order
+  // moves (100 booked, 120 fed) and the printed rate must divide the amount
+  // this invoice actually carries. Legacy rows have no snapshot.
+  const pax = invoice.finalHeadcount ?? invoice.order?.headcount ?? null;
 
   async function doIssue() {
     "use server";
@@ -85,6 +94,10 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   async function doReleaseHold(note: string) {
     "use server";
     return await releaseCustomerInvoiceHold(id, note || undefined);
+  }
+  async function doApprove(note: string) {
+    "use server";
+    return await approveCustomerInvoiceForRelease(id, note || null);
   }
   async function doRecordPayment(input: { amount: string; method: PaymentMethod; reference: string | null; notes: string | null; paidAt: string }) {
     "use server";
@@ -125,10 +138,15 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 />
               )}
             <Link href="/invoices"><Button variant="outline">Back</Button></Link>
-            {invoice.status === CustomerInvoiceStatus.DRAFT && canIssue && (
+            {isDraft && canIssue && (
               <>
-                <Link href={`/invoices/${invoice.id}/edit`}><Button variant="outline">Edit lines</Button></Link>
-                <ActionResultButton action={doIssue} successMessage="Invoice issued">Issue invoice</ActionResultButton>
+                <Link href={`/invoices/${invoice.id}/edit`}><Button variant="outline">Edit lines & pax</Button></Link>
+                {/* Issue is offered only once a manager has signed off. The
+                    action refuses anyway; hiding the button means nobody
+                    clicks it expecting the customer to get the bill. */}
+                {isApproved && (
+                  <ActionResultButton action={doIssue} successMessage="Invoice issued">Issue invoice</ActionResultButton>
+                )}
               </>
             )}
           </div>
@@ -163,6 +181,45 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
             </div>
           )}
         </div>
+      )}
+
+      {/* Release gate. A draft is not a customer document until a manager or
+          admin has signed off the numbers on it — and any edit sends it back
+          here, so the signature always belongs to the amount on screen. */}
+      {isDraft && (
+        isApproved ? (
+          <div className="mb-4 rounded-md border border-positive-wash bg-positive-wash p-3 text-[12.5px]">
+            <div className="font-medium text-positive">Approved for release</div>
+            <div className="mt-1 text-ik-ink-2">
+              Signed off by {invoice.approvedBy?.name ?? "—"}
+              {invoice.approvedAt && <> on {formatIST(invoice.approvedAt)}</>}
+              {invoice.approvalNote && <> — “{invoice.approvalNote}”</>}.
+              Editing it now withdraws this approval and it will need signing off again.
+            </div>
+          </div>
+        ) : (
+          <div className="mb-4 rounded-md border border-amber-wash bg-amber-wash p-4 text-[13px]">
+            <div className="font-semibold uppercase tracking-wide text-amber">Awaiting approval</div>
+            <div className="mt-1 text-ik-ink-2">
+              This invoice can&apos;t be issued to the customer until a manager or admin approves it.
+            </div>
+            {canApprove && (
+              <div className="mt-3 max-w-md">
+                <ActionReasonForm
+                  action={doApprove}
+                  heading="Approve for release"
+                  description={`${formatINR(invoice.grandTotal)}${pax ? ` · ${pax} pax` : ""} — check the figures before you sign this off.`}
+                  submitLabel="Approve for release"
+                  successMessage="Approved — the invoice can now be issued"
+                  placeholder="Note (optional)"
+                  required={false}
+                  tone="brand"
+                  buttonVariant="default"
+                />
+              </div>
+            )}
+          </div>
+        )
       )}
 
       {invoice.irn && (
@@ -202,20 +259,21 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               </TableHeader>
               <TableBody>
                 {invoice.order ? (
-                  // Order-linked bill: one consolidated row reading the LIVE
-                  // order (meal + current pax) — the stored lines snapshot
-                  // pax at creation, which kept showing stale counts after a
-                  // revision. Money stays exactly as invoiced; the PDF
-                  // renders the same row.
+                  // Order-linked bill: one consolidated row. Pax comes from
+                  // the INVOICE's own finalHeadcount, so the printed rate
+                  // (subtotal ÷ pax) always divides the amount actually
+                  // invoiced. Reading the live order made the two disagree —
+                  // change the order to 120 after invoicing and the document
+                  // read "120 pax @ ₹416.67" while still totalling 100 pax.
+                  // Legacy invoices predate the column and fall back to the
+                  // order, i.e. exactly what they printed before.
                   <TableRow>
                     <TableCell>
                       {MEAL_LABEL[invoice.order.mealType] ?? invoice.order.mealType} catering — {invoice.order.code}
                     </TableCell>
-                    <TableCell className="text-right font-mono">{invoice.order.headcount ?? "—"} pax</TableCell>
+                    <TableCell className="text-right font-mono">{pax ?? "—"} pax</TableCell>
                     <TableCell className="text-right font-mono">
-                      {invoice.order.headcount
-                        ? toDecimal(invoice.subtotal).div(invoice.order.headcount).toDecimalPlaces(2).toString()
-                        : "—"}
+                      {pax ? toDecimal(invoice.subtotal).div(pax).toDecimalPlaces(2).toString() : "—"}
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {toDecimal(invoice.subtotal).gt(0)

@@ -22,7 +22,12 @@ export default async function InvoicesPage() {
 
   const unpaid = invoices.filter((i) => i.status === CustomerInvoiceStatus.ISSUED || i.status === CustomerInvoiceStatus.PARTIAL);
   const paid = invoices.filter((i) => i.status === CustomerInvoiceStatus.PAID);
-  const other = invoices.filter((i) => i.status === CustomerInvoiceStatus.DRAFT || i.status === CustomerInvoiceStatus.CANCELLED);
+  // Drafts nobody has signed off can't reach the customer at all, so they
+  // get their own section instead of being buried with the cancelled ones.
+  const awaitingApproval = invoices.filter((i) => i.status === CustomerInvoiceStatus.DRAFT && !i.approvedAt);
+  const other = invoices.filter(
+    (i) => (i.status === CustomerInvoiceStatus.DRAFT && i.approvedAt) || i.status === CustomerInvoiceStatus.CANCELLED,
+  );
   const outstanding = unpaid.reduce((s, i) => s.plus(toDecimal(i.grandTotal).minus(toDecimal(i.amountPaid))), toDecimal(0));
 
   return (
@@ -46,6 +51,7 @@ export default async function InvoicesPage() {
           chips={[
             { label: "Unpaid invoices", value: unpaid.length, tone: unpaid.length > 0 ? "amber" : "grey" },
             { label: "Outstanding", value: formatINRWhole(outstanding), tone: outstanding.gt(0) ? "red" : "grey" },
+            { label: "Awaiting approval", value: awaitingApproval.length, tone: awaitingApproval.length > 0 ? "amber" : "grey" },
             { label: "Paid", value: paid.length, tone: "green" },
           ]}
         />
@@ -55,9 +61,12 @@ export default async function InvoicesPage() {
         <p className="text-[13px] text-ik-ink-3">No invoices yet. Generate one from a DELIVERED order, or create an ad-hoc invoice.</p>
       ) : (
         <div className="grid gap-5">
+          {awaitingApproval.length > 0 && (
+            <InvSection title="Awaiting manager approval — not yet releasable" rows={awaitingApproval} now={now} canMarkPaid={false} />
+          )}
           {unpaid.length > 0 && <InvSection title="To collect" rows={unpaid} now={now} canMarkPaid={canMarkPaid} />}
           {paid.length > 0 && <InvSection title="Paid" rows={paid} now={now} canMarkPaid={false} />}
-          {other.length > 0 && <InvSection title="Draft & cancelled" rows={other} now={now} canMarkPaid={false} />}
+          {other.length > 0 && <InvSection title="Approved draft & cancelled" rows={other} now={now} canMarkPaid={false} />}
         </div>
       )}
     </>
@@ -104,6 +113,9 @@ function InvSection({ title, rows, now, canMarkPaid }: { title: string; rows: In
                 <TableCell>
                   <span className="inline-flex items-center gap-1">
                     <StatusPill tone={tone}>{label}</StatusPill>
+                    {inv.status === CustomerInvoiceStatus.DRAFT && !inv.approvedAt && (
+                      <StatusPill tone="amber">NEEDS APPROVAL</StatusPill>
+                    )}
                     {inv.onHoldAt && <StatusPill tone="red">ON HOLD</StatusPill>}
                   </span>
                 </TableCell>

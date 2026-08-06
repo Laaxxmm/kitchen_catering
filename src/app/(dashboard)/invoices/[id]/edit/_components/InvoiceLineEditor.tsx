@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatINR } from "@/lib/money";
+import { prorateQuantity } from "@/lib/customer-invoice-gates";
 import { isNextNavigationError } from "@/lib/next-error";
 import type { ActionResult } from "@/lib/action-result";
 
@@ -68,12 +69,15 @@ interface CreateProps extends CommonProps {
 interface EditProps extends CommonProps {
   mode: "edit";
   customerLabel: string; // immutable on edit
+  /** Pax this invoice is billed for — editable while it's a draft. */
+  finalHeadcount?: number | null;
   onSubmit: (input: {
     placeOfSupplyStateCode: string;
     dueDate: string | null;
     notes: string | null;
     termsMd: string | null;
     poRef: string | null;
+    finalHeadcount: number | null;
     lines: Array<{
       description: string;
       hsnSac: string | null;
@@ -104,12 +108,37 @@ export function InvoiceLineEditor(props: Props) {
   const [termsMd, setTermsMd] = useState<string>(d.termsMd ?? "");
   const [poRef, setPoRef] = useState<string>(d.poRef ?? "");
   const [lines, setLines] = useState<DraftLine[]>(d.lines && d.lines.length > 0 ? d.lines : [emptyLine()]);
+  // Pax billed. `savedHeadcount` is the number the current line amounts were
+  // built for, so it's the "from" side of any pro-rata.
+  const savedHeadcount = props.mode === "edit" ? props.finalHeadcount ?? null : null;
+  const [headcount, setHeadcount] = useState<string>(savedHeadcount != null ? String(savedHeadcount) : "");
 
   function setLine(i: number, patch: Partial<DraftLine>) {
     setLines((p) => p.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   }
   function removeLine(i: number) {
     setLines((p) => p.filter((_, idx) => idx !== i));
+  }
+
+  /**
+   * Pre-fill the line quantities for the new pax count — "they ordered for
+   * 100, 120 turned up". This only fills the boxes: the manager sees the new
+   * amounts and still has to press Save, because money on a customer
+   * document changes when a human confirms the number in front of them, not
+   * as a side effect of typing a pax count.
+   */
+  function applyProRata() {
+    const to = Number(headcount);
+    const scaled = lines.map((l) => {
+      const q = prorateQuantity(l.quantity, savedHeadcount, to);
+      return q == null ? l : { ...l, quantity: q };
+    });
+    if (scaled.every((l, i) => l.quantity === lines[i].quantity)) {
+      toast.error("Nothing to pro-rata — check the pax count.");
+      return;
+    }
+    setLines(scaled);
+    toast.success(`Quantities pre-filled for ${to} pax — review and save.`);
   }
 
   // When customer changes (create mode), auto-fill place of supply
@@ -178,6 +207,7 @@ export function InvoiceLineEditor(props: Props) {
                 notes: notes || null,
                 termsMd: termsMd || null,
                 poRef: poRef || null,
+                finalHeadcount: headcount.trim() ? Number(headcount) : null,
                 lines: payload,
               });
         if (res && !res.ok) {
@@ -225,6 +255,40 @@ export function InvoiceLineEditor(props: Props) {
             <Input id="poRef" value={poRef} onChange={(e) => setPoRef(e.target.value)} />
           </div>
         </div>
+        {props.mode === "edit" && (
+          <div className="grid gap-1 rounded-md border border-ik-rule bg-ik-paper-alt p-3">
+            <Label htmlFor="finalHeadcount">Final headcount (pax billed)</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                id="finalHeadcount"
+                type="number"
+                min="0"
+                step="1"
+                // An event invoice that already carries a pax count must not
+                // be saved with the box blanked — it would fall back to
+                // reading the live order again.
+                required={savedHeadcount != null}
+                className="w-32"
+                value={headcount}
+                onChange={(e) => setHeadcount(e.target.value)}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!savedHeadcount || !headcount || Number(headcount) === savedHeadcount}
+                onClick={applyProRata}
+              >
+                Pro-rata the lines for this count
+              </Button>
+            </div>
+            <p className="text-[12px] text-ik-ink-2">
+              Ordered for {savedHeadcount ?? "—"} pax. If more turned up, change the count and
+              pro-rata — it pre-fills the quantities and you can override any line before saving.
+              Nothing is charged until you save.
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">

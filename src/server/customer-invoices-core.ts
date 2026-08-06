@@ -107,6 +107,7 @@ export async function createProformaInvoiceForOrderCore(orderId: string) {
           status: CustomerInvoiceStatus.ISSUED,
           issuedAt: new Date(),
           orderId,
+          finalHeadcount: order.headcount,
           customerId: order.customer.id,
           placeOfSupplyStateCode: order.placeOfSupplyStateCode,
           subtotal: summary.subtotal.toString(),
@@ -180,8 +181,9 @@ export async function createProformaInvoiceForOrderCore(orderId: string) {
         issuedAt: fullInvoice.issuedAt,
         dueAt: fullInvoice.dueAt,
         orderCode: fullInvoice.order?.code ?? null,
-        // Live pax/meal off the order we just read — not the line snapshot.
-        order: { headcount: order.headcount, mealType: order.mealType },
+        // Pax off the invoice we just wrote, not the live order — same
+        // snapshot rule as every other render of this document.
+        order: { headcount: fullInvoice.finalHeadcount ?? order.headcount, mealType: order.mealType },
         placeOfSupplyStateCode: fullInvoice.placeOfSupplyStateCode,
         irn: fullInvoice.irn,
         ackNo: fullInvoice.ackNo,

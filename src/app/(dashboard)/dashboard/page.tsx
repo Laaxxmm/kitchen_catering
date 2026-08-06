@@ -27,7 +27,7 @@ import { listChefRequisitions } from "@/server/actions/chef-requisitions";
 import { listVendorPOs, listVendorBills } from "@/server/actions/procurement";
 import { listPendingVendors } from "@/server/actions/vendors";
 import { listBanquetRequisitions } from "@/server/actions/banquet";
-import { listCustomerInvoices } from "@/server/actions/customer-invoices";
+import { listCustomerInvoices, listCustomerInvoicesAwaitingApproval } from "@/server/actions/customer-invoices";
 import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
 import { listHousekeepingIssues } from "@/server/actions/housekeeping";
 import { listMaintenanceActivities } from "@/server/actions/maintenance";
@@ -662,6 +662,8 @@ export default async function DashboardPage({
         // Store-added suppliers awaiting sign-off — every PO on them is
         // blocked at submit, so they must sit in the manager's face here.
         listPendingVendors(),
+        // Drafts that can't be given to the customer until signed off.
+        listCustomerInvoicesAwaitingApproval(),
       ])
     : null;
 
@@ -801,6 +803,16 @@ export default async function DashboardPage({
               name: v.name,
               code: v.code,
               createdAt: v.createdAt.toISOString(),
+            }))}
+            invoicesToApprove={approvals[4].map((i) => ({
+              id: i.id,
+              invoiceNo: i.invoiceNo,
+              customerName: i.customer.name,
+              orderCode: i.order?.code ?? null,
+              grandTotal: i.grandTotal.toString(),
+              pax: i.finalHeadcount,
+              createdAt: i.createdAt.toISOString(),
+              onHold: i.onHoldAt != null,
             }))}
             viewerIsAdmin={role === "ADMIN"}
           />

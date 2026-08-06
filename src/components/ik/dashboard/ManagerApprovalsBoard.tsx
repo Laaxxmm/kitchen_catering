@@ -16,6 +16,7 @@ import type { ActionResult } from "@/lib/action-result";
 import { adminApproveOrder, managerApproveChefSuggestion } from "@/server/actions/orders";
 import { approveVendorPO } from "@/server/actions/procurement";
 import { approveVendor } from "@/server/actions/vendors";
+import { approveCustomerInvoiceForRelease } from "@/server/actions/customer-invoices";
 
 export interface OrderToApprove {
   id: string;
@@ -52,6 +53,17 @@ export interface PendingVendor {
   /** ISO createdAt. */
   createdAt: string;
 }
+export interface InvoiceToApprove {
+  id: string;
+  invoiceNo: string;
+  customerName: string;
+  orderCode: string | null;
+  grandTotal: string;
+  pax: number | null;
+  /** ISO createdAt. */
+  createdAt: string;
+  onHold: boolean;
+}
 
 interface Props {
   ordersToApprove: OrderToApprove[];
@@ -59,6 +71,8 @@ interface Props {
   purchaseOrders: PurchaseOrder[];
   /** Store-added suppliers awaiting sign-off — every PO on them is blocked. */
   pendingVendors?: PendingVendor[];
+  /** Drafts that can't go to the customer until signed off. */
+  invoicesToApprove?: InvoiceToApprove[];
   viewerIsAdmin?: boolean;
 }
 
@@ -80,14 +94,16 @@ const CHANNEL_LABEL: Record<OrderChannel, string> = {
  * grows downwards and stays on screen. Nothing here gets missed: the order
  * gate sits first since the kitchen waits on it.
  */
-export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseOrders, pendingVendors = [], viewerIsAdmin = false }: Props) {
+export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseOrders, pendingVendors = [], invoicesToApprove = [], viewerIsAdmin = false }: Props) {
   const total =
-    ordersToApprove.length + orderChanges.length + purchaseOrders.length + pendingVendors.length;
+    ordersToApprove.length + orderChanges.length + purchaseOrders.length
+    + pendingVendors.length + invoicesToApprove.length;
   if (total === 0) return null;
 
   const tabs = [
     { key: "orders", label: "Orders to approve", hint: "Commercial sign-off", count: ordersToApprove.length },
     { key: "changes", label: "Order changes", hint: "Chef suggestions", count: orderChanges.length },
+    { key: "invoices", label: "Invoices", hint: "Release to customer", count: invoicesToApprove.length },
     { key: "po", label: "Purchase orders", hint: "Sign off spend", count: purchaseOrders.length },
     { key: "vendors", label: "New suppliers", hint: "Approve to unblock POs", count: pendingVendors.length },
   ];
@@ -113,6 +129,13 @@ export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseO
             return (
               <CappedList items={changesSorted} className={CARD_GRID} keyOf={(o) => o.id}>
                 {(o) => <OrderChangeCard change={o} />}
+              </CappedList>
+            );
+          }
+          if (active === "invoices") {
+            return (
+              <CappedList items={invoicesToApprove} className={CARD_GRID} keyOf={(i) => i.id}>
+                {(i) => <InvoiceApprovalCard invoice={i} />}
               </CappedList>
             );
           }
@@ -290,6 +313,46 @@ function PurchaseOrderCard({ po, viewerIsAdmin }: { po: PurchaseOrder; viewerIsA
           </span>
         )}
         <Link href={`/procurement/purchase-orders/${po.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open</Link>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * A draft invoice waiting on a signature. Nothing reaches the customer until
+ * this is approved, so it sits on the manager's board rather than only on
+ * the invoice page. "Open" is the review path — the card carries enough to
+ * recognise the bill, not enough to check it line by line.
+ */
+function InvoiceApprovalCard({ invoice }: { invoice: InvoiceToApprove }) {
+  const { pending, run } = useApprove();
+  return (
+    <li className={CARD + " border border-brand-200 bg-brand-50"}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="font-mono text-[12.5px] text-brand-700">{invoice.invoiceNo}</span>
+        <span className="font-mono text-[12.5px] text-ik-ink">{formatINR(invoice.grandTotal)}</span>
+      </div>
+      <div className="mt-1 text-[13px] text-ik-ink"><strong>{invoice.customerName}</strong></div>
+      <div className="mt-0.5 text-[11.5px] text-ik-ink-2">
+        {[invoice.orderCode, invoice.pax != null ? `${invoice.pax} pax` : null]
+          .filter(Boolean)
+          .join(" · ") || "Ad-hoc invoice"}
+      </div>
+      <div className="mt-0.5 text-[11px] text-ik-ink-3">
+        Drafted {formatIST(new Date(invoice.createdAt), "d MMM, HH:mm")}
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        {invoice.onHold ? (
+          <span className="text-[11.5px] font-medium uppercase tracking-wide text-alert">
+            On hold — release it first
+          </span>
+        ) : (
+          <Button size="sm" disabled={pending}
+            onClick={() => run(() => approveCustomerInvoiceForRelease(invoice.id), "Approved — the invoice can now be issued")}>
+            Approve
+          </Button>
+        )}
+        <Link href={`/invoices/${invoice.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open</Link>
       </div>
     </li>
   );

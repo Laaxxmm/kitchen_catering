@@ -407,6 +407,7 @@ model User {
   quoteEvents                     QuoteEvent[]             @relation("QuoteEventActor")
   customerInvoicesCreated         CustomerInvoice[]        @relation("CustomerInvoiceCreatedBy")
   customerInvoicesHeld            CustomerInvoice[]        @relation("CustomerInvoiceOnHoldBy")
+  customerInvoicesApproved        CustomerInvoice[]        @relation("CustomerInvoiceApprovedBy")
   ordersCreated                   Order[]                  @relation("OrderCreatedBy")
   ordersStoreReviewed             Order[]                  @relation("OrderStoreReviewedBy")
   ordersManagerReviewed           Order[]                  @relation("OrderManagerReviewedBy")
@@ -1647,6 +1648,22 @@ model CustomerInvoice {
   onHoldReason String?
   onHoldById   String?
   onHoldBy     User?     @relation("CustomerInvoiceOnHoldBy", fields: [onHoldById], references: [id])
+
+  // Manager/admin sign-off, required before a draft may be issued to the
+  // customer. Any edit to the draft clears all three — an approval belongs
+  // to the numbers it was given for, so a ₹50,000 sign-off must not travel
+  // with an ₹80,000 invoice. NULL on every pre-existing invoice.
+  approvedAt   DateTime?
+  approvedById String?
+  approvedBy   User?     @relation("CustomerInvoiceApprovedBy", fields: [approvedById], references: [id])
+  approvalNote String?
+
+  // Pax the invoice is actually billed for, snapshotted from the order when
+  // the invoice is created and editable by a manager while it's a draft.
+  // The printed pax and rate derive from this, not from the live order —
+  // changing the order to 120 after invoicing used to leave the document
+  // reading "120 pax @ ₹416.67" while still totalling the 100-pax amount.
+  finalHeadcount Int?
 
   emailedAt DateTime?
   emailedTo String?
