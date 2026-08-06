@@ -32,6 +32,7 @@ import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
 import { listHousekeepingIssues } from "@/server/actions/housekeeping";
 import { listMaintenanceActivities } from "@/server/actions/maintenance";
 import { toDecimal, formatINRWhole } from "@/lib/money";
+import { isPayable } from "@/lib/vendor-bill-gates";
 import { formatIST, istDayWindow, istScopeWindow, istWeekWindow, type EventDateScope } from "@/lib/time";
 import { EventScopePills } from "@/components/ik/EventScopePills";
 import {
@@ -401,6 +402,9 @@ export default async function DashboardPage({
         billNo: b.billNo,
         vendorName: b.vendor.name,
         outstanding: toDecimal(b.grandTotal).minus(toDecimal(b.amountPaid)),
+        // Unapproved bills stay on the board (they're still money owed) but
+        // offer approval, not payment — the actions refuse the rest.
+        payable: isPayable(b.status),
       }))
       .filter((p) => p.outstanding.gt(0));
     return (

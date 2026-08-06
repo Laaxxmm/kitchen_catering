@@ -13,6 +13,8 @@ interface Props {
   submitLabel: string;
   successMessage: string;
   placeholder?: string;
+  /** Widen the table-row-sized input when the reason is a sentence, not a word. */
+  inputClassName?: string;
 }
 
 /**
@@ -21,7 +23,13 @@ interface Props {
  * swallowed the converted action's `{ ok: false, error }` result —
  * refusals now toast, and the row refreshes on success.
  */
-export function InlineReasonForm({ action, submitLabel, successMessage, placeholder = "Reason" }: Props) {
+export function InlineReasonForm({
+  action,
+  submitLabel,
+  successMessage,
+  placeholder = "Reason",
+  inputClassName = "h-6 w-24 text-[11px]",
+}: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [reason, setReason] = useState("");
@@ -56,7 +64,7 @@ export function InlineReasonForm({ action, submitLabel, successMessage, placehol
         placeholder={placeholder}
         value={reason}
         onChange={(e) => setReason(e.target.value)}
-        className="h-6 w-24 rounded border border-ik-rule bg-ik-card px-1 text-[11px]"
+        className={`rounded border border-ik-rule bg-ik-card px-1 ${inputClassName}`}
       />
       <Button type="submit" size="sm" variant="outline" className="ml-1" disabled={pending}>
         {submitLabel}

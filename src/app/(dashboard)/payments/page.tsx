@@ -4,6 +4,7 @@ import { gateRolePage } from "@/server/rbac";
 import { listCustomerInvoices } from "@/server/actions/customer-invoices";
 import { listVendorBills } from "@/server/actions/procurement";
 import { toDecimal, formatINRWhole } from "@/lib/money";
+import { isPayable } from "@/lib/vendor-bill-gates";
 import { SummaryStrip } from "@/components/ik/StatChips";
 import { PaymentsActionView } from "./_components/PaymentsActionView";
 
@@ -36,6 +37,9 @@ export default async function PaymentsPage() {
       amount: toDecimal(b.grandTotal).minus(toDecimal(b.amountPaid)),
       due: b.dueDate ? b.dueDate.toISOString() : null,
       overdue: !!(b.dueDate && b.dueDate < now),
+      // Matched-but-unapproved bills stay listed as money owed; they just
+      // can't be paid until accounts approve them.
+      payable: isPayable(b.status),
     }))
     .filter((b) => b.amount.gt(0));
 

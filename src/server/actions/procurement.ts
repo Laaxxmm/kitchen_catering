@@ -7,6 +7,7 @@ import {
   BanquetRequisitionStatus,
   ChefRequisitionLineStatus,
   ChefRequisitionStatus,
+  DocumentEntityType,
   GRNStatus,
   PaymentMethod,
   Prisma,
@@ -34,6 +35,12 @@ import {
 } from "@/lib/validators";
 import { computeLine, summarise } from "@/lib/gst";
 import { humanizeStatus } from "@/lib/order-status";
+import {
+  approveRefusal,
+  editRefusal,
+  payRefusal,
+  PAYABLE_STATUSES,
+} from "@/lib/vendor-bill-gates";
 import { indefineStateCode } from "@/lib/org";
 import { nextGRNNumber, nextVendorBillNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
@@ -1368,6 +1375,18 @@ async function createGRNInner(
 const PRICE_TOLERANCE_PCT = new Decimal(0.5); // ±0.5%
 const TAX_TOLERANCE_ABS = new Decimal(1); // ±₹1
 
+/** GRN states that mean goods actually arrived (a REJECTED one means nothing did). */
+const RECEIVED_GRN_STATUSES = [GRNStatus.ACCEPTED, GRNStatus.PARTIALLY_ACCEPTED];
+
+/** Has anything been accepted against this PO? Drives the goods-in gate + its warning. */
+export async function poHasReceivedGoods(poId: string): Promise<boolean> {
+  await requireRole(READ_ROLES);
+  const received = await db.gRN.count({
+    where: { poId, status: { in: RECEIVED_GRN_STATUSES } },
+  });
+  return received > 0;
+}
+
 export async function createVendorBill(
   raw: unknown,
 ): Promise<ActionResultWith<{ id: string; billNo: string }>> {
@@ -1428,6 +1447,24 @@ async function createVendorBillInner(raw: unknown): Promise<{ ok: true; id: stri
   const input = VendorBillCreateInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {
+    // "Obviously invoice cannot be generated before accepting GRN" — a hard
+    // block. Against a PO, something must actually have been received first.
+    if (input.poId) {
+      const po = await tx.vendorPO.findUnique({
+        where: { id: input.poId },
+        select: { poNo: true },
+      });
+      if (!po) throw new ActionError("That purchase order no longer exists — refresh the page.");
+      const received = await tx.gRN.count({
+        where: { poId: input.poId, status: { in: RECEIVED_GRN_STATUSES } },
+      });
+      if (received === 0) {
+        throw new ActionError(
+          `Nothing has been received against ${po.poNo} yet — accept the GRN first. A supplier bill can't be raised before the goods are in.`,
+        );
+      }
+    }
+
     const { linesData, subtotal, taxTotal } = computeVendorBillLines(input.lines);
 
     const billNo = await nextVendorBillNumber(tx);
@@ -1503,6 +1540,13 @@ async function updateVendorBillInner(id: string, raw: unknown): Promise<{ ok: tr
         `${bill.billNo} is ${humanizeStatus(bill.status)} — approved/paid bills are financial records and can't be edited. Record a fresh bill or contact an admin.`,
       );
     }
+    // Editing a mismatched bill IS the "pay only for what we ordered and
+    // got" correction — it needs a reason on the record, not just in someone's
+    // memory. (AuditLog keeps a payload hash nobody can read back.)
+    const reason = input.reason?.trim() ?? null;
+    const reasonRefusal = editRefusal(bill.billNo, bill.status, reason);
+    if (reasonRefusal) throw new ActionError(reasonRefusal);
+    const wasDiscrepancy = bill.status === VendorBillStatus.DISCREPANCY;
 
     const { linesData, subtotal, taxTotal } = computeVendorBillLines(input.lines);
 
@@ -1530,6 +1574,9 @@ async function updateVendorBillInner(id: string, raw: unknown): Promise<{ ok: tr
         matchedByUserId: null,
         matchedAt: null,
         discrepancyNote: null,
+        // Keep the correction's reason on the bill; a plain DRAFT edit leaves
+        // whatever was there alone.
+        ...(wasDiscrepancy ? { discrepancyEditReason: reason } : {}),
       },
     });
     if (updated.count === 0) {
@@ -1700,19 +1747,45 @@ async function matchVendorBillInner(
   });
 }
 
-export async function approveVendorBill(id: string): Promise<ActionResult> {
+/**
+ * Accounts sign off the supplier's invoice — the step that makes a bill
+ * payable at all. The vendor's document must be attached (stores upload it
+ * after the GRN clears; approving with nothing attached approves nothing),
+ * and approving a bill that failed the 3-way match takes a written reason:
+ * someone is consciously agreeing to pay other than what was ordered and
+ * received, and that has to be attributable.
+ */
+export async function approveVendorBill(id: string, reason?: string | null): Promise<ActionResult> {
   try {
     const session = await requireRole(BILL_APPROVE_ROLES);
     await db.$transaction(async (tx) => {
-      const bill = await tx.vendorBill.findUnique({ where: { id }, select: { status: true } });
+      const bill = await tx.vendorBill.findUnique({
+        where: { id },
+        select: { status: true, billNo: true },
+      });
       if (!bill) throw new ActionError("Bill not found");
-      if (bill.status !== VendorBillStatus.MATCHED && bill.status !== VendorBillStatus.DISCREPANCY) {
-        throw new ActionError(`Cannot approve a bill that's ${humanizeStatus(bill.status)}`);
-      }
+      const attachments = await tx.document.count({
+        where: { entityType: DocumentEntityType.VENDOR_BILL, entityId: id },
+      });
+      const refusal = approveRefusal({
+        billNo: bill.billNo,
+        status: bill.status,
+        hasSupplierInvoice: attachments > 0,
+        reason: reason ?? null,
+      });
+      if (refusal) throw new ActionError(refusal);
       // Status guard: a double-approve loses the race with a clear message.
       const updated = await tx.vendorBill.updateMany({
         where: { id, status: { in: [VendorBillStatus.MATCHED, VendorBillStatus.DISCREPANCY] } },
-        data: { status: VendorBillStatus.APPROVED },
+        data: {
+          status: VendorBillStatus.APPROVED,
+          approvedByUserId: session.user.id,
+          approvedAt: new Date(),
+          // Only a mismatch carries a justification; a clean match needs none.
+          ...(bill.status === VendorBillStatus.DISCREPANCY
+            ? { approvalNote: (reason ?? "").trim() }
+            : {}),
+        },
       });
       if (updated.count === 0) {
         throw new ActionError("This bill was already approved — refresh the page.");
@@ -1767,30 +1840,20 @@ async function markVendorBillPaidInner(input: {
   await db.$transaction(async (tx) => {
     const bill = await tx.vendorBill.findUnique({
       where: { id },
-      select: { id: true, status: true, grandTotal: true, amountPaid: true },
+      select: { id: true, billNo: true, status: true, grandTotal: true, amountPaid: true },
     });
     if (!bill) throw new ActionError("Bill not found");
-    if (bill.status === VendorBillStatus.PAID) {
-      throw new ActionError("Bill is already marked paid");
-    }
-    if (bill.status === VendorBillStatus.DRAFT || bill.status === VendorBillStatus.PENDING_MATCH) {
-      throw new ActionError("Run the 3-way match (or save the bill) before marking it paid");
-    }
+    // Nothing is payable before accounts approve it — a MATCHED or
+    // DISCREPANCY bill included. The button is hidden for those, but a stale
+    // tab (or a replayed request) still reaches this action.
+    const refusal = payRefusal(bill.billNo, bill.status);
+    if (refusal) throw new ActionError(refusal);
     const balance = toDecimal(bill.grandTotal).minus(toDecimal(bill.amountPaid));
-    // H3: flip the status FIRST via a guarded update (eligible = anything the
-    // pre-checks above didn't reject) so a double-click can't create two
-    // full-balance payment rows — the loser matches zero rows and aborts.
+    // H3: flip the status FIRST via a guarded update (eligible = the payable
+    // statuses only) so a double-click can't create two full-balance payment
+    // rows — the loser matches zero rows and aborts.
     const flipped = await tx.vendorBill.updateMany({
-      where: {
-        id,
-        status: {
-          notIn: [
-            VendorBillStatus.PAID,
-            VendorBillStatus.DRAFT,
-            VendorBillStatus.PENDING_MATCH,
-          ],
-        },
-      },
+      where: { id, status: { in: PAYABLE_STATUSES } },
       data: {
         amountPaid: bill.grandTotal.toString(),
         status: VendorBillStatus.PAID,
@@ -1941,6 +2004,7 @@ export async function getVendorBill(id: string) {
       vendor: true,
       po: { include: { lines: true, order: { select: { id: true, code: true, customer: { select: { name: true } } } } } },
       matchedBy: { select: { name: true } },
+      approvedBy: { select: { name: true } },
       lines: { orderBy: { sortOrder: "asc" } },
       payments: { where: { reversedAt: null }, orderBy: { paidAt: "desc" } },
     },
@@ -2040,13 +2104,10 @@ export async function applyVendorAdvanceToBill(
       if (advance.vendorId !== bill.vendorId) {
         throw new ActionError("This advance belongs to a different supplier.");
       }
-      if (
-        bill.status === VendorBillStatus.DRAFT ||
-        bill.status === VendorBillStatus.PENDING_MATCH ||
-        bill.status === VendorBillStatus.PAID
-      ) {
-        throw new ActionError(`Cannot apply an advance to a bill that's ${humanizeStatus(bill.status)}.`);
-      }
+      // Applying an advance posts a payment row and can settle the bill, so
+      // it goes through the same approval gate as any other payment.
+      const refusal = payRefusal(bill.billNo, bill.status);
+      if (refusal) throw new ActionError(refusal);
       const balance = toDecimal(bill.grandTotal).minus(toDecimal(bill.amountPaid));
       const amount = toDecimal(advance.amount);
       if (amount.gt(balance)) {

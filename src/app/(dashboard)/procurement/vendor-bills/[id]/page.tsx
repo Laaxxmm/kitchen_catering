@@ -15,6 +15,8 @@ import {
   matchVendorBill,
 } from "@/server/actions/procurement";
 import { recordVendorBillPayment, reverseVendorBillPayment } from "@/server/actions/payments";
+import { listDocuments } from "@/server/actions/documents";
+import { isPayable } from "@/lib/vendor-bill-gates";
 import { BillPaymentForm } from "./_components/BillPaymentForm";
 import { MarkPaidModal } from "@/components/ik/finance/MarkPaidModal";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
@@ -44,7 +46,13 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
   // Accounts approve supplier bills too (client item #12) — mirrors
   // BILL_APPROVE_ROLES in the action; PO approval stays admin/manager.
   const canApprove = (bill.status === VendorBillStatus.MATCHED || bill.status === VendorBillStatus.DISCREPANCY) && (role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS);
-  const canPay = bill.status === VendorBillStatus.APPROVED && (role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS);
+  // Approval signs off the supplier's own invoice — it has to be attached
+  // first, so say that where the Approve button would otherwise be.
+  const hasSupplierInvoice = canApprove
+    ? (await listDocuments(DocumentEntityType.VENDOR_BILL, bill.id)).length > 0
+    : false;
+  const needsApprovalReason = bill.status === VendorBillStatus.DISCREPANCY;
+  const canPay = isPayable(bill.status) && (role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS);
   // Unapplied advances for this supplier — offered on payable bills so money
   // already handed over settles the bill instead of being paid twice.
   const openAdvances = canPay ? await listOpenVendorAdvances(bill.vendorId) : [];
@@ -53,9 +61,9 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
     "use server";
     return await matchVendorBill(id);
   }
-  async function doApprove() {
+  async function doApprove(reason?: string) {
     "use server";
-    return await approveVendorBill(id);
+    return await approveVendorBill(id, reason ?? null);
   }
   async function doPay(input: { amount: string; method: PaymentMethod; reference: string | null; notes: string | null; paidAt: string }) {
     "use server";
@@ -100,7 +108,11 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
             <Link href="/procurement/vendor-bills"><Button variant="outline">Back</Button></Link>
             {canEdit && <Link href={`/procurement/vendor-bills/${bill.id}/edit`}><Button variant="outline">Edit</Button></Link>}
             {canMatch && <ActionResultButton action={doMatch} successMessage="3-way match complete">Run 3-way match</ActionResultButton>}
-            {canApprove && <ActionResultButton action={doApprove} successMessage="Bill approved">Approve</ActionResultButton>}
+            {/* A mismatched bill is approved from the banner below, where the
+                reason box is — never with a one-click button. */}
+            {canApprove && hasSupplierInvoice && !needsApprovalReason && (
+              <ActionResultButton action={doApprove} successMessage="Bill approved">Approve</ActionResultButton>
+            )}
             {canPay && (
               <MarkPaidModal
                 outstanding={(Number(bill.grandTotal) - Number(bill.amountPaid)).toFixed(2)}
@@ -123,6 +135,29 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
         )}
       </div>
 
+      {canApprove && !hasSupplierInvoice && (
+        <div className="mb-4 rounded-md border border-amber-wash bg-amber-wash p-3 text-[12.5px] text-ik-ink-2">
+          <h3 className="mb-1 font-medium text-amber">Supplier&apos;s invoice not attached</h3>
+          Upload the invoice the vendor gave you (bottom of this page) before approving. Approving
+          is the sign-off on that document.
+        </div>
+      )}
+
+      {(bill.discrepancyEditReason || bill.approvalNote) && (
+        <div className="mb-4 grid gap-1 rounded-md border border-ik-rule bg-ik-card p-3 text-[12.5px] text-ik-ink-2">
+          {bill.discrepancyEditReason && (
+            <p><span className="text-ik-ink-3">Amounts corrected by accounts:</span> {bill.discrepancyEditReason}</p>
+          )}
+          {bill.approvalNote && (
+            <p>
+              <span className="text-ik-ink-3">Approved despite the mismatch</span>
+              {bill.approvedBy ? ` by ${bill.approvedBy.name}` : ""}
+              {bill.approvedAt ? ` on ${formatIST(bill.approvedAt, "yyyy-MM-dd")}` : ""}: {bill.approvalNote}
+            </p>
+          )}
+        </div>
+      )}
+
       {discrepancies.length > 0 && (
         <div className="mb-4 rounded-md border border-amber-wash bg-amber-wash p-3 text-[12.5px]">
           <h3 className="mb-1 font-medium text-amber">3-way match found {discrepancies.length} discrepancy(ies)</h3>
@@ -135,6 +170,25 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Separate from the list above: a DISCREPANCY bill whose note failed to
+          parse still needs a way to be approved. */}
+      {canApprove && needsApprovalReason && hasSupplierInvoice && (
+        <div className="mb-4 rounded-md border border-amber-wash bg-amber-wash p-3 text-[12.5px]">
+          <p className="mb-1.5 text-ik-ink-2">
+            We pay for what was ordered and received. Either{" "}
+            <Link href={`/procurement/vendor-bills/${bill.id}/edit`} className="text-brand hover:underline">edit the bill</Link>{" "}
+            down to the correct amounts, or write why it&apos;s being approved as it stands.
+          </p>
+          <InlineReasonForm
+            action={doApprove}
+            submitLabel="Approve anyway"
+            successMessage="Bill approved"
+            placeholder="Reason for approving"
+            inputClassName="h-8 w-full max-w-sm text-[12.5px]"
+          />
         </div>
       )}
 

@@ -30,7 +30,7 @@ interface ReminderRunResult {
   scanned: number;
   notified: number;
   tasksCreated: number;
-  /** L10: bills flipped APPROVED/MATCHED → OVERDUE this run. */
+  /** L10: bills flipped APPROVED → OVERDUE this run. */
   billsFlippedOverdue: number;
   /** M18: POs stuck in PENDING_APPROVAL nudged to their approver tier. */
   poApprovalNudges: number;
@@ -72,10 +72,12 @@ export async function runVendorPaymentRemindersInternal(): Promise<ReminderRunRe
 
   // L10: flip past-due bills to OVERDUE first, so the AP donut / filters
   // reflect reality and the reminder scan below (which includes OVERDUE)
-  // still nags about them. Guarded updateMany: only APPROVED/MATCHED move.
+  // still nags about them. Guarded updateMany: only APPROVED moves — OVERDUE
+  // is payable, so flipping an unapproved MATCHED bill into it would hand the
+  // calendar the power to make a bill payable without anyone approving it.
   const overdueFlip = await db.vendorBill.updateMany({
     where: {
-      status: { in: [VendorBillStatus.APPROVED, VendorBillStatus.MATCHED] },
+      status: VendorBillStatus.APPROVED,
       dueDate: { lt: now },
     },
     data: { status: VendorBillStatus.OVERDUE },

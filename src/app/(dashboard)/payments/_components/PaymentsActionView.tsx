@@ -17,6 +17,8 @@ export interface PayBill {
   amount: string;
   due: string | null;
   overdue: boolean;
+  /** Approved (or approved and past due). Anything else needs approving first. */
+  payable: boolean;
 }
 export interface CollectInvoice {
   id: string;
@@ -83,12 +85,20 @@ export function PaymentsActionView({ toPay, toCollect, overpaid, canMarkCustomer
                   ? <StatusPill tone="red">Overdue {formatIST(new Date(b.due), "d MMM")}</StatusPill>
                   : <span className="text-[11.5px] text-ik-ink-3">due {formatIST(new Date(b.due), "d MMM")}</span>)}
                 <span className="ml-auto font-mono text-[13px] text-ik-ink">{formatINRWhole(b.amount)}</span>
-                <MarkPaidModal
-                  outstanding={b.amount}
-                  onSubmit={(input) =>
-                    markVendorBillPaid({ id: b.id, method: input.method, reference: input.reference, paidAt: input.paidAt, notes: input.notes })
-                  }
-                />
+                {/* Payment waits on the accounts approval — offer that step
+                    rather than a button the action would refuse. */}
+                {b.payable ? (
+                  <MarkPaidModal
+                    outstanding={b.amount}
+                    onSubmit={(input) =>
+                      markVendorBillPaid({ id: b.id, method: input.method, reference: input.reference, paidAt: input.paidAt, notes: input.notes })
+                    }
+                  />
+                ) : (
+                  <Link href={`/procurement/vendor-bills/${b.id}`}>
+                    <Button size="sm" variant="outline">Approve first</Button>
+                  </Link>
+                )}
               </li>
             ))}
           </ul>

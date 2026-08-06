@@ -4,7 +4,7 @@ import { Role, VendorPOStatus } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { gateRolePage } from "@/server/rbac";
 import { listVendors } from "@/server/actions/vendors";
-import { createVendorBill, getVendorPO, listVendorPOs } from "@/server/actions/procurement";
+import { createVendorBill, getVendorPO, listVendorPOs, poHasReceivedGoods } from "@/server/actions/procurement";
 import { toDecimal } from "@/lib/money";
 import { VendorBillForm } from "./_components/VendorBillForm";
 
@@ -31,6 +31,10 @@ export default async function NewVendorBillPage({
     }),
     poId ? getVendorPO(poId) : Promise.resolve(null),
   ]);
+
+  // "Invoice cannot be generated before accepting GRN" — say so up front
+  // instead of letting them key a whole bill and be refused on save.
+  const goodsReceived = poId ? await poHasReceivedGoods(poId) : true;
 
   // Pre-fill the bill from the PO. We use *received* qty as the default
   // since the supplier bills for what was actually delivered; if no GRN
@@ -77,6 +81,14 @@ export default async function NewVendorBillPage({
             : "Capture the supplier's invoice. If you link a PO, the 3-way match (bill ↔ PO ↔ delivery note) runs automatically when you save."
         }
       />
+
+      {po && !goodsReceived && (
+        <div className="mb-4 rounded-md border border-alert/40 bg-alert-wash p-3 text-[13px] text-ik-ink-2">
+          <strong className="text-alert">Nothing received against {po.poNo} yet.</strong> Accept the
+          GRN for this purchase order first — a supplier bill can&apos;t be raised before the goods
+          are in, and saving will be refused.
+        </div>
+      )}
 
       {po && (
         <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">

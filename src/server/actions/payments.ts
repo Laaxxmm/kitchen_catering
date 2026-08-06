@@ -24,6 +24,7 @@ import {
 } from "@/lib/validators";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
+import { overpayRefusal, payRefusal } from "@/lib/vendor-bill-gates";
 import type { Prisma } from "@prisma/client";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
@@ -322,18 +323,14 @@ async function recordVendorBillPaymentInner(raw: unknown): Promise<{ ok: true; i
     await lockVendorBillRow(tx, input.billId);
     const bill = await tx.vendorBill.findUnique({
       where: { id: input.billId },
-      select: { id: true, status: true, grandTotal: true },
+      select: { id: true, billNo: true, status: true, grandTotal: true },
     });
     if (!bill) throw new ActionError("Bill not found");
-    // OVERDUE is just APPROVED/MATCHED past its due date (the reminders
-    // cron flips it) — it must stay payable.
-    if (
-      bill.status !== VendorBillStatus.APPROVED &&
-      bill.status !== VendorBillStatus.MATCHED &&
-      bill.status !== VendorBillStatus.OVERDUE
-    ) {
-      throw new ActionError(`Cannot pay a bill in status ${bill.status}`);
-    }
+    // Accounts approve the supplier's invoice, and only then is it payable —
+    // a MATCHED (never signed off) or DISCREPANCY bill is not, however old
+    // the browser tab that posted this is.
+    const refusal = payRefusal(bill.billNo, bill.status);
+    if (refusal) throw new ActionError(refusal);
     // H2: over-payment guard (was missing on the vendor side) — mirror the
     // customer-invoice guard. Sum live payments, refuse anything over balance.
     const priorRows = await tx.vendorBillPayment.findMany({
@@ -341,10 +338,8 @@ async function recordVendorBillPaymentInner(raw: unknown): Promise<{ ok: true; i
       select: { amount: true },
     });
     const priorPaid = priorRows.reduce((s, r) => s.plus(toDecimal(r.amount)), new Decimal(0));
-    const outstanding = toDecimal(bill.grandTotal).minus(priorPaid);
-    if (toDecimal(input.amount).gt(outstanding)) {
-      throw new ActionError(`That's more than the outstanding balance (₹${outstanding.toFixed(2)}).`);
-    }
+    const overpay = overpayRefusal(input.amount, bill.grandTotal.toString(), priorPaid.toString());
+    if (overpay) throw new ActionError(overpay);
     const payment = await tx.vendorBillPayment.create({
       data: {
         vendorBillId: bill.id,

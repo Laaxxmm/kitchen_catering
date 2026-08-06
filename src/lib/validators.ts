@@ -708,10 +708,13 @@ export type VendorBillCreateInputT = z.infer<typeof VendorBillCreateInput>;
 
 // Editing an existing bill: vendor + PO linkage are fixed at creation
 // (changing them would orphan the 3-way-match context); everything else
-// is a full replace.
+// is a full replace. `reason` is required only when the bill failed the
+// 3-way match — the action enforces that, since only it knows the status.
 export const VendorBillUpdateInput = VendorBillCreateInput.omit({
   vendorId: true,
   poId: true,
+}).extend({
+  reason: z.string().max(500).nullable().optional(),
 });
 export type VendorBillUpdateInputT = z.infer<typeof VendorBillUpdateInput>;
 

@@ -23,7 +23,7 @@ interface Props {
   onSubmit: (input: {
     vendorId: string; poId: string | null; vendorBillNo: string | null;
     issueDate: string | undefined; dueDate: string | null; notes: string | null;
-    lines: DraftLine[];
+    reason: string | null; lines: DraftLine[];
   }) => Promise<ActionResult | void>;
   // Pre-fill when the bill is being recorded against a known PO (the
   // "Record supplier bill" button on the PO/GRN detail page).
@@ -34,6 +34,10 @@ interface Props {
   // pre-filled and the vendor + PO linkage is locked — same defaults
   // pattern as the customer/order forms.
   mode?: "create" | "edit";
+  // Editing a bill that failed the 3-way match: accounts are changing what
+  // the supplier gets paid, so the reason is mandatory (the action refuses
+  // without one too).
+  reasonRequired?: boolean;
   defaults?: {
     vendorBillNo?: string;
     issueDate?: string;
@@ -45,7 +49,7 @@ interface Props {
 
 function empty(): DraftLine { return { description: "", quantity: "1", unit: "kg", unitPrice: "0", gstRatePct: "5" }; }
 
-export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initialPoId, initialLines, mode = "create", defaults, submitLabel }: Props) {
+export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initialPoId, initialLines, mode = "create", reasonRequired = false, defaults, submitLabel }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const isEdit = mode === "edit";
@@ -55,6 +59,7 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
   const [issueDate, setIssueDate] = useState(defaults?.issueDate ?? "");
   const [dueDate, setDueDate] = useState(defaults?.dueDate ?? "");
   const [notes, setNotes] = useState(defaults?.notes ?? "");
+  const [reason, setReason] = useState("");
   const [lines, setLines] = useState<DraftLine[]>(
     initialLines && initialLines.length > 0 ? initialLines : [empty()],
   );
@@ -93,6 +98,7 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
     if (!vendorId) return toast.error("Pick a vendor");
     const payload = lines.filter((l) => l.description && Number(l.quantity) > 0);
     if (payload.length === 0) return toast.error("Add at least one line");
+    if (reasonRequired && !reason.trim()) return toast.error("Say why you're changing the amounts");
     startTransition(async () => {
       try {
         const res = await onSubmit({
@@ -102,6 +108,7 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
           issueDate: issueDate || undefined,
           dueDate: dueDate || null,
           notes: notes || null,
+          reason: reason.trim() || null,
           lines: payload,
         });
         if (res && !res.ok) {
@@ -203,6 +210,21 @@ export function VendorBillForm({ vendors, pos, onSubmit, initialVendorId, initia
         <Label htmlFor="notes">Notes</Label>
         <Textarea id="notes" rows={2} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </div>
+
+      {reasonRequired && (
+        <div className="grid gap-1 max-w-2xl">
+          <Label htmlFor="reason">Reason for the change<span className="text-gold" aria-hidden> *</span></Label>
+          <Textarea
+            id="reason"
+            rows={2}
+            maxLength={500}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. Supplier billed 20kg, GRN accepted 18kg — corrected to 18kg."
+          />
+          <p className="text-[11.5px] text-ik-ink-3">Kept on the bill so the change is attributable.</p>
+        </div>
+      )}
 
       <div className="sticky bottom-0 z-10 -mx-4 mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-ik-rule bg-ik-paper/90 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-ik-paper/75 md:-mx-6 md:px-6">
         <span className="text-[11.5px] text-ik-ink-3">

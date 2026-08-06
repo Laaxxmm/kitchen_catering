@@ -28,6 +28,8 @@ export default async function EditVendorBillPage({ params }: { params: Promise<{
     bill.status === VendorBillStatus.DISCREPANCY;
   if (!editable) redirect(`/procurement/vendor-bills/${id}`);
 
+  const isDiscrepancy = bill.status === VendorBillStatus.DISCREPANCY;
+
   async function save(input: {
     vendorId: string;
     poId: string | null;
@@ -35,6 +37,7 @@ export default async function EditVendorBillPage({ params }: { params: Promise<{
     issueDate: string | undefined;
     dueDate: string | null;
     notes: string | null;
+    reason: string | null;
     lines: Array<{ description: string; quantity: string; unit: string; unitPrice: string; gstRatePct: string }>;
   }) {
     "use server";
@@ -44,6 +47,7 @@ export default async function EditVendorBillPage({ params }: { params: Promise<{
       issueDate: input.issueDate,
       dueDate: input.dueDate,
       notes: input.notes,
+      reason: input.reason,
       lines: input.lines,
     });
     if (!r.ok) return r;
@@ -57,6 +61,12 @@ export default async function EditVendorBillPage({ params }: { params: Promise<{
         title={`Edit ${bill.billNo}`}
         description="Fix the vendor invoice number, dates, notes or lines. Totals are recomputed on save, and any earlier 3-way match result is cleared — re-run it after."
       />
+      {isDiscrepancy && (
+        <div className="mx-auto mb-4 max-w-4xl rounded-md border border-amber-wash bg-amber-wash p-3 text-[12.5px] text-ik-ink-2">
+          This bill didn&apos;t match the purchase order and the goods received. Correct the lines to
+          what was actually ordered and received — the reason you give is kept on the bill.
+        </div>
+      )}
       <VendorBillForm
         vendors={[{ id: bill.vendor.id, name: bill.vendor.name, code: bill.vendor.code }]}
         pos={bill.po ? [{ id: bill.po.id, poNo: bill.po.poNo, vendorId: bill.vendorId, vendorName: bill.vendor.name }] : []}
@@ -71,6 +81,7 @@ export default async function EditVendorBillPage({ params }: { params: Promise<{
           gstRatePct: l.gstRatePct.toString(),
         }))}
         mode="edit"
+        reasonRequired={isDiscrepancy}
         defaults={{
           vendorBillNo: bill.vendorBillNo ?? "",
           issueDate: bill.issueDate ? formatIST(bill.issueDate, "yyyy-MM-dd") : "",

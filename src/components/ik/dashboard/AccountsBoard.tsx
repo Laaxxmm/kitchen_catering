@@ -21,6 +21,8 @@ export interface Payable {
   billNo: string;
   vendorName: string;
   outstanding: string;
+  /** Approved (or overdue, i.e. approved and late). Anything else can't be paid yet. */
+  payable: boolean;
 }
 
 /**
@@ -90,18 +92,26 @@ export function AccountsBoard({ receivables, payables }: { receivables: Receivab
                 </div>
                 <div className="mt-1 text-[13px] text-ik-ink"><strong>{p.vendorName}</strong></div>
                 <div className="mt-2.5 flex items-center gap-2">
-                  <MarkPaidModal
-                    outstanding={p.outstanding}
-                    onSubmit={(input) =>
-                      markVendorBillPaid({
-                        id: p.id,
-                        method: input.method,
-                        reference: input.reference,
-                        paidAt: input.paidAt,
-                        notes: input.notes,
-                      })
-                    }
-                  />
+                  {/* Nothing is payable before accounts approve it — offer the
+                      approval step instead of a button that would be refused. */}
+                  {p.payable ? (
+                    <MarkPaidModal
+                      outstanding={p.outstanding}
+                      onSubmit={(input) =>
+                        markVendorBillPaid({
+                          id: p.id,
+                          method: input.method,
+                          reference: input.reference,
+                          paidAt: input.paidAt,
+                          notes: input.notes,
+                        })
+                      }
+                    />
+                  ) : (
+                    <Link href={`/procurement/vendor-bills/${p.id}`}>
+                      <Button size="sm" variant="outline">Approve first</Button>
+                    </Link>
+                  )}
                   <Link href={`/procurement/vendor-bills/${p.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">Open</Link>
                 </div>
               </li>

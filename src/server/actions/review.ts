@@ -4,6 +4,7 @@ import { Role, VendorBillStatus } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { toDecimal } from "@/lib/money";
+import { isPayable } from "@/lib/vendor-bill-gates";
 
 const REVIEW_ROLES = [Role.ADMIN, Role.MANAGER];
 
@@ -35,6 +36,7 @@ export async function getReviewWorklist() {
       select: {
         id: true,
         billNo: true,
+        status: true,
         grandTotal: true,
         amountPaid: true,
         dueDate: true,
@@ -66,6 +68,9 @@ export async function getReviewWorklist() {
       amount: toDecimal(b.grandTotal).minus(toDecimal(b.amountPaid)).toString(),
       due: b.dueDate ? b.dueDate.toISOString() : null,
       overdue: !!(b.dueDate && b.dueDate < now),
+      // A matched bill nobody has approved is still on the list — it just
+      // needs approving before any money moves.
+      payable: isPayable(b.status),
     }))
     .filter((b) => toDecimal(b.amount).gt(0));
 

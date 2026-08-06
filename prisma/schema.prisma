@@ -424,6 +424,7 @@ model User {
   vendorPosAdminApproved          VendorPO[]               @relation("VendorPOAdminApprovedBy")
   grnsReceived                    GRN[]                    @relation("GRNReceivedBy")
   vendorBillsMatched              VendorBill[]             @relation("VendorBillMatchedBy")
+  vendorBillsApproved             VendorBill[]             @relation("VendorBillApprovedBy")
   customerInvoicePaymentsRecorded CustomerInvoicePayment[] @relation("CustomerInvoicePaymentRecordedBy")
   customerInvoicePaymentsReversed CustomerInvoicePayment[] @relation("CustomerInvoicePaymentReversedBy")
   vendorBillPaymentsRecorded      VendorBillPayment[]      @relation("VendorBillPaymentRecordedBy")
@@ -1552,6 +1553,16 @@ model VendorBill {
   matchedAt       DateTime?
   discrepancyNote String?
   notes           String?
+  // Who signed off on paying this supplier, and on what terms. The audit log
+  // keeps only a payload hash, so anything a human has to read back later
+  // (why a mismatched bill was still approved / still edited) lives here.
+  approvedByUserId String?
+  approvedBy       User?           @relation("VendorBillApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedAt       DateTime?
+  /// Why a bill that failed the 3-way match was approved anyway.
+  approvalNote     String?
+  /// Why accounts changed a mismatched bill's amounts.
+  discrepancyEditReason String?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 

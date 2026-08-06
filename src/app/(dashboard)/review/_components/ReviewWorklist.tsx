@@ -11,7 +11,7 @@ import { markVendorBillPaid } from "@/server/actions/procurement";
 
 export interface Worklist {
   billsToMatch: { id: string; billNo: string; vendor: string; amount: string }[];
-  billsToPay: { id: string; billNo: string; vendor: string; amount: string; due: string | null; overdue: boolean }[];
+  billsToPay: { id: string; billNo: string; vendor: string; amount: string; due: string | null; overdue: boolean; payable: boolean }[];
   lowStock: { id: string; name: string; unit: string; onHand: string; reorderLevel: string; out: boolean }[];
   total: number;
 }
@@ -60,18 +60,26 @@ export function ReviewWorklist({ data }: { data: Worklist }) {
                 )}
               </div>
               <div className="ml-auto">
-                <MarkPaidModal
-                  outstanding={b.amount}
-                  onSubmit={(input) =>
-                    markVendorBillPaid({
-                      id: b.id,
-                      method: input.method,
-                      reference: input.reference,
-                      paidAt: input.paidAt,
-                      notes: input.notes,
-                    })
-                  }
-                />
+                {/* Approval comes first — a bill nobody has signed off can't
+                    be paid, so send them to the bill instead. */}
+                {b.payable ? (
+                  <MarkPaidModal
+                    outstanding={b.amount}
+                    onSubmit={(input) =>
+                      markVendorBillPaid({
+                        id: b.id,
+                        method: input.method,
+                        reference: input.reference,
+                        paidAt: input.paidAt,
+                        notes: input.notes,
+                      })
+                    }
+                  />
+                ) : (
+                  <Link href={`/procurement/vendor-bills/${b.id}`}>
+                    <Button size="sm" variant="outline">Approve first</Button>
+                  </Link>
+                )}
               </div>
             </Row>
           ))}
