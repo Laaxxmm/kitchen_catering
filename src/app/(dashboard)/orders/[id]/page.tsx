@@ -22,6 +22,7 @@ import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoic
 import { listDishes } from "@/server/actions/dishes";
 import { listAssignableUsers } from "@/server/actions/users";
 import { isEventDeliveryChannel, isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
+import { computeRevisionBand, type RevisionBand } from "@/lib/order-revision";
 import {
   FORCE_DELIVERABLE_ORDER_STATUSES,
   REQUISITION_ELIGIBLE_ORDER_STATUSES,
@@ -30,6 +31,7 @@ import {
 import { formatINR } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
+import { StatusPill, type PillTone } from "@/components/ik/StatusPill";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 import { HandoverChecklist } from "@/components/ik/HandoverChecklist";
 import { StaffAllocation } from "@/components/ik/StaffAllocation";
@@ -238,6 +240,22 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // invoices, no margin. They need dish + portions + notes only.
   const chefOnlyView = role === Role.KITCHEN_HEAD;
 
+  // How loudly this order's revisions need reading — the same banding the
+  // reviseOrder gate applies. A CRITICAL one is lifted out of the left column
+  // and put above everything else: whoever opens this order has to see the
+  // change before they act on anything stale below it.
+  const revisionBand: RevisionBand | null =
+    order.orderRevisions.length > 0
+      ? computeRevisionBand({ eventDate: order.eventDate, status: order.status })
+      : null;
+  const revisionPanel = revisionBand && (
+    <RevisionsPanel
+      revisions={order.orderRevisions}
+      band={revisionBand}
+      chefOnlyView={chefOnlyView}
+    />
+  );
+
   return (
     <>
       <PageHeader
@@ -311,6 +329,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         onMarkServed={doMarkServed}
       />
 
+      {revisionBand === "CRITICAL" && <div className="mb-6">{revisionPanel}</div>}
 
       <div className="grid gap-6 md:grid-cols-3">
         <div className="md:col-span-2 grid gap-6">
@@ -358,84 +377,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           )}
 
           {/* Revisions — what the manager changed mid-flight, in plain words.
-              The chef cooks from this, so it's visible to every role; only
-              the money line is hidden from the chef view. */}
-          {order.orderRevisions.length > 0 && (
-            <section className="rounded-2xl border border-amber/40 bg-amber-wash/30 shadow-ik-card p-4">
-              <h3 className="mb-2 font-medium text-[14px] text-amber-700">
-                Order revised {order.orderRevisions.length > 1 ? `${order.orderRevisions.length} times` : ""}
-              </h3>
-              <ol className="grid gap-3">
-                {order.orderRevisions.map((rev) => {
-                  const changes = (rev.lineChanges ?? []) as Array<{
-                    kind: "added" | "removed" | "portions";
-                    dish: string;
-                    from?: string;
-                    to?: string;
-                  }>;
-                  const paxChanged = rev.beforeHeadcount !== rev.afterHeadcount;
-                  const dateChanged = rev.beforeEventDate.getTime() !== rev.afterEventDate.getTime();
-                  const mealChanged = rev.beforeMealType !== rev.afterMealType;
-                  const valueChanged = rev.beforeContractValue.toString() !== rev.afterContractValue.toString();
-                  return (
-                    <li key={rev.id} className="rounded-xl border border-ik-rule bg-ik-card p-3 text-[12.5px]">
-                      <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
-                        <span className="font-medium text-ik-ink">{rev.revisedBy.name}</span>
-                        <span className="font-mono text-[11px] text-ik-ink-3">{formatIST(rev.createdAt)}</span>
-                      </div>
-                      <ul className="grid gap-1 text-ik-ink-2">
-                        {paxChanged && (
-                          <li>
-                            Pax: <s className="text-ik-ink-3">{rev.beforeHeadcount}</s>{" "}
-                            <strong className="text-ik-ink">→ {rev.afterHeadcount}</strong>
-                          </li>
-                        )}
-                        {dateChanged && (
-                          <li>
-                            Event: <s className="text-ik-ink-3">{formatIST(rev.beforeEventDate, "EEE d MMM HH:mm")}</s>{" "}
-                            <strong className="text-ik-ink">→ {formatIST(rev.afterEventDate, "EEE d MMM HH:mm")}</strong>
-                          </li>
-                        )}
-                        {mealChanged && (
-                          <li>
-                            Meal: <s className="text-ik-ink-3">{rev.beforeMealType.replace("_", " ")}</s>{" "}
-                            <strong className="text-ik-ink">→ {rev.afterMealType.replace("_", " ")}</strong>
-                          </li>
-                        )}
-                        {!chefOnlyView && valueChanged && (
-                          <li>
-                            Value: <s className="text-ik-ink-3">{formatINR(rev.beforeContractValue)}</s>{" "}
-                            <strong className="text-ik-ink">→ {formatINR(rev.afterContractValue)}</strong>
-                          </li>
-                        )}
-                        {changes.map((c, i) => (
-                          <li key={i}>
-                            {c.kind === "added" && (
-                              <>Added <strong className="text-ik-ink">{c.dish}</strong> · {c.to} portions</>
-                            )}
-                            {c.kind === "removed" && (
-                              <>Removed <s className="text-ik-ink-3">{c.dish}</s></>
-                            )}
-                            {c.kind === "portions" && (
-                              <>
-                                {c.dish}: <s className="text-ik-ink-3">{c.from}</s>{" "}
-                                <strong className="text-ik-ink">→ {c.to} portions</strong>
-                              </>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                      {rev.note && (
-                        <p className="mt-2 rounded-md bg-ik-paper-alt px-2 py-1.5 italic text-ik-ink">
-                          “{rev.note}” <span className="not-italic text-ik-ink-3">— {rev.revisedBy.name}</span>
-                        </p>
-                      )}
-                    </li>
-                  );
-                })}
-              </ol>
-            </section>
-          )}
+              A CRITICAL one is hoisted above the grid instead (see above), so
+              only the calmer bands sit down here in the column. */}
+          {revisionBand !== "CRITICAL" && revisionPanel}
 
           {/* Decision history */}
           <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
@@ -774,6 +718,120 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         </aside>
       </div>
     </>
+  );
+}
+
+type OrderDetail = NonNullable<Awaited<ReturnType<typeof getOrder>>>;
+
+/** How each band dresses the revisions panel. No motion of any kind: a
+ *  revision people miss is a real problem, but a flashing panel is a worse
+ *  one (WCAG 2.3.1) — the weight comes from colour and position instead. */
+const REVISION_SKIN: Record<RevisionBand, { shell: string; heading: string; pill: PillTone; pillLabel: string }> = {
+  CRITICAL: { shell: "border-alert bg-alert-wash", heading: "text-alert", pill: "red", pillLabel: "Critical" },
+  URGENT: { shell: "border-amber bg-amber-wash/60", heading: "text-amber-700", pill: "amber", pillLabel: "Urgent" },
+  NORMAL: { shell: "border-amber/40 bg-amber-wash/30", heading: "text-amber-700", pill: "grey", pillLabel: "Revised" },
+};
+
+/**
+ * What the manager changed mid-flight, in plain words. The chef cooks from
+ * this, so it's visible to every role; only the money line is hidden from the
+ * chef view. Banded by how much the change is going to hurt — CRITICAL is
+ * rendered above the fold by the caller, not tucked into the column.
+ */
+function RevisionsPanel({
+  revisions,
+  band,
+  chefOnlyView,
+}: {
+  revisions: OrderDetail["orderRevisions"];
+  band: RevisionBand;
+  chefOnlyView: boolean;
+}) {
+  const skin = REVISION_SKIN[band];
+  return (
+    <section className={"rounded-2xl border shadow-ik-card p-4 " + skin.shell}>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h3 className={"font-medium text-[14px] " + skin.heading}>
+          Order revised {revisions.length > 1 ? `${revisions.length} times` : ""}
+        </h3>
+        <StatusPill tone={skin.pill}>{skin.pillLabel}</StatusPill>
+      </div>
+      {band === "CRITICAL" && (
+        <p className="mb-3 text-[12.5px] text-ik-ink">
+          The event is nearly here, or the kitchen is already working this order. Read this before
+          acting on anything else on the page — the dishes and quantities below have changed.
+        </p>
+      )}
+      <ol className="grid gap-3">
+        {revisions.map((rev) => {
+          const changes = (rev.lineChanges ?? []) as Array<{
+            kind: "added" | "removed" | "portions";
+            dish: string;
+            from?: string;
+            to?: string;
+          }>;
+          const paxChanged = rev.beforeHeadcount !== rev.afterHeadcount;
+          const dateChanged = rev.beforeEventDate.getTime() !== rev.afterEventDate.getTime();
+          const mealChanged = rev.beforeMealType !== rev.afterMealType;
+          const valueChanged = rev.beforeContractValue.toString() !== rev.afterContractValue.toString();
+          return (
+            <li key={rev.id} className="rounded-xl border border-ik-rule bg-ik-card p-3 text-[12.5px]">
+              <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
+                <span className="font-medium text-ik-ink">{rev.revisedBy.name}</span>
+                <span className="font-mono text-[11px] text-ik-ink-3">{formatIST(rev.createdAt)}</span>
+              </div>
+              <ul className="grid gap-1 text-ik-ink-2">
+                {paxChanged && (
+                  <li>
+                    Pax: <s className="text-ik-ink-3">{rev.beforeHeadcount}</s>{" "}
+                    <strong className="text-ik-ink">→ {rev.afterHeadcount}</strong>
+                  </li>
+                )}
+                {dateChanged && (
+                  <li>
+                    Event: <s className="text-ik-ink-3">{formatIST(rev.beforeEventDate, "EEE d MMM HH:mm")}</s>{" "}
+                    <strong className="text-ik-ink">→ {formatIST(rev.afterEventDate, "EEE d MMM HH:mm")}</strong>
+                  </li>
+                )}
+                {mealChanged && (
+                  <li>
+                    Meal: <s className="text-ik-ink-3">{rev.beforeMealType.replace("_", " ")}</s>{" "}
+                    <strong className="text-ik-ink">→ {rev.afterMealType.replace("_", " ")}</strong>
+                  </li>
+                )}
+                {!chefOnlyView && valueChanged && (
+                  <li>
+                    Value: <s className="text-ik-ink-3">{formatINR(rev.beforeContractValue)}</s>{" "}
+                    <strong className="text-ik-ink">→ {formatINR(rev.afterContractValue)}</strong>
+                  </li>
+                )}
+                {changes.map((c, i) => (
+                  <li key={i}>
+                    {c.kind === "added" && (
+                      <>Added <strong className="text-ik-ink">{c.dish}</strong> · {c.to} portions</>
+                    )}
+                    {c.kind === "removed" && (
+                      <>Removed <s className="text-ik-ink-3">{c.dish}</s></>
+                    )}
+                    {c.kind === "portions" && (
+                      <>
+                        {c.dish}: <s className="text-ik-ink-3">{c.from}</s>{" "}
+                        <strong className="text-ik-ink">→ {c.to} portions</strong>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {rev.note && (
+                <p className="mt-2 rounded-md bg-ik-paper-alt px-2 py-1.5 italic text-ik-ink">
+                  “{rev.note}” <span className="not-italic text-ik-ink-3">— {rev.revisedBy.name}</span>
+                </p>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 

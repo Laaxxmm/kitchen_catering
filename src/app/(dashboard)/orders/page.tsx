@@ -124,6 +124,21 @@ const TAB_DEFS: { key: string; label: string; group: Group | null; tone?: "red" 
 
 type OrderRow = Awaited<ReturnType<typeof listOrders>>[number];
 
+/**
+ * A revision nobody downstream has picked up: revised after the last time
+ * BOTH the chef and the store looked (never looked = epoch). One team having
+ * opened it isn't enough — the other is still cooking or issuing to the old
+ * numbers, which is exactly what the badge exists to catch.
+ */
+function revisionUnseen(o: OrderRow): boolean {
+  if (!o.lastRevisedAt) return false;
+  const revised = o.lastRevisedAt.getTime();
+  return (
+    revised > (o.revisionSeenByChefAt?.getTime() ?? 0) &&
+    revised > (o.revisionSeenByStoreAt?.getTime() ?? 0)
+  );
+}
+
 export default async function OrdersPage({
   searchParams,
 }: {
@@ -268,6 +283,14 @@ function OrdersTable({ rows, showValue = true }: { rows: OrderRow[]; showValue?:
                   <strong>{o.customer.name}</strong>
                 </Link>
                 <span className="ml-2 font-mono text-[11px] text-ik-ink-3">{o.code}</span>
+                {revisionUnseen(o) && (
+                  <span className="ml-2 inline-block align-middle">
+                    <StatusPill tone="red">
+                      REVISED
+                      <span className="sr-only"> — nobody in the kitchen or store has opened this revision yet</span>
+                    </StatusPill>
+                  </span>
+                )}
               </TableCell>
               <TableCell className="text-[12.5px] text-ik-ink-2">{o.mealType}</TableCell>
               <TableCell className="text-right">{o.headcount}</TableCell>

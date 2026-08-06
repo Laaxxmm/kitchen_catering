@@ -14,11 +14,17 @@ import {
   markBanquetLineAwaitingProcurement,
   markBanquetLinesAwaitingProcurement,
 } from "@/server/actions/banquet";
+import { acknowledgeRevisedDocument } from "@/server/actions/orders";
 import { listVendors } from "@/server/actions/vendors";
+import { db } from "@/server/db";
 import { formatIST } from "@/lib/time";
 import { LineFulfilControls, type VendorOption } from "./_components/LineFulfilControls";
 import { BulkProcureProvider } from "./_components/BulkProcure";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
+import {
+  RevisionBanner,
+  revisionOrderSelect,
+} from "@/app/(dashboard)/requisitions/[id]/_components/RevisionBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +81,21 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
       }))
     : [];
 
+  // getBanquetRequisition doesn't carry the order's revision stamps, so read
+  // them here. Skipped for a cancelled requisition — nothing left to chase,
+  // same as the revision board's filter.
+  const revisedOrder =
+    requisition.order && requisition.status !== BanquetRequisitionStatus.CANCELLED
+      ? await db.order.findUnique({
+          where: { id: requisition.order.id },
+          select: revisionOrderSelect,
+        })
+      : null;
+
+  async function doAckRevision() {
+    "use server";
+    return await acknowledgeRevisedDocument("BANQUET_REQUISITION", id);
+  }
   async function doIssue(lineId: string, qty: string) {
     "use server";
     return await issueBanquetRequisitionLine({ requisitionLineId: lineId, issueQty: qty });
@@ -128,6 +149,29 @@ export default async function BanquetRequisitionDetailPage({ params }: { params:
           </div>
         }
       />
+
+      <RevisionBanner
+        order={revisedOrder}
+        documentLabel="requisition"
+        createdAt={requisition.createdAt}
+        ackAt={requisition.revisionAckAt}
+        canAcknowledge={!!role && ISSUE_ROLES.includes(role)}
+        onAcknowledge={doAckRevision}
+      >
+        <p>
+          <strong>What to do:</strong> check every line below against the new numbers. Where more is
+          needed, raise the requested quantity on that line — the store then issues only the extra,
+          not the whole amount again. Anything already issued stays issued.
+        </p>
+        {requisition.order && (
+          <p className="mt-1.5">
+            <Link href={`/orders/${requisition.order.id}`} className="text-brand hover:underline">
+              Open the order
+            </Link>{" "}
+            to see what changed before you change anything here.
+          </p>
+        )}
+      </RevisionBanner>
 
       <div className="mb-4 flex flex-wrap items-center gap-3 text-[13px]">
         <StatusBadge status={requisition.status} />

@@ -1009,6 +1009,13 @@ model Order {
   managerChangeDecision     ApprovalDecision?
   managerChangeNote         String?
 
+  // Revision alerting. lastRevisedAt is stamped on every revision (null =
+  // never revised); the two seen-stamps are cleared by that same write, so a
+  // fresh revision re-alerts a team that acknowledged the previous one.
+  lastRevisedAt         DateTime?
+  revisionSeenByChefAt  DateTime?
+  revisionSeenByStoreAt DateTime?
+
   // Workflow
   kitchenSupervisorId String?
   kitchenSupervisor   User?     @relation("KitchenSupervisor", fields: [kitchenSupervisorId], references: [id])
@@ -1138,6 +1145,9 @@ model ChefRequisition {
   lastFulfilledById String?
   lastFulfilledBy   User?                 @relation("ChefRequisitionFulfilledBy", fields: [lastFulfilledById], references: [id])
   closedAt          DateTime?
+  // Chef re-checked these quantities against the order's latest revision.
+  // Older than Order.lastRevisedAt (or null) = still stale.
+  revisionAckAt     DateTime?
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
 
@@ -1436,6 +1446,8 @@ model VendorPO {
   adminApprovedAt        DateTime?
   sentAt                 DateTime?
   closedAt               DateTime?
+  // Store re-checked this PO against the order's latest revision.
+  revisionAckAt          DateTime?
   notes                  String?
   createdAt              DateTime        @default(now())
   updatedAt              DateTime        @updatedAt
@@ -2549,6 +2561,8 @@ model BanquetRequisition {
   lastFulfilledById String?
   lastFulfilledBy   User?                    @relation("BanquetRequisitionFulfilledBy", fields: [lastFulfilledById], references: [id])
   closedAt          DateTime?
+  // F&B/store re-checked these lines against the order's latest revision.
+  revisionAckAt     DateTime?
   createdAt         DateTime                 @default(now())
   updatedAt         DateTime                 @updatedAt
 

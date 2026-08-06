@@ -21,7 +21,8 @@ import { StoreBoard } from "@/components/ik/dashboard/StoreBoard";
 import { StoreUpcoming } from "@/components/ik/dashboard/StoreUpcoming";
 import { ManagerApprovalsBoard } from "@/components/ik/dashboard/ManagerApprovalsBoard";
 import { AccountsBoard } from "@/components/ik/dashboard/AccountsBoard";
-import { listOrders, listUpcomingOrdersForStore } from "@/server/actions/orders";
+import { listOrders, listUpcomingOrdersForStore, listRevisedOrders, type RevisedOrderRow } from "@/server/actions/orders";
+import type { RevisedOrderCard, RevisionLineChange } from "@/components/ik/dashboard/RevisedOrdersPanel";
 import { listChefRequisitions } from "@/server/actions/chef-requisitions";
 import { listVendorPOs, listVendorBills } from "@/server/actions/procurement";
 import { listPendingVendors } from "@/server/actions/vendors";
@@ -41,6 +42,34 @@ import {
 import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
+
+/** Serialise revised orders for the boards — ISO dates, like every other
+ *  board prop, and the lineChanges JSON column narrowed to its one shape. */
+function toRevisedCards(rows: RevisedOrderRow[]): RevisedOrderCard[] {
+  return rows.map((r) => ({
+    id: r.id,
+    code: r.code,
+    customerName: r.customerName,
+    eventDate: r.eventDate.toISOString(),
+    headcount: r.headcount,
+    band: r.band,
+    revision: r.revision
+      ? {
+          note: r.revision.note,
+          beforeHeadcount: r.revision.beforeHeadcount,
+          afterHeadcount: r.revision.afterHeadcount,
+          beforeEventDate: r.revision.beforeEventDate.toISOString(),
+          afterEventDate: r.revision.afterEventDate.toISOString(),
+          beforeMealType: r.revision.beforeMealType,
+          afterMealType: r.revision.afterMealType,
+          lineChanges: Array.isArray(r.revision.lineChanges)
+            ? (r.revision.lineChanges as unknown as RevisionLineChange[])
+            : [],
+        }
+      : null,
+    documents: r.documents,
+  }));
+}
 
 /** Group a record by IST calendar: today / within 7 days / earlier. */
 function logBucket(date: Date): LogBucket {
@@ -94,9 +123,12 @@ export default async function DashboardPage({
     // Scoped board for the cards + unscoped list for pill counts, so the
     // chef sees "Tomorrow (2)" at a glance instead of an empty Today with
     // no hint that work is queued ahead.
-    const [board, allBoard] = await Promise.all([
+    const [board, allBoard, revised] = await Promise.all([
       listChefBoardOrders(window ?? undefined),
       listChefBoardOrders(),
+      // Never scoped by the date pills — a revision the kitchen hasn't seen
+      // must show up whatever window they happen to be looking at.
+      listRevisedOrders("chef"),
     ]);
     const inWindow = (d: Date, w: { from: Date; toExclusive: Date }) =>
       d.getTime() >= w.from.getTime() && d.getTime() < w.toExclusive.getTime();
@@ -145,6 +177,7 @@ export default async function DashboardPage({
             </p>
           )}
           <ChefWorkScreen
+            revised={toRevisedCards(revised)}
             orders={board.map((o) => ({
               id: o.id,
               code: o.code,
@@ -227,7 +260,7 @@ export default async function DashboardPage({
           ? sp.scope
           : "all";
     const window = istScopeWindow(scope, sp.date);
-    const [chefReqs, fnbReqs, pos, upcoming, allUpcoming] = await Promise.all([
+    const [chefReqs, fnbReqs, pos, upcoming, allUpcoming, revised] = await Promise.all([
       listChefRequisitions({
         status: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED],
         activeOrderOnly: true,
@@ -252,6 +285,9 @@ export default async function DashboardPage({
       // (mirrors the chef branch), so "This week (5)" shows at a glance.
       listUpcomingOrdersForStore(window ?? undefined),
       listUpcomingOrdersForStore(),
+      // Unscoped for the same reason as the chef board: a revision must
+      // surface whatever date window the store is browsing.
+      listRevisedOrders("store"),
     ]);
     const inWindow = (iso: string, w: { from: Date; toExclusive: Date }) => {
       const t = new Date(iso).getTime();
@@ -272,6 +308,7 @@ export default async function DashboardPage({
         <div className="grid grid-cols-1 gap-5">
           <MyTasksPanel />
           <StoreBoard
+            revised={toRevisedCards(revised)}
             chefReqs={chefReqs
               // A request whose every open line is awaiting a purchase has
               // nothing the store can issue — its work lives on the PO under

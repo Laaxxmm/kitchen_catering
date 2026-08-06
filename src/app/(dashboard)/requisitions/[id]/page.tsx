@@ -18,13 +18,21 @@ import {
   updateChefRequisitionLineQty,
 } from "@/server/actions/chef-requisitions";
 import { listIngredients } from "@/server/actions/inventory";
+import { acknowledgeRevisedDocument } from "@/server/actions/orders";
+import { db } from "@/server/db";
+import { ORDER_KITCHEN_ROLES } from "@/server/rbac";
 import { formatIST } from "@/lib/time";
 import { LineFulfilControls } from "./_components/LineFulfilControls";
 import { DraftAddLine, DraftLineControls } from "./_components/DraftEditControls";
+import { RevisionBanner, revisionOrderSelect } from "./_components/RevisionBanner";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 
 export const dynamic = "force-dynamic";
+
+// Mirrors the server gate acknowledgeRevisedDocument applies to a chef
+// requisition — no point offering a button that will be refused.
+const REVISION_ACK_ROLES: Role[] = ORDER_KITCHEN_ROLES;
 
 export default async function RequisitionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -38,7 +46,21 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
   // before submitting. Catalogue only fetched when the editor renders.
   const canEditDraft = isChef && requisition.status === ChefRequisitionStatus.DRAFT;
   const ingredients = canEditDraft ? await listIngredients({ active: true }) : [];
+  // getChefRequisition doesn't carry the order's revision stamps, so read
+  // them here. Skipped for a cancelled requisition — nothing left to chase,
+  // same as the revision board's filter.
+  const revisedOrder =
+    requisition.order && requisition.status !== ChefRequisitionStatus.CANCELLED
+      ? await db.order.findUnique({
+          where: { id: requisition.order.id },
+          select: revisionOrderSelect,
+        })
+      : null;
 
+  async function doAckRevision() {
+    "use server";
+    return await acknowledgeRevisedDocument("CHEF_REQUISITION", id);
+  }
   async function doSubmit() {
     "use server";
     return await submitChefRequisition(id);
@@ -131,6 +153,29 @@ export default async function RequisitionDetailPage({ params }: { params: Promis
           </div>
         }
       />
+
+      <RevisionBanner
+        order={revisedOrder}
+        documentLabel="requisition"
+        createdAt={requisition.createdAt}
+        ackAt={requisition.revisionAckAt}
+        canAcknowledge={!!role && REVISION_ACK_ROLES.includes(role)}
+        onAcknowledge={doAckRevision}
+      >
+        <p>
+          <strong>What to do:</strong> check every line below against the new numbers. Where you
+          need more of something, raise the requested quantity on that line — the store then issues
+          only the extra, not the whole amount again. Anything already issued stays issued.
+        </p>
+        {requisition.order && (
+          <p className="mt-1.5">
+            <Link href={`/orders/${requisition.order.id}`} className="text-brand hover:underline">
+              Open the order
+            </Link>{" "}
+            to see the new menu and pax before you change anything.
+          </p>
+        )}
+      </RevisionBanner>
 
       {/* The menu being cooked — same panel as the raise page, so the chef
           editing a draft (and the store issuing) sees the dishes without

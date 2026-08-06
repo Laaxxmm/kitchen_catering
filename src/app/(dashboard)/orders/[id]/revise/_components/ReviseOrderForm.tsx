@@ -1,16 +1,21 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Decimal } from "decimal.js";
-import { MealType } from "@prisma/client";
+import { MealType, type OrderStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Textarea } from "@/components/ui/textarea";
+import { Notice } from "@/components/ik/Notice";
 import { QuickAddDish, type QuickDishInput } from "@/components/ik/QuickAddDish";
 import { isNextNavigationError } from "@/lib/next-error";
+import { computeRevisionBand } from "@/lib/order-revision";
+import { STATUS_LABEL } from "@/lib/order-status";
 import type { ActionResult, ActionResultWith } from "@/lib/action-result";
+import { CriticalReviseDialog } from "./CriticalReviseDialog";
+import { criticalReasons } from "./critical-reasons";
 
 interface Line {
   id: string;
@@ -44,6 +49,12 @@ interface Props {
   currentHeadcount: number;
   /** IST "yyyy-MM-ddTHH:mm" backing the datetime-local input. */
   currentEventDate: string;
+  /** The same event as an unambiguous instant — the datetime-local string is
+   *  IST wall time, which can't be banded against the browser's clock. */
+  currentEventDateISO: string;
+  /** Where the order stands now. Banded together with the event date to
+   *  decide whether this revision needs a confirmation. */
+  orderStatus: OrderStatus;
   currentMealType: MealType;
   /** Package-priced channel (banquet / buffet / ODC / packet) — contract
    *  value is the lump-sum package total, not the line sum. */
@@ -74,6 +85,8 @@ export function ReviseOrderForm({
   orderId,
   currentHeadcount,
   currentEventDate,
+  currentEventDateISO,
+  orderStatus,
   currentMealType,
   packageChannel,
   currentContractValue,
@@ -100,6 +113,27 @@ export function ReviseOrderForm({
   // Local copy so a quick-added dish shows up immediately.
   const [dishList, setDishList] = useState<DishOption[]>(dishes);
   const dishById = useMemo(() => new Map(dishList.map((d) => [d.id, d])), [dishList]);
+  // The payload waiting on a "yes, anyway" — set only when the band came back
+  // CRITICAL, cleared when the manager backs out or the save lands.
+  const [confirming, setConfirming] = useState<
+    { payload: Record<string, unknown>; reasons: string[]; changes: string[] } | null
+  >(null);
+  // `now` is captured on the CLIENT after mount and passed explicitly into
+  // computeRevisionBand. The server has no business rendering a countdown:
+  // a `now` taken during SSR is already stale by the time it hydrates, and
+  // the two renders would disagree. Null until mounted = no banner server-side.
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => setNow(new Date()), []);
+
+  // Band the order AS IT STANDS — the event it's currently booked for and the
+  // status it's currently in — because that's exactly what reviseOrder bands
+  // server-side. Banding the *edited* date would ask for a confirmation the
+  // server doesn't want, or skip one it does.
+  const orderEventDate = useMemo(() => new Date(currentEventDateISO), [currentEventDateISO]);
+  const band = now ? computeRevisionBand({ eventDate: orderEventDate, status: orderStatus, now }) : null;
+  const hoursToEvent = now
+    ? Math.round((orderEventDate.getTime() - now.getTime()) / 3_600_000)
+    : 0;
 
   // Current vs new contract value. Package channels carry the typed lump
   // sum; per-dish channels re-sum the lines exactly like the server will.
@@ -124,6 +158,48 @@ export function ReviseOrderForm({
   }, [packageChannel, packageTotal, lines, portions, added, dishById]);
 
   const removedCount = lines.filter((l) => Number(portions[l.id] ?? "0") === 0).length;
+
+  /** What the manager is about to change, in the order they'd say it out loud. */
+  function summarise(
+    pax: number,
+    items: Array<{ id: string; portions: number }>,
+    addDishes: Array<{ dishId: string; portions: number }>,
+  ): string[] {
+    const out: string[] = [];
+    if (pax !== currentHeadcount) out.push(`Headcount: ${currentHeadcount} → ${pax} pax`);
+    for (const l of lines) {
+      const to = items.find((it) => it.id === l.id)?.portions;
+      if (to === undefined || to === Number(l.portions)) continue;
+      out.push(to === 0 ? `Remove ${l.dishName}` : `${l.dishName}: ${l.portions} → ${to} portions`);
+    }
+    for (const a of addDishes) {
+      out.push(`Add ${dishById.get(a.dishId)?.name ?? "dish"} · ${a.portions} portions`);
+    }
+    if (dateChanged) out.push(`Event moved to ${eventDate.replace("T", " ")}`);
+    if (mealType !== currentMealType) {
+      out.push(`Meal: ${MEAL_LABEL[currentMealType]} → ${MEAL_LABEL[mealType]}`);
+    }
+    return out;
+  }
+
+  function send(payload: Record<string, unknown>, criticalConfirmed: boolean) {
+    startTransition(async () => {
+      try {
+        const res = await onSubmit(criticalConfirmed ? { ...payload, criticalConfirmed: true } : payload);
+        if (res && res.ok === false) {
+          toast.error(res.error);
+          return;
+        }
+        setConfirming(null);
+        toast.success("Order revised — the kitchen has been notified");
+        router.push(`/orders/${orderId}`);
+        router.refresh();
+      } catch (err) {
+        if (isNextNavigationError(err)) throw err;
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
+    });
+  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -154,33 +230,55 @@ export function ReviseOrderForm({
     if (packageChannel && (!packageTotal.trim() || Number.isNaN(Number(packageTotal)))) {
       return toast.error("Enter the revised package total");
     }
-    startTransition(async () => {
-      try {
-        const res = await onSubmit({
-          headcount: pax,
-          items,
-          ...(packageChannel ? { packageTotal: packageTotal.trim() } : {}),
-          ...(dateChanged ? { eventDate } : {}),
-          ...(mealType !== currentMealType ? { mealType } : {}),
-          ...(addDishes.length > 0 ? { addDishes } : {}),
-          revisionNote: note.trim(),
-        });
-        if (res && res.ok === false) {
-          toast.error(res.error);
-          return;
-        }
-        toast.success("Order revised — the kitchen has been notified");
-        router.push(`/orders/${orderId}`);
-        router.refresh();
-      } catch (err) {
-        if (isNextNavigationError(err)) throw err;
-        toast.error(err instanceof Error ? err.message : "Save failed");
-      }
+    const payload = {
+      headcount: pax,
+      items,
+      ...(packageChannel ? { packageTotal: packageTotal.trim() } : {}),
+      ...(dateChanged ? { eventDate } : {}),
+      ...(mealType !== currentMealType ? { mealType } : {}),
+      ...(addDishes.length > 0 ? { addDishes } : {}),
+      revisionNote: note.trim(),
+    };
+    // Re-banded here rather than reusing the render-time band: a form left
+    // open for an hour would otherwise wave through a revision that has since
+    // become critical.
+    const nowAtSubmit = new Date();
+    const bandAtSubmit = computeRevisionBand({
+      eventDate: orderEventDate,
+      status: orderStatus,
+      now: nowAtSubmit,
     });
+    if (bandAtSubmit === "CRITICAL") {
+      setConfirming({
+        payload,
+        reasons: criticalReasons({ eventDate: orderEventDate, status: orderStatus, now: nowAtSubmit }),
+        changes: summarise(pax, items, addDishes),
+      });
+      return;
+    }
+    send(payload, false);
   }
 
   return (
     <form onSubmit={submit} className="grid max-w-3xl gap-4">
+      {/* URGENT doesn't block — it just makes sure the manager knows what the
+          change costs before they commit to it. CRITICAL gets the dialog. */}
+      {band === "URGENT" && (
+        <Notice tone="amber">
+          {hoursToEvent < 24 ? (
+            <>
+              The event is in {hoursToEvent <= 1 ? "about an hour" : `${hoursToEvent} hours`} — the chef
+              may already have started prep. Change only what really changed.
+            </>
+          ) : (
+            <>
+              The kitchen and store have already committed to this order (
+              {STATUS_LABEL[orderStatus].toLowerCase()}) — a change now means someone redoes work.
+            </>
+          )}
+        </Notice>
+      )}
+
       <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <h3 className="mb-2 text-[14px] font-medium text-ik-ink">Headcount</h3>
         <div className="flex items-center gap-3 text-[13px]">
@@ -419,6 +517,15 @@ export function ReviseOrderForm({
           Cancel
         </Button>
       </div>
+
+      <CriticalReviseDialog
+        open={confirming !== null}
+        reasons={confirming?.reasons ?? []}
+        changes={confirming?.changes ?? []}
+        pending={pending}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => confirming && send(confirming.payload, true)}
+      />
     </form>
   );
 }

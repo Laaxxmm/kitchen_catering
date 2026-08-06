@@ -15,15 +15,26 @@ import {
   submitVendorPO,
   updateVendorPOLines,
 } from "@/server/actions/procurement";
+import { acknowledgeRevisedDocument } from "@/server/actions/orders";
+import { db } from "@/server/db";
+import { ORDER_STORE_ROLES } from "@/server/rbac";
 import { formatINR } from "@/lib/money";
 import { Decimal } from "decimal.js";
 import { formatIST } from "@/lib/time";
+import {
+  RevisionBanner,
+  revisionOrderSelect,
+} from "@/app/(dashboard)/requisitions/[id]/_components/RevisionBanner";
 import { NotifyVendorBlock } from "./_components/NotifyVendorBlock";
 import { EditPOLines } from "./_components/EditPOLines";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 
 export const dynamic = "force-dynamic";
+
+// Mirrors the server gate acknowledgeRevisedDocument applies to a vendor PO
+// — no point offering a button that will be refused.
+const REVISION_ACK_ROLES: Role[] = [...ORDER_STORE_ROLES, Role.MANAGER];
 
 export default async function VendorPODetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -64,6 +75,21 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
   // Supplier bills are finance-only — store keepers never record them.
   const canRecordBill = role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS || role === Role.STORE_KEEPER;
 
+  // getVendorPO carries only the order's id and code, so read the revision
+  // stamps here. Skipped on a cancelled PO — nothing left to chase.
+  const revisedOrder =
+    po.order && po.status !== VendorPOStatus.CANCELLED
+      ? await db.order.findUnique({ where: { id: po.order.id }, select: revisionOrderSelect })
+      : null;
+  // Before approval the PO is still ours to change; after it, the supplier
+  // is holding a document we can't quietly rewrite.
+  const poStillEditable =
+    po.status === VendorPOStatus.DRAFT || po.status === VendorPOStatus.PENDING_APPROVAL;
+
+  async function doAckRevision() {
+    "use server";
+    return await acknowledgeRevisedDocument("VENDOR_PO", id);
+  }
   async function doSubmit() { "use server"; return await submitVendorPO(id); }
   async function doApprove() { "use server"; return await approveVendorPO(id); }
   async function doApproveVendor() {
@@ -113,6 +139,46 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
           </div>
         }
       />
+      <RevisionBanner
+        order={revisedOrder}
+        documentLabel="purchase order"
+        createdAt={po.createdAt}
+        ackAt={po.revisionAckAt}
+        canAcknowledge={!!role && REVISION_ACK_ROLES.includes(role)}
+        onAcknowledge={doAckRevision}
+      >
+        {poStillEditable ? (
+          <p>
+            <strong>What to do:</strong> this PO hasn&apos;t gone to the supplier yet, so it can
+            still be changed.{" "}
+            {po.status === VendorPOStatus.DRAFT
+              ? "Fix the quantities in the lines below and save."
+              : "Use “Recall to draft” at the top, fix the quantities, then submit it again."}
+          </p>
+        ) : (
+          <>
+            <p>
+              <strong>The supplier already has this purchase order.</strong> Don&apos;t change it —
+              they are working to the copy in their hands. If more is now needed, raise a second
+              purchase order for the extra quantity only.
+            </p>
+            <p className="mt-1.5">
+              <Link href="/procurement/purchase-orders/new" className="text-brand hover:underline">
+                Raise an additional PO
+              </Link>
+            </p>
+          </>
+        )}
+        {po.order && (
+          <p className="mt-1.5">
+            <Link href={`/orders/${po.order.id}`} className="text-brand hover:underline">
+              Open order {po.order.code}
+            </Link>{" "}
+            to see what changed.
+          </p>
+        )}
+      </RevisionBanner>
+
       <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
         <StatusBadge status={po.status} />
         {po.procurementType !== "STANDARD" && (

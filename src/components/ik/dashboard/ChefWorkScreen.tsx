@@ -18,6 +18,15 @@ import { markIngredientsAvailable } from "@/server/actions/chef-requisitions";
 import { startCookingOrder, markOrderCooked } from "@/server/actions/production-jobs";
 import { handToDelivery } from "@/server/actions/deliveries";
 import { isImmediateChannel } from "@/lib/order-channels";
+import type { RevisionBand } from "@/lib/order-revision";
+import { BoardPoller } from "@/components/ik/dashboard/BoardPoller";
+import {
+  CriticalRevisionModal,
+  RevisedBadge,
+  RevisedOrdersPanel,
+  revisedCardClass,
+  type RevisedOrderCard,
+} from "@/components/ik/dashboard/RevisedOrdersPanel";
 import {
   HandoverChecklist,
   type HandoverChecklistItem,
@@ -49,6 +58,8 @@ export interface ChefBoardOrder {
 
 interface Props {
   orders: ChefBoardOrder[];
+  /** Orders a manager changed that the kitchen hasn't re-checked yet. */
+  revised: RevisedOrderCard[];
 }
 
 const CHANNEL_LABEL: Record<OrderChannel, string> = {
@@ -82,10 +93,13 @@ const TONE_CLASS: Record<"new" | "active" | "ready" | "wait", string> = {
   wait: "border-ik-rule bg-ik-card",
 };
 
-// The four stages of the chef's day, each its own tab. An order lands in
-// exactly one tab based on its status; the tab it's in tells the chef what
-// kind of action it needs.
+// The stages of the chef's day, each its own tab. An order lands in exactly
+// one tab based on its status; the tab it's in tells the chef what kind of
+// action it needs. Revised orders come first and carry no statuses of their
+// own — cooking to a stale headcount is the costliest mistake on this board,
+// so a pending revision takes the opening tab off everything else.
 const TABS: { key: string; label: string; hint: string; statuses: OrderStatus[] }[] = [
+  { key: "revised", label: "Revised orders", hint: "Changed — re-check", statuses: [] },
   { key: "new", label: "New orders", hint: "Accept or reject", statuses: [OrderStatus.PENDING_CHEF_APPROVAL] },
   {
     key: "ingredients",
@@ -110,8 +124,16 @@ const TABS: { key: string; label: string; hint: string; statuses: OrderStatus[] 
  * cooking, Mark done, …) so nothing needs a detail page. Kept deliberately
  * simple — it's for non-technical kitchen staff.
  */
-export function ChefWorkScreen({ orders }: Props) {
-  // Bucket each order into its tab, soonest event first (most urgent on top).
+export function ChefWorkScreen({ orders, revised }: Props) {
+  // Band per revised order id — drives the badge and the float-to-top in the
+  // other tabs, so a changed order is visible without switching tab.
+  const revisedBands = useMemo(
+    () => new Map(revised.map((r) => [r.id, r.band] as const)),
+    [revised],
+  );
+
+  // Bucket each order into its tab, soonest event first (most urgent on top),
+  // with anything revised pulled above it.
   const byTab = useMemo(() => {
     const map: Record<string, ChefBoardOrder[]> = {};
     for (const t of TABS) map[t.key] = [];
@@ -120,19 +142,27 @@ export function ChefWorkScreen({ orders }: Props) {
       if (tab) map[tab.key].push(o);
     }
     for (const key of Object.keys(map)) {
-      map[key].sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime());
+      map[key].sort(
+        (a, b) =>
+          Number(revisedBands.has(b.id)) - Number(revisedBands.has(a.id)) ||
+          new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime(),
+      );
     }
     return map;
-  }, [orders]);
+  }, [orders, revisedBands]);
+
+  const countOf = (key: string) => (key === "revised" ? revised.length : byTab[key].length);
 
   // Open on the first tab that actually has work waiting.
-  const firstWithWork = TABS.find((t) => byTab[t.key].length > 0)?.key ?? TABS[0].key;
+  const firstWithWork = TABS.find((t) => countOf(t.key) > 0)?.key ?? TABS[0].key;
   const [active, setActive] = useState<string>(firstWithWork);
   const activeTab = TABS.find((t) => t.key === active) ?? TABS[0];
   const activeOrders = byTab[active] ?? [];
 
   return (
     <section>
+      <CriticalRevisionModal orders={revised} scope="chef" />
+      <BoardPoller />
       <BoardHeader
         total={orders.length}
         unit="orders in your kitchen"
@@ -144,9 +174,9 @@ export function ChefWorkScreen({ orders }: Props) {
         ]}
       />
       {/* Tab bar — big, labelled, with a live count per stage. */}
-      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {TABS.map((t) => {
-          const count = byTab[t.key].length;
+          const count = countOf(t.key);
           const on = active === t.key;
           return (
             <button
@@ -165,7 +195,11 @@ export function ChefWorkScreen({ orders }: Props) {
                 <span
                   className={
                     "grid min-h-[20px] min-w-[20px] place-items-center rounded-full px-1.5 font-mono text-[11px] font-bold leading-none " +
-                    (count > 0 ? "bg-brand-500 text-white" : "bg-ik-paper-alt text-ik-ink-3")
+                    (count === 0
+                      ? "bg-ik-paper-alt text-ik-ink-3"
+                      : t.key === "revised"
+                        ? "bg-alert text-white"
+                        : "bg-brand-500 text-white")
                   }
                 >
                   {count}
@@ -178,20 +212,33 @@ export function ChefWorkScreen({ orders }: Props) {
       </div>
 
       {/* Orders in the selected stage. */}
-      {activeOrders.length === 0 ? (
+      {active === "revised" ? (
+        <RevisedOrdersPanel orders={revised} scope="chef" />
+      ) : activeOrders.length === 0 ? (
         <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-5 text-[13px] text-ik-ink-2">
           Nothing in <strong>{activeTab.label}</strong> right now.
         </div>
       ) : (
         <CappedList items={activeOrders} limit={6} className="grid gap-3 sm:grid-cols-2" keyOf={(o) => o.id}>
-          {(o, i) => <ChefOrderCard order={o} highlight={i === 0} />}
+          {(o, i) => (
+            <ChefOrderCard order={o} highlight={i === 0} revisedBand={revisedBands.get(o.id)} />
+          )}
         </CappedList>
       )}
     </section>
   );
 }
 
-function ChefOrderCard({ order, highlight = false }: { order: ChefBoardOrder; highlight?: boolean }) {
+function ChefOrderCard({
+  order,
+  highlight = false,
+  revisedBand,
+}: {
+  order: ChefBoardOrder;
+  highlight?: boolean;
+  /** Set when a manager changed this order and the kitchen hasn't re-checked. */
+  revisedBand?: RevisionBand;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [showReject, setShowReject] = useState(false);
@@ -225,12 +272,13 @@ function ChefOrderCard({ order, highlight = false }: { order: ChefBoardOrder; hi
     <li
       className={
         "rounded-md border p-3 " +
-        TONE_CLASS[stage.tone] +
+        (revisedBand ? revisedCardClass(revisedBand) : TONE_CLASS[stage.tone]) +
         (highlight ? " ring-2 ring-brand-500" : "")
       }
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="flex flex-wrap items-baseline gap-2">
+          {revisedBand && <RevisedBadge band={revisedBand} />}
           {highlight && (
             <span className="rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
               Next up
@@ -264,6 +312,12 @@ function ChefOrderCard({ order, highlight = false }: { order: ChefBoardOrder; hi
       )}
 
       <div className="mt-0.5 text-[12px] text-ik-ink-2">{stage.line}</div>
+
+      {revisedBand && (
+        <div className="mt-1 text-[12px] font-semibold text-alert">
+          This order was changed — see the Revised orders tab before you cook.
+        </div>
+      )}
 
       {/* Dish list — compact, so the chef sees what to cook without drilling in. */}
       {order.items.length > 0 && (

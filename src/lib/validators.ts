@@ -394,6 +394,11 @@ export const OrderReviseInput = z.object({
     )
     .optional(),
   revisionNote: z.string().trim().min(1, "A revision note is required").max(2000),
+  // The manager has seen and accepted that this revision lands on an
+  // imminent / already-cooking order (computeRevisionBand → CRITICAL). The
+  // action refuses a CRITICAL revision without it; the UI asks, then
+  // re-submits with the flag set.
+  criticalConfirmed: z.boolean().optional().default(false),
 });
 export type OrderReviseInputT = z.infer<typeof OrderReviseInput>;
 

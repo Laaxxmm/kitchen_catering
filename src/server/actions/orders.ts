@@ -9,6 +9,7 @@ import {
   ChefRequisitionLineStatus,
   ChefRequisitionStatus,
   DeliveryStatus,
+  MealType,
   OrderChannel,
   OrderStatus,
   Prisma,
@@ -39,9 +40,17 @@ import {
 } from "@/lib/validators";
 import {
   FORCE_DELIVERABLE_ORDER_STATUSES,
+  INACTIVE_ORDER_STATUSES,
   REVISABLE_ORDER_STATUSES,
   STATUS_LABEL,
 } from "@/lib/order-status";
+import {
+  computeRevisionBand,
+  isStaleAfterRevision,
+  type RevisionBand,
+  type RevisionDocumentType,
+  type RevisionScope,
+} from "@/lib/order-revision";
 import { computeLine as computeGstLine } from "@/lib/gst";
 import {
   ActionError,
@@ -493,6 +502,17 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
       );
     }
 
+    // Banded off the order as it stands right now (inside the transaction),
+    // not off whatever the revision moves it to. A CRITICAL revision costs
+    // real food, so it needs a human "yes, anyway" — the UI asks, but the
+    // gate lives here regardless of what the UI does.
+    const band = computeRevisionBand({ eventDate: order.eventDate, status: order.status });
+    if (band === "CRITICAL" && !input.criticalConfirmed) {
+      throw new ActionError(
+        `The event is less than an hour away or the kitchen is already cooking (${STATUS_LABEL[order.status].toLowerCase()}). Confirm you want to revise it anyway — the chef and store will have to redo work.`,
+      );
+    }
+
     // Every submitted line must belong to this order.
     const byId = new Map(order.items.map((it) => [it.id, it]));
     for (const li of input.items) {
@@ -639,6 +659,12 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
         contractValue: contractValue.toString(),
         ...(newEventDate ? { eventDate: newEventDate } : {}),
         ...(newMealType ? { mealType: newMealType } : {}),
+        // Same write, so an order can never be revised without the boards
+        // learning about it. Clearing both seen-stamps re-raises the alert
+        // for a team that already acknowledged an earlier revision.
+        lastRevisedAt: new Date(),
+        revisionSeenByChefAt: null,
+        revisionSeenByStoreAt: null,
       },
     });
     if (updated.count === 0) {
@@ -694,7 +720,7 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
       },
     });
 
-    return { code: order.code, oldPax: order.headcount, newEventDate, newMealType, addedNames };
+    return { code: order.code, oldPax: order.headcount, newEventDate, newMealType, addedNames, band };
   });
 
   revalidatePath(`/orders/${id}`);
@@ -713,16 +739,17 @@ async function reviseOrderInner(id: string, raw: unknown): Promise<{ ok: true }>
     .filter(Boolean)
     .join(" ");
   deferAfterResponse("order-revise:notify", () =>
-    notifyOrderRevised(id, revised.code, revised.oldPax, input.headcount, noteParts),
+    notifyOrderRevised(id, revised.code, revised.oldPax, input.headcount, noteParts, revised.band),
   );
   return { ok: true };
 }
 
 /**
  * Fire-and-forget: tell the kitchen + service teams an in-flight order's
- * quantities changed. If an ingredient requisition is still open (not
- * fully issued / cancelled), the kitchen is told to re-check it — the
- * quantities were planned for the old headcount.
+ * quantities changed. Names every downstream document the revision just
+ * invalidated — the chef's ingredient requisition, the F&B requisition and
+ * any purchase order raised for this order — because each is a separate
+ * team who otherwise finds out by accident.
  */
 async function notifyOrderRevised(
   orderId: string,
@@ -730,28 +757,62 @@ async function notifyOrderRevised(
   oldPax: number | null,
   newPax: number,
   note: string,
+  band: RevisionBand,
 ) {
   try {
-    // Open = non-terminal and not fully issued. Already-issued stock is not
-    // auto-returned, so the chef has to reconcile the requisition by hand.
-    const openRequisition = await db.chefRequisition.findFirst({
-      where: {
-        orderId,
-        status: {
-          in: [
-            ChefRequisitionStatus.DRAFT,
-            ChefRequisitionStatus.SUBMITTED,
-            ChefRequisitionStatus.PARTIALLY_ISSUED,
-          ],
+    // Open = non-terminal and not fully issued/closed. Already-issued stock
+    // and already-bought goods are not auto-returned, so each team has to
+    // reconcile their own document by hand.
+    const [openRequisition, openBanquetRequisition, openPo] = await Promise.all([
+      db.chefRequisition.findFirst({
+        where: {
+          orderId,
+          status: {
+            in: [
+              ChefRequisitionStatus.DRAFT,
+              ChefRequisitionStatus.SUBMITTED,
+              ChefRequisitionStatus.PARTIALLY_ISSUED,
+            ],
+          },
         },
-      },
-      select: { id: true },
-    });
+        select: { id: true },
+      }),
+      db.banquetRequisition.findFirst({
+        where: {
+          orderId,
+          status: {
+            in: [
+              BanquetRequisitionStatus.SUBMITTED,
+              BanquetRequisitionStatus.PARTIALLY_ISSUED,
+            ],
+          },
+        },
+        select: { id: true },
+      }),
+      db.vendorPO.findFirst({
+        where: {
+          orderId,
+          status: { notIn: [VendorPOStatus.CANCELLED, VendorPOStatus.CLOSED] },
+        },
+        select: { id: true },
+      }),
+    ]);
     const increased = oldPax != null && newPax > oldPax;
     const body =
+      (band === "CRITICAL"
+        ? "CRITICAL — the event is imminent or the food is already being made. "
+        : band === "URGENT"
+          ? "URGENT — the event is within a day or the store is already issuing. "
+          : "") +
       note +
       (openRequisition
         ? " Review the ingredient requisition — quantities were planned for the old headcount."
+        : "") +
+      (openBanquetRequisition
+        ? " Review the F&B requisition — it was raised against the old order."
+        : "") +
+      (openPo
+        ? " A purchase order is open against this order — check it still buys the right quantities."
         : "") +
       (increased
         ? " You may need more ingredients — raise a top-up requisition for the extra."
@@ -768,6 +829,263 @@ async function notifyOrderRevised(
     });
   } catch (err) {
     console.warn("[notify] order-revised fanout failed:", err);
+  }
+}
+
+// Who may read a scope's revision board and clear its stamp. Chef and store
+// each see their own; the manager who made the revision sees both, since
+// chasing it up is their job.
+const REVISION_SCOPE_ROLES: Record<RevisionScope, Role[]> = {
+  chef: [...ORDER_KITCHEN_ROLES, Role.MANAGER],
+  store: [...ORDER_STORE_ROLES, Role.MANAGER],
+};
+
+// Each downstream document is acknowledged by the desk that owns it.
+// BanquetRequisition mirrors REQUISITION_ROLES in actions/banquet.ts (F&B
+// raises them, the store counter fulfils them).
+const REVISION_DOCUMENT_GATES: Record<
+  RevisionDocumentType,
+  { roles: Role[]; entity: string }
+> = {
+  CHEF_REQUISITION: { roles: ORDER_KITCHEN_ROLES, entity: "ChefRequisition" },
+  BANQUET_REQUISITION: {
+    roles: [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER],
+    entity: "BanquetRequisition",
+  },
+  VENDOR_PO: { roles: [...ORDER_STORE_ROLES, Role.MANAGER], entity: "VendorPO" },
+};
+
+/** One row of `listRevisedOrders` — a revised order still owing a team a look. */
+export interface RevisedOrderRow {
+  id: string;
+  code: string;
+  customerName: string;
+  eventDate: Date;
+  status: OrderStatus;
+  headcount: number;
+  lastRevisedAt: Date;
+  band: RevisionBand;
+  /** Latest revision on the order — null only if the record was purged. */
+  revision: {
+    createdAt: Date;
+    note: string | null;
+    beforeHeadcount: number;
+    afterHeadcount: number;
+    beforeEventDate: Date;
+    afterEventDate: Date;
+    beforeMealType: MealType;
+    afterMealType: MealType;
+    /** [{kind:"added"|"removed"|"portions", dish, from?, to?}] */
+    lineChanges: Prisma.JsonValue;
+  } | null;
+  /** This scope's documents raised before the revision and not re-checked since. */
+  documents: Array<{
+    type: RevisionDocumentType;
+    id: string;
+    number: string;
+    status: string;
+  }>;
+}
+
+/**
+ * The revisions a team still owes a look at, newest revision first. An order
+ * shows up while EITHER that team hasn't acknowledged the revision itself,
+ * OR one of their documents predates it and hasn't been re-checked — so
+ * clearing the order-level flag doesn't hide a requisition still built for
+ * the old headcount. Terminal orders are excluded: nothing left to redo.
+ */
+export async function listRevisedOrders(scope: RevisionScope): Promise<RevisedOrderRow[]> {
+  await requireRole(REVISION_SCOPE_ROLES[scope]);
+  const rows = await db.order.findMany({
+    where: { lastRevisedAt: { not: null }, status: { notIn: INACTIVE_ORDER_STATUSES } },
+    select: {
+      id: true,
+      code: true,
+      eventDate: true,
+      status: true,
+      headcount: true,
+      lastRevisedAt: true,
+      revisionSeenByChefAt: true,
+      revisionSeenByStoreAt: true,
+      customer: { select: { name: true } },
+      orderRevisions: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: {
+          createdAt: true,
+          note: true,
+          beforeHeadcount: true,
+          afterHeadcount: true,
+          beforeEventDate: true,
+          afterEventDate: true,
+          beforeMealType: true,
+          afterMealType: true,
+          lineChanges: true,
+        },
+      },
+      // All three sets are fetched and the scope picks from them in memory:
+      // staleness compares two columns (lastRevisedAt vs ackAt/createdAt),
+      // which Prisma can't express in a where clause.
+      chefRequisitions: {
+        where: { status: { not: ChefRequisitionStatus.CANCELLED } },
+        select: { id: true, requisitionNo: true, status: true, createdAt: true, revisionAckAt: true },
+      },
+      banquetRequisitions: {
+        where: { status: { not: BanquetRequisitionStatus.CANCELLED } },
+        select: { id: true, requisitionNo: true, status: true, createdAt: true, revisionAckAt: true },
+      },
+      vendorPos: {
+        where: { status: { not: VendorPOStatus.CANCELLED } },
+        select: { id: true, poNo: true, status: true, createdAt: true, revisionAckAt: true },
+      },
+    },
+    orderBy: { lastRevisedAt: "desc" },
+    take: 200,
+  });
+
+  const now = new Date();
+  return rows.flatMap((o) => {
+    // Non-null by the where clause above; Prisma can't narrow it for us.
+    const lastRevisedAt = o.lastRevisedAt!;
+    const docs =
+      scope === "chef"
+        ? o.chefRequisitions.map((r) => ({
+            type: "CHEF_REQUISITION" as const,
+            id: r.id,
+            number: r.requisitionNo,
+            status: String(r.status),
+            createdAt: r.createdAt,
+            ackAt: r.revisionAckAt,
+          }))
+        : [
+            ...o.banquetRequisitions.map((r) => ({
+              type: "BANQUET_REQUISITION" as const,
+              id: r.id,
+              number: r.requisitionNo,
+              status: String(r.status),
+              createdAt: r.createdAt,
+              ackAt: r.revisionAckAt,
+            })),
+            ...o.vendorPos.map((p) => ({
+              type: "VENDOR_PO" as const,
+              id: p.id,
+              number: p.poNo,
+              status: String(p.status),
+              createdAt: p.createdAt,
+              ackAt: p.revisionAckAt,
+            })),
+          ];
+    const stale = docs.filter((d) =>
+      isStaleAfterRevision({ lastRevisedAt, ackAt: d.ackAt, createdAt: d.createdAt }),
+    );
+    const seenAt = scope === "chef" ? o.revisionSeenByChefAt : o.revisionSeenByStoreAt;
+    const unseen = !seenAt || seenAt.getTime() < lastRevisedAt.getTime();
+    if (!unseen && stale.length === 0) return [];
+    return [
+      {
+        id: o.id,
+        code: o.code,
+        customerName: o.customer.name,
+        eventDate: o.eventDate,
+        status: o.status,
+        headcount: o.headcount,
+        lastRevisedAt,
+        band: computeRevisionBand({ eventDate: o.eventDate, status: o.status, now }),
+        revision: o.orderRevisions[0] ?? null,
+        documents: stale.map((d) => ({
+          type: d.type,
+          id: d.id,
+          number: d.number,
+          status: d.status,
+        })),
+      },
+    ];
+  });
+}
+
+/**
+ * A named human confirms their team has seen the revision. Stamps that
+ * team's seen column and logs who — this is the accountability record, so
+ * "nobody told the kitchen" stops being arguable. Only stamps an order that
+ * actually carries a revision.
+ */
+export async function acknowledgeOrderRevision(
+  orderId: string,
+  scope: RevisionScope,
+): Promise<ActionResult> {
+  try {
+    const session = await requireRole(REVISION_SCOPE_ROLES[scope]);
+    const seenAt = new Date();
+    await db.$transaction(async (tx) => {
+      const updated = await tx.order.updateMany({
+        where: { id: orderId, lastRevisedAt: { not: null } },
+        data:
+          scope === "chef"
+            ? { revisionSeenByChefAt: seenAt }
+            : { revisionSeenByStoreAt: seenAt },
+      });
+      if (updated.count === 0) {
+        throw new ActionError("Nothing to acknowledge — this order has no revision on it.");
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: scope === "chef" ? "ORDER_REVISION_SEEN_CHEF" : "ORDER_REVISION_SEEN_STORE",
+          entity: "Order",
+          entityId: orderId,
+          payloadHash: sha256Json({ scope, seenAt: seenAt.toISOString() }),
+        },
+      });
+    });
+    revalidatePath(`/orders/${orderId}`);
+    revalidatePath("/orders");
+    revalidatePath("/kitchen");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+/**
+ * Confirm one downstream document has been re-checked against the latest
+ * revision — the requisition's quantities re-done, the PO verified. Clears
+ * that document off the revision board without touching the others, so a
+ * chef who fixed their requisition doesn't silently sign off the store's
+ * purchase order too.
+ */
+export async function acknowledgeRevisedDocument(
+  type: RevisionDocumentType,
+  documentId: string,
+): Promise<ActionResult> {
+  try {
+    const gate = REVISION_DOCUMENT_GATES[type];
+    const session = await requireRole(gate.roles);
+    const revisionAckAt = new Date();
+    const where = { id: documentId };
+    const data = { revisionAckAt };
+    const { count } =
+      type === "CHEF_REQUISITION"
+        ? await db.chefRequisition.updateMany({ where, data })
+        : type === "BANQUET_REQUISITION"
+          ? await db.banquetRequisition.updateMany({ where, data })
+          : await db.vendorPO.updateMany({ where, data });
+    if (count === 0) {
+      throw new ActionError("That document no longer exists — refresh and try again.");
+    }
+    await db.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "ORDER_REVISION_DOCUMENT_ACKED",
+        entity: gate.entity,
+        entityId: documentId,
+        payloadHash: sha256Json({ type, revisionAckAt: revisionAckAt.toISOString() }),
+      },
+    });
+    revalidatePath("/orders");
+    revalidatePath("/kitchen");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
   }
 }
 
