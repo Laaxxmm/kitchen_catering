@@ -248,7 +248,10 @@ export async function listBanquetItems(opts: { activeOnly?: boolean } = {}) {
   await requireRole(READ_ROLES);
   return db.banquetItem.findMany({
     where: opts.activeOnly ? { active: true } : {},
-    orderBy: [{ active: "desc" }, { category: "asc" }, { name: "asc" }],
+    // Name first, not category — category-major ordering made every picker
+    // look unsorted to someone scanning for an item name (they see the
+    // categories interleaved, not the alphabet). Inactive items still sink.
+    orderBy: [{ active: "desc" }, { name: "asc" }],
   });
 }
 
