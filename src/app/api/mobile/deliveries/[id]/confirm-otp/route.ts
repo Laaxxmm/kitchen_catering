@@ -4,7 +4,6 @@ import { db } from "@/server/db";
 import { MobileAuthError, mobileError, requireMobileAuth } from "@/server/mobile-auth";
 import { sha256Json } from "@/lib/audit";
 import { createTaxInvoiceForOrderInTx } from "@/server/actions/customer-invoices";
-import { emailTaxInvoiceCore } from "@/server/customer-invoices-core";
 
 /**
  * POST /api/mobile/deliveries/:id/confirm-otp
@@ -16,8 +15,10 @@ import { emailTaxInvoiceCore } from "@/server/customer-invoices-core";
  * wild, and validate it against the bcrypt hash if the delivery row has
  * one set.
  *
- * On confirmation the tax invoice is auto-generated, the order moves to
- * INVOICED, and the customer gets an emailed copy (best-effort).
+ * On confirmation the tax invoice is auto-drafted and the order moves to
+ * INVOICED, so the driver's run is finished. The customer gets nothing
+ * yet: the bill waits for a manager or admin to approve and issue it, and
+ * the email goes out from there.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -75,7 +76,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       });
       await tx.deliveryAttempt.create({ data: { deliveryId: id, outcome: "OTP_MATCH" } });
 
-      // Auto-create the GST tax invoice + advance order → INVOICED.
+      // Auto-draft the GST tax invoice + advance order → INVOICED. The
+      // invoice is NOT sent to the customer here — it needs a manager's
+      // sign-off first, and issuing it is what emails it.
       const invoice = await createTaxInvoiceForOrderInTx(tx, delivery.orderId, session.user.id);
 
       await tx.auditLog.create({
@@ -87,13 +90,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           payloadHash: sha256Json({ source: "mobile", invoiceId: invoice.id }),
         },
       });
-      return { status: DeliveryStatus.DELIVERED, invoiceId: invoice.id, invoiceCreated: invoice.created };
+      return { status: DeliveryStatus.DELIVERED };
     });
 
-    // Post-commit email — best-effort.
-    if (result.invoiceCreated) {
-      void emailTaxInvoiceCore(result.invoiceId);
-    }
     return Response.json({ status: result.status });
   } catch (err) {
     return mobileError(err);

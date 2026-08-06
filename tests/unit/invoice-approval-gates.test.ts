@@ -3,9 +3,12 @@ import { CustomerInvoiceStatus } from "@prisma/client";
 import {
   APPROVABLE_STATUSES,
   APPROVAL_CLEARED,
+  ORDER_INVOICE_INITIAL,
   approveRefusal,
   issueRefusal,
+  mayReachCustomer,
   prorateQuantity,
+  settledStatus,
 } from "@/lib/customer-invoice-gates";
 
 // A customer's GST invoice leaves the building on these decisions, so they
@@ -99,6 +102,96 @@ describe("an edit revokes the approval", () => {
     // ...and it can be signed off again against the new numbers.
     expect(approveRefusal({ invoiceNo: approved.invoiceNo, status: afterEdit.status, approvedAt: afterEdit.approvedAt }))
       .toBeNull();
+  });
+});
+
+describe("an order-linked invoice is born unapproved", () => {
+  // The trigger case: booked for 100, 120 turned up. The bill the delivery
+  // raises must be a draft nobody has signed, or the extra 20 never make it
+  // on before the customer has the document.
+  it("starts as an unissued, unapproved draft", () => {
+    expect(ORDER_INVOICE_INITIAL.status).toBe(CustomerInvoiceStatus.DRAFT);
+    expect(ORDER_INVOICE_INITIAL.approvedAt).toBeNull();
+    expect(ORDER_INVOICE_INITIAL.issuedAt).toBeNull();
+  });
+
+  it("cannot be issued the moment it is created", () => {
+    const refusal = issueRefusal({
+      invoiceNo: "INV-26-27-0042",
+      status: ORDER_INVOICE_INITIAL.status,
+      onHold: false,
+      onHoldReason: null,
+      approvedAt: ORDER_INVOICE_INITIAL.approvedAt,
+    });
+    expect(refusal).toContain("hasn't been approved");
+  });
+
+  it("is the manager's to sign off, and nothing else is", () => {
+    expect(
+      approveRefusal({
+        invoiceNo: "INV-26-27-0042",
+        status: ORDER_INVOICE_INITIAL.status,
+        approvedAt: ORDER_INVOICE_INITIAL.approvedAt,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("may this invoice be emailed or viewed by the customer", () => {
+  it("is false for the draft an order raises", () => {
+    expect(mayReachCustomer(ORDER_INVOICE_INITIAL.status)).toBe(false);
+  });
+
+  it("is false for exactly DRAFT and true for every issued state", () => {
+    // Exhaustive: a new CustomerInvoiceStatus must not quietly become
+    // customer-facing without passing through the issue gate.
+    const hidden = ALL_STATUSES.filter((status) => !mayReachCustomer(status));
+    expect(hidden).toEqual([CustomerInvoiceStatus.DRAFT]);
+  });
+
+  it("opens only once the approved draft has been issued", () => {
+    // The whole journey in one line: created → approved → issued → visible.
+    expect(mayReachCustomer(CustomerInvoiceStatus.DRAFT)).toBe(false);
+    expect(mayReachCustomer(CustomerInvoiceStatus.ISSUED)).toBe(true);
+  });
+});
+
+describe("where an invoice lands when it is issued", () => {
+  // Cash the driver took at the door is credited onto the draft, so the
+  // status has to be settled from the money at issue — not assumed ISSUED.
+  it("is ISSUED when nothing was collected", () => {
+    expect(settledStatus("0", "11800.00")).toBe(CustomerInvoiceStatus.ISSUED);
+  });
+
+  it("is PAID when the door money covers the bill", () => {
+    expect(settledStatus("11800.00", "11800.00")).toBe(CustomerInvoiceStatus.PAID);
+    // Overpayment still settles rather than sitting part-paid forever.
+    expect(settledStatus("12000.00", "11800.00")).toBe(CustomerInvoiceStatus.PAID);
+  });
+
+  it("is PARTIAL when it only covers some of it", () => {
+    expect(settledStatus("5000.00", "11800.00")).toBe(CustomerInvoiceStatus.PARTIAL);
+  });
+
+  it("re-prices with the bill: 100 pax paid, 120 pax billed", () => {
+    // The manager adds the extra 20 before releasing, and money that was
+    // exactly enough becomes a part payment.
+    expect(settledStatus("11800.00", "11800.00")).toBe(CustomerInvoiceStatus.PAID);
+    expect(settledStatus("11800.00", "14160.00")).toBe(CustomerInvoiceStatus.PARTIAL);
+  });
+
+  it("uses Decimal, not floats", () => {
+    // 0.1 + 0.2 is 0.30000000000000004 in float arithmetic, which would
+    // read as an overpayment against a 0.3 bill either way — the point is
+    // that 0.3 vs 0.3 must settle exactly, never "0.29999… < 0.3".
+    expect(settledStatus("0.3", "0.30")).toBe(CustomerInvoiceStatus.PAID);
+    expect(settledStatus("0.29", "0.30")).toBe(CustomerInvoiceStatus.PARTIAL);
+  });
+
+  it("treats a blank amount as nothing collected instead of crashing", () => {
+    // decimalString permits "" — new Decimal("") throws.
+    expect(settledStatus("", "11800.00")).toBe(CustomerInvoiceStatus.ISSUED);
+    expect(settledStatus("0.00", "")).toBe(CustomerInvoiceStatus.ISSUED);
   });
 });
 

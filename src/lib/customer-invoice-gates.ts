@@ -21,6 +21,46 @@ export function isApprovable(status: CustomerInvoiceStatus): boolean {
 }
 
 /**
+ * The state an order-linked invoice is born in — the delivery-driven one
+ * included. Everything an order raises is a draft nobody has signed off:
+ * 100 were booked, 120 ate, and the extra 20 go on before the customer
+ * ever sees the document. Spread into the `create` so the three creation
+ * paths can't drift apart on what "not yet released" means.
+ */
+export const ORDER_INVOICE_INITIAL = {
+  status: CustomerInvoiceStatus.DRAFT,
+  issuedAt: null,
+  approvedAt: null,
+} as const;
+
+/**
+ * May this document be shown or emailed to the customer? A DRAFT is a
+ * work-in-progress the numbers can still move on, and it has by definition
+ * not been through the issue gate (which is what demands the signature).
+ * Everything else got there via `issueCustomerInvoice`, or was born ISSUED
+ * because it is informational (proforma).
+ *
+ * The one predicate behind both customer-facing doors: the invoice email
+ * and the public share-token page.
+ */
+export function mayReachCustomer(status: CustomerInvoiceStatus): boolean {
+  return status !== CustomerInvoiceStatus.DRAFT;
+}
+
+/**
+ * Where an invoice lands the moment it is issued, given money already
+ * recorded against it — cash the driver took at the door is credited onto
+ * the draft, so an invoice can be fully settled before it is released.
+ */
+export function settledStatus(amountPaid: string, grandTotal: string): CustomerInvoiceStatus {
+  // decimalString permits "" — blank-guard before new Decimal().
+  const paid = amountPaid.trim() ? new Decimal(amountPaid) : new Decimal(0);
+  const grand = grandTotal.trim() ? new Decimal(grandTotal) : new Decimal(0);
+  if (paid.lte(0)) return CustomerInvoiceStatus.ISSUED;
+  return paid.gte(grand) ? CustomerInvoiceStatus.PAID : CustomerInvoiceStatus.PARTIAL;
+}
+
+/**
  * Written into the invoice by every draft edit. An approval is given for the
  * numbers the approver was looking at: edit those numbers and the sign-off
  * is gone, so the invoice has to go back to a manager before it can be

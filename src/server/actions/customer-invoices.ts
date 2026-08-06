@@ -30,8 +30,11 @@ import { toDecimal } from "@/lib/money";
 import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
 import {
   APPROVAL_CLEARED,
+  ORDER_INVOICE_INITIAL,
   approveRefusal,
   issueRefusal,
+  mayReachCustomer,
+  settledStatus,
 } from "@/lib/customer-invoice-gates";
 import { indefineGstin, indefineCompanyName, indefineStateCode } from "@/lib/org";
 import { eInvoiceEnabled, getEInvoiceProvider } from "@/server/services/e-invoice/provider";
@@ -137,16 +140,16 @@ async function createCustomerInvoiceFromOrderInner(
       (s, d) => s.plus(d.paymentAmount ? toDecimal(d.paymentAmount) : 0),
       new Decimal(0),
     );
-    const fullyPaidAtDelivery = podTotal.gte(summary.grandTotal);
-    const partiallyPaidAtDelivery = podTotal.gt(0) && !fullyPaidAtDelivery;
-
-    // Advance the order DELIVERED → INVOICED (or straight to COMPLETED if
-    // fully settled at the door) BEFORE creating the invoice, as a guarded
-    // updateMany. On a double-click the second request matches zero rows and
-    // bails — no second ISSUED invoice for the same order (AUDIT_REPORT M8).
+    // Advance the order DELIVERED → INVOICED BEFORE creating the invoice, as
+    // a guarded updateMany. On a double-click the second request matches zero
+    // rows and bails — no second invoice for the same order (AUDIT_REPORT M8),
+    // and the order stops showing on the "generate invoice" screen.
+    // Not COMPLETED even when the door money covers the bill: this is still a
+    // draft a manager may re-price (100 booked, 120 ate), so "fully settled"
+    // isn't known until issue. issueCustomerInvoice makes that call.
     const flipped = await tx.order.updateMany({
       where: { id: orderId, status: OrderStatus.DELIVERED },
-      data: { status: fullyPaidAtDelivery ? OrderStatus.COMPLETED : OrderStatus.INVOICED },
+      data: { status: OrderStatus.INVOICED },
     });
     if (flipped.count === 0) {
       throw new ActionError("This order was just invoiced — refresh.");
@@ -156,15 +159,11 @@ async function createCustomerInvoiceFromOrderInner(
       data: {
         invoiceNo,
         kind: CustomerInvoiceKind.ORDER,
-        // Invoice is created in ISSUED status — the GST document is now
-        // canonical for this order. Status flips to PAID/PARTIAL below
-        // if there was a payment-on-delivery.
-        status: fullyPaidAtDelivery
-          ? CustomerInvoiceStatus.PAID
-          : partiallyPaidAtDelivery
-            ? CustomerInvoiceStatus.PARTIAL
-            : CustomerInvoiceStatus.ISSUED,
-        issuedAt: new Date(),
+        // Born a draft awaiting a manager's signature — the numbers can still
+        // be corrected and nothing goes to the customer until it is issued.
+        // Money collected at the door is still credited (amountPaid + the
+        // payment rows below); the paid/partial STATUS is settled at issue.
+        ...ORDER_INVOICE_INITIAL,
         amountPaid: podTotal.toFixed(2),
         orderId,
         // Pax at the moment of billing. Read the live order later and the
@@ -258,6 +257,7 @@ async function createCustomerInvoiceFromOrderInner(
     return invoice;
   });
 
+  notifyAwaitingApproval(result.id, "raised from a delivered order");
   revalidatePath("/invoices");
   revalidatePath(`/orders/${orderId}`);
   revalidatePath(`/invoices/${result.id}`);
@@ -565,16 +565,19 @@ function notifyAwaitingApproval(id: string, why: string) {
 }
 
 /**
- * System-triggered tax invoice creation. Called from confirmDelivery
- * the moment an order is marked DELIVERED, so the customer's GST invoice
- * is ready without anyone clicking a button.
+ * System-triggered tax invoice creation. Called from the driver's delivery
+ * confirmation the moment an order is marked DELIVERED, so the customer's
+ * GST invoice is drafted without anyone clicking a button.
  *
  * - Idempotent: returns the existing ORDER invoice id if one was already
  *   created (so this is safe to call multiple times from the same flow).
- * - Creates the invoice as ISSUED (not DRAFT) — the order is delivered,
- *   nothing is going to change about the line items now.
- * - Advances the order status from DELIVERED to INVOICED.
- * - Best-effort emails the invoice PDF to the customer.
+ * - Creates the invoice as a DRAFT awaiting a manager's signature. The
+ *   event was booked for 100 and 120 turned up; the bill gets corrected
+ *   and signed off before it reaches the customer. Nothing is emailed
+ *   here — the customer copy goes out on issue.
+ * - Advances the order status from DELIVERED to INVOICED, so the driver's
+ *   run is finished whether or not a manager has looked at the bill yet.
+ * - Pings ADMIN/MANAGER that a bill is waiting on them.
  *
  * Must run inside a transaction. Returns the invoice id + invoiceNo so
  * the caller can bind a payment to it in the same transaction.
@@ -620,9 +623,9 @@ export async function createTaxInvoiceForOrderInTx(
     data: {
       invoiceNo,
       kind: CustomerInvoiceKind.ORDER,
-      // Create ISSUED, not DRAFT — delivery is done, no edits expected.
-      status: CustomerInvoiceStatus.ISSUED,
-      issuedAt: new Date(),
+      // DRAFT, not ISSUED: delivery being done is not a manager having read
+      // the bill. It sits here until one approves and issues it.
+      ...ORDER_INVOICE_INITIAL,
       orderId,
       finalHeadcount: order.headcount,
       customerId: order.customer.id,
@@ -655,7 +658,9 @@ export async function createTaxInvoiceForOrderInTx(
     select: { id: true, invoiceNo: true, grandTotal: true },
   });
 
-  // Order advances DELIVERED → INVOICED in the same transaction.
+  // Order advances DELIVERED → INVOICED in the same transaction. The
+  // driver's run ends here — a bill waiting on a manager must never leave a
+  // delivery hanging.
   await tx.order.update({
     where: { id: orderId },
     data: { status: OrderStatus.INVOICED },
@@ -670,6 +675,10 @@ export async function createTaxInvoiceForOrderInTx(
       payloadHash: sha256Json({ orderId, invoiceNo: invoice.invoiceNo, grandTotal: invoice.grandTotal.toString() }),
     },
   });
+
+  // Post-response, so it can't roll the delivery back or slow the driver's
+  // tap; it re-reads the invoice and no-ops if the transaction didn't commit.
+  notifyAwaitingApproval(invoice.id, "raised automatically on delivery");
 
   return { id: invoice.id, invoiceNo: invoice.invoiceNo, grandTotal: invoice.grandTotal.toString(), created: true };
 }
@@ -929,7 +938,7 @@ async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
     const invoice = await tx.customerInvoice.findUnique({
       where: { id },
       select: {
-        invoiceNo: true, status: true, orderId: true,
+        invoiceNo: true, status: true, orderId: true, amountPaid: true, grandTotal: true,
         onHoldAt: true, onHoldReason: true, approvedAt: true,
       },
     });
@@ -942,14 +951,21 @@ async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
       approvedAt: invoice.approvedAt,
     });
     if (refusal) throw new ActionError(refusal);
+    // Cash taken at the door was credited onto the draft, so an invoice can
+    // already be settled the moment it is released. Land it on the status
+    // the money says, not blindly on ISSUED.
+    const settled = settledStatus(invoice.amountPaid.toString(), invoice.grandTotal.toString());
+    const fullyPaid = settled === CustomerInvoiceStatus.PAID;
+    const issuedAt = new Date();
     // Status guard: a concurrent issue loses the race cleanly. The
     // approvedAt clause makes an edit landing mid-click lose it too — the
     // edit revoked the sign-off, so this issue must not slip through.
     const updated = await tx.customerInvoice.updateMany({
       where: { id, status: CustomerInvoiceStatus.DRAFT, approvedAt: { not: null } },
       data: {
-        status: CustomerInvoiceStatus.ISSUED,
-        issuedAt: new Date(),
+        status: settled,
+        issuedAt,
+        ...(fullyPaid ? { paidAt: issuedAt } : {}),
         eInvoiceStatus: wantsEInvoice ? EInvoiceStatus.PENDING : EInvoiceStatus.NOT_REQUIRED,
       },
     });
@@ -959,7 +975,14 @@ async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
     if (invoice.orderId) {
       await tx.order.update({
         where: { id: invoice.orderId },
-        data: { status: OrderStatus.INVOICED },
+        data: { status: fullyPaid ? OrderStatus.COMPLETED : OrderStatus.INVOICED },
+      });
+    } else if (fullyPaid) {
+      // Consolidated folio (orderId null) settled at the door — close every
+      // member order it billed, same rule as recordCustomerInvoicePayment.
+      await tx.order.updateMany({
+        where: { consolidatedInvoiceId: id, status: OrderStatus.INVOICED },
+        data: { status: OrderStatus.COMPLETED },
       });
     }
     await tx.auditLog.create({
@@ -972,8 +995,12 @@ async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
     });
   });
 
-  // Post-commit: kick off IRN generation after the response is sent, like
-  // every other post-commit side effect (emails, notifications).
+  // Post-commit, after the response: this is the single point at which an
+  // invoice reaches the customer. It used to fire on delivery confirmation,
+  // which handed the bill over before any manager had seen it.
+  deferAfterResponse("invoice-email", () => emailTaxInvoiceCore(id));
+  // IRN too — only ever from here, so an unapproved draft is never filed
+  // with the GST portal.
   if (wantsEInvoice) {
     deferAfterResponse("invoice-irn", () => generateIRNForInvoice(id));
   }
@@ -1121,7 +1148,7 @@ export async function cancelCustomerInvoice(id: string, reason: string): Promise
     await db.$transaction(async (tx) => {
       const invoice = await tx.customerInvoice.findUnique({
         where: { id },
-        select: { status: true, kind: true, orderId: true, eInvoiceStatus: true },
+        select: { status: true, kind: true, orderId: true, eInvoiceStatus: true, amountPaid: true },
       });
       if (!invoice) throw new ActionError("Invoice not found");
       if (invoice.status === CustomerInvoiceStatus.CANCELLED) {
@@ -1130,9 +1157,12 @@ export async function cancelCustomerInvoice(id: string, reason: string): Promise
       // Money has landed against this invoice — cancelling would strand those
       // payments (and a PAID order would point at a cancelled invoice).
       // Reverse the payments first, which demotes the invoice to ISSUED.
+      // amountPaid, not just the status: cash taken at the door is credited
+      // onto the DRAFT, which is a status this guard would otherwise wave past.
       if (
         invoice.status === CustomerInvoiceStatus.PAID ||
-        invoice.status === CustomerInvoiceStatus.PARTIAL
+        invoice.status === CustomerInvoiceStatus.PARTIAL ||
+        toDecimal(invoice.amountPaid).gt(0)
       ) {
         throw new ActionError("Payments are recorded against this invoice — reverse them first.");
       }
@@ -1564,8 +1594,6 @@ async function createConsolidatedInHouseInvoiceInner(
     const podTotal = orders
       .flatMap((o) => o.deliveries)
       .reduce((s, d) => s.plus(d.paymentAmount ? toDecimal(d.paymentAmount) : 0), new Decimal(0));
-    const fullyPaid = podTotal.gte(summary.grandTotal);
-    const partiallyPaid = podTotal.gt(0) && !fullyPaid;
 
     const room = orders.find((o) => o.roomNumber)?.roomNumber;
     const codes = orders.map((o) => o.code).join(", ");
@@ -1574,12 +1602,10 @@ async function createConsolidatedInHouseInvoiceInner(
       data: {
         invoiceNo,
         kind: CustomerInvoiceKind.ORDER,
-        status: fullyPaid
-          ? CustomerInvoiceStatus.PAID
-          : partiallyPaid
-            ? CustomerInvoiceStatus.PARTIAL
-            : CustomerInvoiceStatus.ISSUED,
-        issuedAt: new Date(),
+        // Same gate as every other order-linked bill: the folio is a draft
+        // until a manager releases it. Money taken on the way is credited
+        // now; the paid/partial status is settled at issue.
+        ...ORDER_INVOICE_INITIAL,
         amountPaid: podTotal.toFixed(2),
         orderId: null, // consolidated — see notes for the source order codes
         customerId,
@@ -1633,10 +1659,12 @@ async function createConsolidatedInHouseInvoiceInner(
     // overlapping submission could double-bill) and back-link each to this
     // consolidated invoice so pay/cancel/reverse can find them (the invoice
     // itself stores orderId: null). Count must equal the orders we validated.
+    // INVOICED, never straight to COMPLETED: the folio can still be re-priced
+    // before release, so "fully settled" isn't decided until issue.
     const advanced = await tx.order.updateMany({
       where: { id: { in: orders.map((o) => o.id) }, status: OrderStatus.DELIVERED },
       data: {
-        status: fullyPaid ? OrderStatus.COMPLETED : OrderStatus.INVOICED,
+        status: OrderStatus.INVOICED,
         consolidatedInvoiceId: invoice.id,
       },
     });
@@ -1657,6 +1685,7 @@ async function createConsolidatedInHouseInvoiceInner(
     return invoice;
   });
 
+  notifyAwaitingApproval(result.id, "in-house folio");
   revalidatePath("/invoices");
   revalidatePath("/invoices/room-service");
   return { ok: true, id: result.id, invoiceNo: result.invoiceNo };
@@ -1690,8 +1719,14 @@ export async function getCustomerInvoice(id: string) {
   });
 }
 
+/**
+ * The public /i/[token] page's only source. Unauthenticated by design, so
+ * the release gate lives here: an unissued draft returns null and the page
+ * 404s. A share token is minted at creation, and a forwarded/guessed link
+ * must not expose a bill no manager has approved.
+ */
 export async function getCustomerInvoiceByToken(token: string) {
-  return db.customerInvoice.findUnique({
+  const invoice = await db.customerInvoice.findUnique({
     where: { shareToken: token },
     include: {
       customer: { select: { name: true, billingAddress: true, gstin: true, stateCode: true } },
@@ -1699,4 +1734,6 @@ export async function getCustomerInvoiceByToken(token: string) {
       order: { select: { code: true, eventDate: true } },
     },
   });
+  if (!invoice || !mayReachCustomer(invoice.status)) return null;
+  return invoice;
 }

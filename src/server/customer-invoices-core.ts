@@ -12,6 +12,7 @@ import { sha256Json } from "@/lib/audit";
 import { summarise } from "@/lib/gst";
 import { indefineStateCode } from "@/lib/org";
 import { ActionError, actionFailure, type ActionResult } from "@/server/action-result";
+import { mayReachCustomer } from "@/lib/customer-invoice-gates";
 import { buildInvoiceEmail, sendEmail } from "@/lib/email";
 import { formatIST } from "@/lib/time";
 
@@ -250,15 +251,17 @@ export async function createProformaInvoiceForOrderCore(orderId: string) {
 
 /**
  * Best-effort email of a freshly-issued tax invoice. Runs post-commit so
- * SMTP latency doesn't hold the delivery confirmation transaction open.
+ * SMTP latency doesn't hold the issuing transaction open.
  * On the auto-send pass failures are logged and swallowed (the invoice
  * still exists and can be re-sent manually); with `force: true` (the
  * user's explicit "Resend by email" click — kept awaited, the button
  * exists to send the email) failures come back as `{ ok: false }`.
  *
- * The exported emailTaxInvoice action gates this with requireRole; the
- * mobile confirm-otp route (which runs under a driver JWT, not a NextAuth
- * session) calls this core directly — best-effort auto-send (AUDIT_REPORT M5).
+ * Refuses outright on an unissued draft — see mayReachCustomer. The
+ * auto-send now fires from issueCustomerInvoice, i.e. after a manager has
+ * signed the bill off, not from delivery confirmation.
+ *
+ * The exported emailTaxInvoice action gates this with requireRole.
  */
 export async function emailTaxInvoiceCore(
   invoiceId: string,
@@ -278,6 +281,18 @@ export async function emailTaxInvoiceCore(
       // user is responsible for handling missing-email customers.
       if (opts.force) {
         throw new ActionError("Customer has no email on file. Add one on the customer page first.");
+      }
+      return { ok: true };
+    }
+    // An unissued draft is not a customer document. This is the gate every
+    // send route funnels through — the manual "Send to customer" button, the
+    // auto-send on issue, and anything added later — so no caller can email a
+    // bill a manager hasn't released.
+    if (!mayReachCustomer(invoice.status)) {
+      if (opts.force) {
+        throw new ActionError(
+          `${invoice.invoiceNo} hasn't been issued yet — a manager or admin has to approve and issue it before it goes to the customer.`,
+        );
       }
       return { ok: true };
     }

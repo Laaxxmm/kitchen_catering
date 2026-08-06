@@ -23,6 +23,7 @@ import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 import { formatINR, toDecimal } from "@/lib/money";
 import { formatIST } from "@/lib/time";
+import { mayReachCustomer } from "@/lib/customer-invoice-gates";
 
 export const dynamic = "force-dynamic";
 
@@ -119,7 +120,12 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         actions={
           <div className="flex gap-2">
             <Link href={`/api/invoices/${invoice.id}/pdf`} target="_blank"><Button variant="outline">Download PDF</Button></Link>
-            <Link href={`/i/${invoice.shareToken}`} target="_blank"><Button variant="outline">Public view</Button></Link>
+            {/* The share link 404s until the invoice is issued — same
+                predicate the public page uses, so the button is only here
+                when there is something for the customer to see. */}
+            {mayReachCustomer(invoice.status) && (
+              <Link href={`/i/${invoice.shareToken}`} target="_blank"><Button variant="outline">Public view</Button></Link>
+            )}
             {!isHeld && invoice.status !== CustomerInvoiceStatus.DRAFT && invoice.status !== CustomerInvoiceStatus.CANCELLED && canMarkPaid && (
               <ActionResultButton action={doEmailToCustomer} successMessage="Invoice emailed to customer">
                 {invoice.emailedAt ? "Resend by email" : "Send to customer"}

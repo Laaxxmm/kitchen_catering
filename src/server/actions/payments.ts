@@ -25,6 +25,7 @@ import {
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
 import { overpayRefusal, payRefusal } from "@/lib/vendor-bill-gates";
+import { settledStatus } from "@/lib/customer-invoice-gates";
 import type { Prisma } from "@prisma/client";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
@@ -221,7 +222,7 @@ async function reverseCustomerInvoicePaymentInner(raw: unknown): Promise<{ ok: t
     // Recompute parent invoice.amountPaid + status.
     const invoice = await tx.customerInvoice.findUnique({
       where: { id: payment.invoiceId },
-      select: { id: true, grandTotal: true, orderId: true },
+      select: { id: true, grandTotal: true, orderId: true, status: true },
     });
     if (!invoice) throw new ActionError("Parent invoice missing");
     const liveRows = await tx.customerInvoicePayment.findMany({
@@ -231,18 +232,19 @@ async function reverseCustomerInvoicePaymentInner(raw: unknown): Promise<{ ok: t
     const paid = liveRows.reduce((s, r) => s.plus(new Decimal(r.amount.toString())), new Decimal(0));
     const grand = new Decimal(invoice.grandTotal.toString());
     const fullyPaid = paid.gte(grand);
-    const partial = paid.gt(0) && !fullyPaid;
+    // A DRAFT carrying cash collected at the door is still a draft: pulling
+    // that money back must never promote it to ISSUED, which would release an
+    // invoice no manager signed off. Its status is settled at issue instead.
+    const stillDraft = invoice.status === CustomerInvoiceStatus.DRAFT;
 
     await tx.customerInvoice.update({
       where: { id: invoice.id },
       data: {
         amountPaid: paid.toDecimalPlaces(2).toString(),
-        paidAt: fullyPaid ? new Date() : null,
-        status: fullyPaid
-          ? CustomerInvoiceStatus.PAID
-          : partial
-            ? CustomerInvoiceStatus.PARTIAL
-            : CustomerInvoiceStatus.ISSUED,
+        paidAt: fullyPaid && !stillDraft ? new Date() : null,
+        ...(stillDraft
+          ? {}
+          : { status: settledStatus(paid.toDecimalPlaces(2).toString(), grand.toString()) }),
       },
     });
 
