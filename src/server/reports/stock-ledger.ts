@@ -1,3 +1,4 @@
+import { StockStore } from "@prisma/client";
 import { db } from "@/server/db";
 import { toDecimal } from "@/lib/money";
 
@@ -5,8 +6,9 @@ import { toDecimal } from "@/lib/money";
  * Per-item stock ledger for a store over a date range: opening balance
  * (everything before `from`), movements in the window (in / out / adjust),
  * and the closing balance. Read-only aggregation off the same movement rows
- * the app already writes on every receipt / issue / adjustment / return — so
- * the ledger reconciles to what actually happened, item by item.
+ * the app already writes on every receipt / issue / adjustment / return /
+ * store transfer — so the ledger reconciles to what actually happened, item
+ * by item. Anything that moves on-hand belongs in here.
  *
  * Kitchen covers every ingredient, which is where vegetables, frozen and
  * non-veg live (they are ingredient categories, not separate stores).
@@ -32,8 +34,67 @@ export interface LedgerRow {
 
 const n = (v: { toString(): string } | null | undefined) => (v == null ? 0 : Number(v.toString()));
 
+/**
+ * Quantities per item, split into "before the window" (opening) and "in the
+ * window". Used for the two movements that can't be groupBy'd in SQL: the
+ * kitchen return line's item lives on its issue, and a transfer's item ids
+ * are polymorphic across three catalogues.
+ *
+ * ponytail: reads the documents whole and sums in JS. Both are low-volume
+ * next to receipts and issues; push it into SQL if either table ever grows
+ * to the point where the report drags.
+ */
+interface Buckets {
+  before: Map<string, number>;
+  window: Map<string, number>;
+}
+const emptyBuckets = (): Buckets => ({ before: new Map(), window: new Map() });
+
+function bucket(b: Buckets, at: Date, from: Date, to: Date, id: string, qty: number) {
+  if (at < from) b.before.set(id, (b.before.get(id) ?? 0) + qty);
+  else if (at <= to) b.window.set(id, (b.window.get(id) ?? 0) + qty);
+}
+
+/** Stock the kitchen sent back, per ingredient. */
+async function kitchenReturnBuckets(from: Date, to: Date): Promise<Buckets> {
+  const rows = await db.ingredientReturnLine.findMany({
+    where: { return: { returnedAt: { lte: to } } },
+    select: {
+      quantity: true,
+      issue: { select: { ingredientId: true } },
+      return: { select: { returnedAt: true } },
+    },
+  });
+  const b = emptyBuckets();
+  for (const r of rows) {
+    bucket(b, r.return.returnedAt, from, to, r.issue.ingredientId, n(r.quantity));
+  }
+  return b;
+}
+
+/** Transfers into and out of one store, per item on that store's side. */
+async function transferBuckets(store: StockStore, from: Date, to: Date) {
+  const rows = await db.stockTransfer.findMany({
+    where: { transferredAt: { lte: to }, OR: [{ fromStore: store }, { toStore: store }] },
+    select: {
+      transferredAt: true,
+      fromStore: true, fromItemId: true,
+      toStore: true, toItemId: true,
+      quantity: true,
+    },
+  });
+  const into = emptyBuckets();
+  const outOf = emptyBuckets();
+  for (const r of rows) {
+    if (r.fromStore === store) bucket(outOf, r.transferredAt, from, to, r.fromItemId, n(r.quantity));
+    if (r.toStore === store) bucket(into, r.transferredAt, from, to, r.toItemId, n(r.quantity));
+  }
+  return { into, outOf };
+}
+
 async function kitchenLedger(from: Date, to: Date): Promise<LedgerRow[]> {
-  const [ingredients, recBefore, issBefore, adjBefore, recIn, issIn, adjIn] = await Promise.all([
+  const [ingredients, recBefore, issBefore, adjBefore, recIn, issIn, adjIn, returns, transfers] =
+    await Promise.all([
     db.ingredient.findMany({
       where: { active: true },
       select: { id: true, sku: true, name: true, unit: true, category: true, avgUnitCost: true },
@@ -44,6 +105,8 @@ async function kitchenLedger(from: Date, to: Date): Promise<LedgerRow[]> {
     db.ingredientReceipt.groupBy({ by: ["ingredientId"], _sum: { qty: true }, where: { receivedAt: { gte: from, lte: to } } }),
     db.ingredientIssue.groupBy({ by: ["ingredientId"], _sum: { qty: true }, where: { issuedAt: { gte: from, lte: to } } }),
     db.ingredientAdjustment.groupBy({ by: ["ingredientId"], _sum: { delta: true }, where: { adjustedAt: { gte: from, lte: to } } }),
+    kitchenReturnBuckets(from, to),
+    transferBuckets(StockStore.KITCHEN, from, to),
   ]);
 
   const sum = (rows: Array<{ ingredientId: string; _sum: { qty?: unknown; delta?: unknown } }>, key: "qty" | "delta") => {
@@ -55,9 +118,17 @@ async function kitchenLedger(from: Date, to: Date): Promise<LedgerRow[]> {
   const rI = sum(recIn, "qty"), iI = sum(issIn, "qty"), aI = sum(adjIn, "delta");
 
   return ingredients.map((g) => {
-    const opening = (rB.get(g.id) ?? 0) - (iB.get(g.id) ?? 0) + (aB.get(g.id) ?? 0);
-    const inQty = rI.get(g.id) ?? 0;
-    const outQty = iI.get(g.id) ?? 0;
+    // Returns and transfers-in are stock coming back on hand; transfers-out
+    // leave like an issue. Every movement that touches onHandQty has to be
+    // here or the closing balance stops matching the item's actual stock.
+    const opening =
+      (rB.get(g.id) ?? 0) - (iB.get(g.id) ?? 0) + (aB.get(g.id) ?? 0)
+      + (returns.before.get(g.id) ?? 0)
+      + (transfers.into.before.get(g.id) ?? 0)
+      - (transfers.outOf.before.get(g.id) ?? 0);
+    const inQty =
+      (rI.get(g.id) ?? 0) + (returns.window.get(g.id) ?? 0) + (transfers.into.window.get(g.id) ?? 0);
+    const outQty = (iI.get(g.id) ?? 0) + (transfers.outOf.window.get(g.id) ?? 0);
     const adjustQty = aI.get(g.id) ?? 0;
     const closing = opening + inQty - outQty + adjustQty;
     return {
@@ -76,7 +147,7 @@ async function kitchenLedger(from: Date, to: Date): Promise<LedgerRow[]> {
 }
 
 async function banquetLedger(from: Date, to: Date): Promise<LedgerRow[]> {
-  const [items, recBefore, retBefore, issBefore, recIn, retIn, issIn] = await Promise.all([
+  const [items, recBefore, retBefore, issBefore, recIn, retIn, issIn, transfers] = await Promise.all([
     db.banquetItem.findMany({ where: { active: true }, select: { id: true, sku: true, name: true, unit: true, category: true } }),
     db.banquetReceiptLine.groupBy({ by: ["itemId"], _sum: { quantity: true }, where: { receipt: { receivedAt: { lt: from } } } }),
     db.banquetReturnLine.groupBy({ by: ["itemId"], _sum: { quantity: true }, where: { return: { returnedAt: { lt: from } } } }),
@@ -84,6 +155,7 @@ async function banquetLedger(from: Date, to: Date): Promise<LedgerRow[]> {
     db.banquetReceiptLine.groupBy({ by: ["itemId"], _sum: { quantity: true }, where: { receipt: { receivedAt: { gte: from, lte: to } } } }),
     db.banquetReturnLine.groupBy({ by: ["itemId"], _sum: { quantity: true }, where: { return: { returnedAt: { gte: from, lte: to } } } }),
     db.banquetIssueLine.groupBy({ by: ["itemId"], _sum: { quantity: true }, where: { issue: { issuedAt: { gte: from, lte: to } } } }),
+    transferBuckets(StockStore.FNB, from, to),
   ]);
 
   const sum = (rows: Array<{ itemId: string; _sum: { quantity: unknown } }>) => {
@@ -95,10 +167,13 @@ async function banquetLedger(from: Date, to: Date): Promise<LedgerRow[]> {
   const rI = sum(recIn), tI = sum(retIn), iI = sum(issIn);
 
   return items.map((b) => {
-    // Returns are stock coming back in.
-    const opening = (rB.get(b.id) ?? 0) + (tB.get(b.id) ?? 0) - (iB.get(b.id) ?? 0);
-    const inQty = (rI.get(b.id) ?? 0) + (tI.get(b.id) ?? 0);
-    const outQty = iI.get(b.id) ?? 0;
+    // Returns and transfers-in are stock coming back in.
+    const opening =
+      (rB.get(b.id) ?? 0) + (tB.get(b.id) ?? 0) - (iB.get(b.id) ?? 0)
+      + (transfers.into.before.get(b.id) ?? 0)
+      - (transfers.outOf.before.get(b.id) ?? 0);
+    const inQty = (rI.get(b.id) ?? 0) + (tI.get(b.id) ?? 0) + (transfers.into.window.get(b.id) ?? 0);
+    const outQty = (iI.get(b.id) ?? 0) + (transfers.outOf.window.get(b.id) ?? 0);
     const closing = opening + inQty - outQty;
     return { sku: b.sku ?? "", name: b.name, category: b.category, unit: b.unit, opening, inQty, outQty, adjustQty: 0, closing, value: null };
   });

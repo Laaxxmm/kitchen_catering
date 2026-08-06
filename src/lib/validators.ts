@@ -18,6 +18,7 @@ import {
   MaintenanceCategory,
   Role,
   RoomType,
+  StockStore,
   TaskPriority,
   TaskStatus,
   VendorPaymentTerms,
@@ -155,6 +156,39 @@ export const IngredientIssueInput = z.object({
   note: z.string().max(500).nullable().optional(),
 });
 export type IngredientIssueInputT = z.infer<typeof IngredientIssueInput>;
+
+// Stock coming back from the kitchen. A line points at the ISSUE it
+// reverses, not just at the ingredient — that's what puts the credit on the
+// right event's food cost. The reason is mandatory, per line.
+const IngredientReturnLineInput = z.object({
+  issueId: z.string().min(1),
+  quantity: decimalString,
+  reason: z.string().min(2, "Say why it's coming back").max(200),
+});
+
+export const IngredientReturnInput = z.object({
+  returnedAt: isoDate,
+  notes: z.string().max(500).nullable().optional(),
+  lines: z.array(IngredientReturnLineInput).min(1, "Add at least one line"),
+});
+export type IngredientReturnInputT = z.infer<typeof IngredientReturnInput>;
+
+// Moving stock between the three stores. Source and destination items are
+// picked explicitly — never matched by name, since "Aluminium Foil" and
+// "Aluminium Foil [Roll]" are different rows with possibly different units.
+// `unitsAcknowledged` is the user confirming a cross-unit move; the action
+// refuses without it and nothing is ever converted.
+export const StockTransferInput = z.object({
+  transferredAt: isoDate,
+  fromStore: z.nativeEnum(StockStore),
+  fromItemId: z.string().min(1),
+  toStore: z.nativeEnum(StockStore),
+  toItemId: z.string().min(1),
+  quantity: decimalString,
+  unitsAcknowledged: z.boolean().optional(),
+  notes: z.string().max(500).nullable().optional(),
+});
+export type StockTransferInputT = z.infer<typeof StockTransferInput>;
 
 // Admin/manager manual stock adjustment. Either set `newQty` (target the
 // new on-hand absolute) or `delta` (signed change). One is required.

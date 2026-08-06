@@ -6,6 +6,7 @@ import {
   BanquetRequisitionStatus,
   Prisma,
   Role,
+  StockStore,
 } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
@@ -212,20 +213,31 @@ async function deleteBanquetItemInner(id: string): Promise<{ ok: true }> {
     // hard delete: receipt + issue lines (audit trail), requisition lines
     // (itemId is a RESTRICT FK — a raw delete would crash with P2003) and
     // vendor-PO lines (banquetItemId is SET NULL — a live PO line would
-    // silently unlink from the item it's buying).
-    const [receiptLines, issueLines, requisitionLines, poLines] = await Promise.all([
+    // silently unlink from the item it's buying). Store transfers count too:
+    // they carry no FK (the ids are polymorphic across three catalogues), so
+    // nothing but this check stops a moved-stock document losing its item.
+    const [receiptLines, issueLines, requisitionLines, poLines, transfers] = await Promise.all([
       tx.banquetReceiptLine.count({ where: { itemId: id } }),
       tx.banquetIssueLine.count({ where: { itemId: id } }),
       tx.banquetRequisitionLine.count({ where: { itemId: id } }),
       tx.vendorPOLine.count({ where: { banquetItemId: id } }),
+      tx.stockTransfer.count({
+        where: {
+          OR: [
+            { fromStore: StockStore.FNB, fromItemId: id },
+            { toStore: StockStore.FNB, toItemId: id },
+          ],
+        },
+      }),
     ]);
-    if (receiptLines > 0 || issueLines > 0 || requisitionLines > 0 || poLines > 0) {
+    if (receiptLines > 0 || issueLines > 0 || requisitionLines > 0 || poLines > 0 || transfers > 0) {
       const bits: string[] = [];
       if (receiptLines > 0) bits.push(`${receiptLines} receipt line${receiptLines === 1 ? "" : "s"}`);
       if (issueLines > 0) bits.push(`${issueLines} issue line${issueLines === 1 ? "" : "s"}`);
       if (requisitionLines > 0)
         bits.push(`${requisitionLines} requisition line${requisitionLines === 1 ? "" : "s"}`);
       if (poLines > 0) bits.push(`${poLines} purchase-order line${poLines === 1 ? "" : "s"}`);
+      if (transfers > 0) bits.push(`${transfers} store transfer${transfers === 1 ? "" : "s"}`);
       throw new ActionError(
         `This item has history (${bits.join(" + ")}). Deactivate instead to keep the audit trail.`,
       );

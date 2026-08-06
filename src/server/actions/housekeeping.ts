@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Prisma, Role } from "@prisma/client";
+import { Prisma, Role, StockStore } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { requireRole, requireSession } from "@/server/rbac";
@@ -424,14 +424,26 @@ export async function deleteHousekeepingItem(id: string): Promise<ActionResult> 
 
 async function deleteHousekeepingItemInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
-  const [receiptLines, issueLines] = await Promise.all([
+  // Store transfers count as history too: they carry no FK (the item ids are
+  // polymorphic across three catalogues), so nothing but this check stops a
+  // moved-stock document losing the item it names.
+  const [receiptLines, issueLines, transfers] = await Promise.all([
     db.housekeepingReceiptLine.count({ where: { itemId: id } }),
     db.housekeepingIssueLine.count({ where: { itemId: id } }),
+    db.stockTransfer.count({
+      where: {
+        OR: [
+          { fromStore: StockStore.HOUSEKEEPING, fromItemId: id },
+          { toStore: StockStore.HOUSEKEEPING, toItemId: id },
+        ],
+      },
+    }),
   ]);
-  if (receiptLines > 0 || issueLines > 0) {
+  if (receiptLines > 0 || issueLines > 0 || transfers > 0) {
     const bits: string[] = [];
     if (receiptLines > 0) bits.push(`${receiptLines} receipt line${receiptLines === 1 ? "" : "s"}`);
     if (issueLines > 0) bits.push(`${issueLines} issue line${issueLines === 1 ? "" : "s"}`);
+    if (transfers > 0) bits.push(`${transfers} store transfer${transfers === 1 ? "" : "s"}`);
     throw new ActionError(
       `This item has history (${bits.join(" + ")}). Deactivate instead to keep the audit trail.`
     );

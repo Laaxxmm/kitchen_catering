@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Role } from "@prisma/client";
 
 interface Props {
-  active: "ingredients" | "receipts" | "issues" | "adjustments" | "audit";
+  active: "ingredients" | "receipts" | "issues" | "returns" | "transfers" | "adjustments" | "audit";
   role?: Role;
 }
 
@@ -13,17 +13,18 @@ const BASE_TABS = [
   { key: "audit", label: "Stock count (bulk)", href: "/inventory/audit" },
 ] as const;
 
-const ADJUSTMENTS_TAB = {
-  key: "adjustments",
-  label: "Stock adjustments",
-  href: "/inventory/adjustments",
-} as const;
+// Stock-movement tabs, same gate as issues (ADMIN/MANAGER/STORE_KEEPER).
+const STOCK_TABS = [
+  { key: "returns", label: "Returns from kitchen", href: "/inventory/returns" },
+  { key: "transfers", label: "Store transfers", href: "/inventory/transfers" },
+  { key: "adjustments", label: "Stock adjustments", href: "/inventory/adjustments" },
+] as const;
 
 export function InventoryNav({ active, role }: Props) {
   // Tabs match what the middleware actually lets each role open — a tab
   // that lands on /forbidden is worse than no tab.
   //   receipts: ADMIN/MANAGER/STORE_KEEPER/ACCOUNTS
-  //   issues:   ADMIN/MANAGER/STORE_KEEPER
+  //   issues / returns / transfers: ADMIN/MANAGER/STORE_KEEPER
   //   adjustments: ADMIN/MANAGER/STORE_KEEPER (writes behind the
   //     stock.storeDirectEdit toggle — a clear refusal, not a dead end)
   //   audit (bulk count): ADMIN/MANAGER/STORE_KEEPER/KITCHEN_HEAD/ACCOUNTS
@@ -31,7 +32,7 @@ export function InventoryNav({ active, role }: Props) {
   const tabs = [
     BASE_TABS[0],
     ...(canStock || role === "ACCOUNTS" ? [BASE_TABS[1]] : []),
-    ...(canStock ? [BASE_TABS[2], ADJUSTMENTS_TAB] : []),
+    ...(canStock ? [BASE_TABS[2], ...STOCK_TABS] : []),
     BASE_TABS[3],
   ];
 

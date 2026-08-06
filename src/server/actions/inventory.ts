@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Role, type Prisma } from "@prisma/client";
+import { Role, StockStore, type Prisma } from "@prisma/client";
+import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import {
@@ -9,10 +10,13 @@ import {
   IngredientInput,
   IngredientReceiptInput,
   IngredientIssueInput,
+  IngredientReturnInput,
 } from "@/lib/validators";
 import { nextGPItemCode } from "@/lib/sequences";
 import { newMovingAverage } from "@/lib/inventory-cost";
+import { STORE_LABELS, checkReturnQty, remainingReturnable } from "@/lib/stock-movement";
 import { unitsEquivalent } from "@/lib/units";
+import { istToUtc } from "@/lib/time";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
 import { getSettingOr } from "@/lib/settings";
@@ -389,6 +393,210 @@ async function recordDirectIngredientIssueInner(raw: unknown): Promise<{ ok: tru
 }
 
 /**
+ * Stock coming back from the kitchen — the chef drew 5 kg of onions and used
+ * 3. The store's F&B counterpart is recordBanquetReturn (banquet.ts); this is
+ * the kitchen version, with the one thing food cost needs that cutlery
+ * doesn't: money.
+ *
+ * A line names the IngredientIssue it reverses, so both the order credited
+ * and the unit cost credited come from that issue. Valuing the return at
+ * today's moving average instead would silently re-price inventory and leave
+ * the event's cost only partly reversed. The quantity is capped at what that
+ * issue still has outstanding (issued − already returned), and the stock goes
+ * back on hand inside the same transaction as the document, under the same
+ * row lock the issue path takes.
+ */
+export async function recordIngredientReturn(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await recordIngredientReturnInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function recordIngredientReturnInner(raw: unknown): Promise<{ ok: true; id: string }> {
+  const session = await requireRole(WRITE_ROLES);
+  const input = IngredientReturnInput.parse(raw);
+
+  const result = await db.$transaction(async (tx) => {
+    const issueIds = [...new Set(input.lines.map((l) => l.issueId))];
+    const issues = await tx.ingredientIssue.findMany({
+      where: { id: { in: issueIds } },
+      select: {
+        id: true,
+        qty: true,
+        unitCostAtIssue: true,
+        ingredientId: true,
+        ingredient: { select: { name: true, unit: true } },
+      },
+    });
+    if (issues.length !== issueIds.length) {
+      throw new ActionError("One of those issues no longer exists — refresh and try again.");
+    }
+    const issueById = new Map(issues.map((i) => [i.id, i]));
+    const ingredientIds = [...new Set(issues.map((i) => i.ingredientId))].sort();
+
+    // Lock every ingredient the document touches BEFORE reading stock or
+    // prior returns; ids in a stable order so two multi-line returns can't
+    // deadlock against each other.
+    for (const id of ingredientIds) await lockIngredientRow(tx, id);
+
+    const [prior, ingredients] = await Promise.all([
+      tx.ingredientReturnLine.groupBy({
+        by: ["issueId"],
+        where: { issueId: { in: issueIds } },
+        _sum: { quantity: true },
+      }),
+      tx.ingredient.findMany({
+        where: { id: { in: ingredientIds } },
+        select: { id: true, onHandQty: true, avgUnitCost: true },
+      }),
+    ]);
+    const returnedBy = new Map(prior.map((p) => [p.issueId, toDecimal(p._sum.quantity ?? 0)]));
+
+    // Two lines against the same issue share one ceiling — check the total,
+    // not each line, or a split return walks straight past the cap.
+    const wantByIssue = new Map<string, Decimal>();
+    for (const l of input.lines) {
+      const want = toDecimal(l.quantity || "0");
+      if (want.lte(0)) throw new ActionError("Return quantity must be greater than 0");
+      wantByIssue.set(l.issueId, (wantByIssue.get(l.issueId) ?? new Decimal(0)).plus(want));
+    }
+    for (const [issueId, want] of wantByIssue) {
+      const issue = issueById.get(issueId)!;
+      const refusal = checkReturnQty({
+        want,
+        issuedQty: issue.qty.toString(),
+        alreadyReturned: returnedBy.get(issueId) ?? "0",
+        name: issue.ingredient.name,
+        unit: issue.ingredient.unit,
+      });
+      if (refusal) throw new ActionError(refusal);
+    }
+
+    const created = await tx.ingredientReturn.create({
+      data: {
+        returnedAt: istToUtc(input.returnedAt),
+        recordedById: session.user.id,
+        notes: input.notes?.trim() || null,
+        lines: {
+          create: input.lines.map((l) => ({
+            issueId: l.issueId,
+            quantity: toDecimal(l.quantity).toDecimalPlaces(3).toString(),
+            unitCost: issueById.get(l.issueId)!.unitCostAtIssue.toString(),
+            reason: l.reason.trim(),
+          })),
+        },
+      },
+    });
+
+    // Fold each line back into stock at the cost it left at. Several lines can
+    // hit one ingredient at different issue costs, so the average is
+    // recomputed line by line off a running figure, then written once.
+    const running = new Map(
+      ingredients.map((i) => [i.id, { qty: toDecimal(i.onHandQty), avg: toDecimal(i.avgUnitCost) }]),
+    );
+    for (const l of input.lines) {
+      const issue = issueById.get(l.issueId)!;
+      const cur = running.get(issue.ingredientId)!;
+      const next = newMovingAverage({
+        onHandQty: cur.qty,
+        avgUnitCost: cur.avg,
+        receiptQty: toDecimal(l.quantity),
+        receiptUnitCost: issue.unitCostAtIssue.toString(),
+      });
+      running.set(issue.ingredientId, { qty: next.qty, avg: next.avgUnitCost });
+    }
+    for (const [ingredientId, v] of running) {
+      await tx.ingredient.update({
+        where: { id: ingredientId },
+        data: {
+          onHandQty: v.qty.toDecimalPlaces(3).toString(),
+          avgUnitCost: v.avg.toDecimalPlaces(4).toString(),
+        },
+      });
+    }
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "INGREDIENT_RETURN_RECORDED",
+        entity: "IngredientReturn",
+        entityId: created.id,
+        payloadHash: sha256Json({
+          lines: input.lines.map((l) => ({ issueId: l.issueId, qty: l.quantity, reason: l.reason })),
+        }),
+      },
+    });
+    return created;
+  });
+
+  revalidatePath("/inventory/ingredients");
+  revalidatePath("/inventory/issues");
+  revalidatePath("/inventory/returns");
+  return { ok: true, id: result.id };
+}
+
+/**
+ * Issues that still have something returnable, for the return screen's
+ * picker. Scoped to an order when the store keeper came from one.
+ */
+export async function listReturnableIssues(opts: { orderId?: string; limit?: number } = {}) {
+  await requireRole(WRITE_ROLES);
+  const issues = await db.ingredientIssue.findMany({
+    where: opts.orderId ? { orderId: opts.orderId } : {},
+    orderBy: { issuedAt: "desc" },
+    // ponytail: recent-window scan, not a "still returnable" SQL predicate —
+    // returns happen within days of the issue. Push the filter into SQL if
+    // someone starts returning stock from months back.
+    take: opts.limit ?? 200,
+    include: {
+      ingredient: { select: { name: true, sku: true, unit: true } },
+      order: { select: { code: true } },
+      returnLines: { select: { quantity: true } },
+    },
+  });
+  return issues
+    .map((i) => {
+      const returned = i.returnLines.reduce((s, l) => s.plus(toDecimal(l.quantity)), new Decimal(0));
+      return {
+        id: i.id,
+        issuedAt: i.issuedAt,
+        ingredientName: i.ingredient.name,
+        sku: i.ingredient.sku,
+        unit: i.ingredient.unit,
+        orderId: i.orderId,
+        orderCode: i.order?.code ?? null,
+        issuedQty: i.qty.toString(),
+        unitCostAtIssue: i.unitCostAtIssue.toString(),
+        returnable: remainingReturnable(i.qty.toString(), returned).toString(),
+      };
+    })
+    .filter((i) => toDecimal(i.returnable).gt(0));
+}
+
+export async function listRecentReturns(opts: { limit?: number } = {}) {
+  await requireRole(READ_ROLES);
+  return db.ingredientReturn.findMany({
+    orderBy: { returnedAt: "desc" },
+    take: opts.limit ?? 50,
+    include: {
+      recordedBy: { select: { name: true } },
+      lines: {
+        include: {
+          issue: {
+            select: {
+              ingredient: { select: { name: true, unit: true } },
+              order: { select: { id: true, code: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
  * Manual stock adjustment — admin/manager only. Use for write-offs,
  * spoilage, opening-balance corrections, and any quantity change that
  * isn't a purchase or an issue. Does NOT touch avgUnitCost (corrections
@@ -639,12 +847,15 @@ export async function listRecentIssues(opts: { limit?: number } = {}) {
 
 /**
  * Per-ingredient movement ledger for the detail page: every receipt (+),
- * issue (−) and manual adjustment (±) in one reverse-chronological list,
- * capped at the latest 100 entries. Read-only, same gate as the other
- * inventory reads.
+ * issue (−), kitchen return (+), store transfer (±) and manual adjustment (±)
+ * in one reverse-chronological list, capped at the latest 100 entries.
+ * Read-only, same gate as the other inventory reads.
+ *
+ * Every movement that touches onHandQty belongs here — a ledger missing one
+ * of them no longer adds up to the stock figure it sits under.
  */
 export type IngredientMovementEntry = {
-  kind: "RECEIPT" | "ISSUE" | "ADJUSTMENT";
+  kind: "RECEIPT" | "ISSUE" | "RETURN" | "TRANSFER" | "ADJUSTMENT";
   id: string;
   at: Date;
   /** Signed quantity string, e.g. "+12.5" / "-3". */
@@ -661,7 +872,7 @@ export async function listIngredientMovements(
   ingredientId: string,
 ): Promise<IngredientMovementEntry[]> {
   await requireRole(READ_ROLES);
-  const [receipts, issues, adjustments] = await Promise.all([
+  const [receipts, issues, returns, transfers, adjustments] = await Promise.all([
     db.ingredientReceipt.findMany({
       where: { ingredientId },
       orderBy: { receivedAt: "desc" },
@@ -676,6 +887,28 @@ export async function listIngredientMovements(
         issuedBy: { select: { name: true } },
         order: { select: { code: true } },
       },
+    }),
+    db.ingredientReturnLine.findMany({
+      where: { issue: { ingredientId } },
+      orderBy: { return: { returnedAt: "desc" } },
+      take: MOVEMENT_CAP,
+      include: {
+        return: { include: { recordedBy: { select: { name: true } } } },
+        issue: { select: { order: { select: { code: true } } } },
+      },
+    }),
+    // Transfers reference items polymorphically (no FK), so both directions
+    // are matched on the plain id plus the store it belongs to.
+    db.stockTransfer.findMany({
+      where: {
+        OR: [
+          { fromStore: StockStore.KITCHEN, fromItemId: ingredientId },
+          { toStore: StockStore.KITCHEN, toItemId: ingredientId },
+        ],
+      },
+      orderBy: { transferredAt: "desc" },
+      take: MOVEMENT_CAP,
+      include: { recordedBy: { select: { name: true } } },
     }),
     db.ingredientAdjustment.findMany({
       where: { ingredientId },
@@ -710,6 +943,36 @@ export async function listIngredientMovements(
         .filter(Boolean)
         .join(" · "),
     })),
+    ...returns.map((r) => ({
+      kind: "RETURN" as const,
+      id: r.id,
+      at: r.return.returnedAt,
+      qty: `+${r.quantity.toString()}`,
+      by: r.return.recordedBy.name,
+      detail: [
+        `₹${r.unitCost.toString()}/unit credited back`,
+        r.issue.order ? `order ${r.issue.order.code}` : "no order",
+        r.reason,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    })),
+    ...transfers.map((t) => {
+      const out = t.fromStore === StockStore.KITCHEN && t.fromItemId === ingredientId;
+      return {
+        kind: "TRANSFER" as const,
+        id: t.id,
+        at: t.transferredAt,
+        qty: `${out ? "-" : "+"}${t.quantity.toString()}`,
+        by: t.recordedBy.name,
+        detail: [
+          out ? `to ${STORE_LABELS[t.toStore]}: ${t.toItemName}` : `from ${STORE_LABELS[t.fromStore]}: ${t.fromItemName}`,
+          t.notes,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      };
+    }),
     ...adjustments.map((a) => ({
       kind: "ADJUSTMENT" as const,
       id: a.id,

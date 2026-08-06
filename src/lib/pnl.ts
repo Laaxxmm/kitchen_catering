@@ -40,8 +40,11 @@ export interface OrderPnL {
  *   Revenue (accrual)     = sum of issued CustomerInvoice.grandTotal
  *   Revenue (cash)        = sum of CustomerInvoicePayment.amount (non-reversed)
  *   Ingredient planned    = sum(ChefRequisitionLine.requestedQty × unitCostSnapshot)
- *   Ingredient actual     = sum(IngredientIssue.qty × unitCostAtIssue) for the order
- *   Labour                = sum(TimeEntry.minutes/60 × hourly rate from SalaryStructure
+ *   Ingredient actual     = sum(IngredientIssue.qty × unitCostAtIssue) for the order,
+ *                           less sum(IngredientReturnLine.quantity × unitCost) for stock
+ *                           the kitchen sent back — credited at the price it was
+ *                           issued at, so the charge actually reverses
+ *   Labour              = sum(TimeEntry.minutes/60 × hourly rate from SalaryStructure
  *                                effective at the time entry's clockIn date)
  *   Overhead              = sum of OrderOverheadAllocation.amount (manual allocations)
  *
@@ -81,6 +84,18 @@ export async function computeOrderPnL(orderId: string): Promise<OrderPnL | null>
     include: { ingredient: { select: { id: true, name: true, unit: true } } },
   });
 
+  // …minus what came back. The return line carries the issue's own unit cost,
+  // so the credit is at the price this order was charged, and it reaches this
+  // order only because the line points at an issue that belongs to it.
+  const returnLines = await db.ingredientReturnLine.findMany({
+    where: { issue: { orderId } },
+    select: {
+      quantity: true,
+      unitCost: true,
+      issue: { select: { ingredientId: true } },
+    },
+  });
+
   // Build per-ingredient roll-up
   const byIng = new Map<string, {
     ingredient: string; unit: string;
@@ -110,6 +125,15 @@ export async function computeOrderPnL(orderId: string): Promise<OrderPnL | null>
     cur.actualQty = cur.actualQty.plus(qty);
     cur.actualCost = cur.actualCost.plus(qty.times(toDecimal(i.unitCostAtIssue)));
     byIng.set(key, cur);
+  }
+  for (const r of returnLines) {
+    // The ingredient always already has a bucket: a return can only exist
+    // against an issue, and every issue for this order was just folded in.
+    const cur = byIng.get(r.issue.ingredientId);
+    if (!cur) continue;
+    const qty = toDecimal(r.quantity);
+    cur.actualQty = cur.actualQty.minus(qty);
+    cur.actualCost = cur.actualCost.minus(qty.times(toDecimal(r.unitCost)));
   }
   const ingLines = [...byIng.values()].map((c) => ({
     ingredient: c.ingredient,

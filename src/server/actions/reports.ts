@@ -30,11 +30,20 @@ async function monthMetrics(periodStart: Date, periodEnd: Date): Promise<MonthMe
     db.order.count({
       where: { createdAt: { gte: periodStart, lt: periodEnd } },
     }),
-    // Product of two columns — not expressible with Prisma aggregate.
+    // Product of two columns — not expressible with Prisma aggregate. Net of
+    // stock the kitchen sent back in the same window, credited at the price
+    // it was issued at; without that the month overstates every event where
+    // the chef drew more than they used.
     db.$queryRaw<Array<{ total: string | null }>>`
-      SELECT COALESCE(SUM("qty" * "unitCostAtIssue"), 0)::text AS total
-      FROM "IngredientIssue"
-      WHERE "issuedAt" >= ${periodStart} AND "issuedAt" < ${periodEnd}`,
+      SELECT (
+        COALESCE((SELECT SUM(i."qty" * i."unitCostAtIssue")
+                  FROM "IngredientIssue" i
+                  WHERE i."issuedAt" >= ${periodStart} AND i."issuedAt" < ${periodEnd}), 0)
+        - COALESCE((SELECT SUM(l."quantity" * l."unitCost")
+                    FROM "IngredientReturnLine" l
+                    JOIN "IngredientReturn" r ON r."id" = l."returnId"
+                    WHERE r."returnedAt" >= ${periodStart} AND r."returnedAt" < ${periodEnd}), 0)
+      )::text AS total`,
     db.vendorBill.aggregate({
       where: { issueDate: { gte: periodStart, lt: periodEnd } },
       _sum: { grandTotal: true },

@@ -14,7 +14,13 @@ import type { IngredientInputT } from "@/lib/validators";
 
 export const dynamic = "force-dynamic";
 
-const MOVEMENT_LABELS = { RECEIPT: "Receipt", ISSUE: "Issue", ADJUSTMENT: "Adjustment" } as const;
+const MOVEMENT_LABELS = {
+  RECEIPT: "Receipt",
+  ISSUE: "Issue",
+  RETURN: "Return",
+  TRANSFER: "Transfer",
+  ADJUSTMENT: "Adjustment",
+} as const;
 
 export default async function IngredientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

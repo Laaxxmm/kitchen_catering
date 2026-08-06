@@ -77,6 +77,10 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   { pattern: /^\/inventory\/adjustments(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
   // Issuing stock out is the store's job (not the chef, not accounts).
   { pattern: /^\/inventory\/issues(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
+  // Stock coming back from the kitchen, and stock moving between the three
+  // stores — same hands that issue it out.
+  { pattern: /^\/inventory\/returns(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
+  { pattern: /^\/inventory\/transfers(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
   // Recording incoming stock — store + accounts (books-side receipt). The
   // chef can view stock levels but doesn't record receipts.
   { pattern: /^\/inventory\/receipts(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "ACCOUNTS"] },
