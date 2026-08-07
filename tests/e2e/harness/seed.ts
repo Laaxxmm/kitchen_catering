@@ -222,7 +222,7 @@ async function clearKeptMasterData(): Promise<void> {
  * rather than `npm run catalogue:import` for one reason: that script passes
  * `--env-file=.env`, and .env points at the developer's own database.
  */
-function importCatalogue(): void {
+export function importCatalogue(): void {
   execFileSync("npx", ["tsx", "scripts/import-catalogue.ts"], {
     cwd: process.cwd(),
     env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL },

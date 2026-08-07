@@ -24,6 +24,8 @@
  *   resetAndReseed()           The same routine, unconditionally.
  *   freshSlate()               Clear the transactional tables only (no
  *                              re-import) — for a clean slate mid-file.
+ *   importCatalogue()          Run the real import script again, as go-live
+ *                              runs it — for asserting it is idempotent.
  *   seeded()                   { customerId, vendorId, dishIds, ingredients }
  *   INGREDIENT_CODES           The two catalogue codes the fixtures use.
  *
@@ -73,6 +75,7 @@ export {
   ensureSeeded,
   resetAndReseed,
   freshSlate,
+  importCatalogue,
   seeded,
   INGREDIENT_CODES,
   type Fixtures,

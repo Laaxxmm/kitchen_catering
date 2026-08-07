@@ -10,6 +10,7 @@ import {
   resetEverythingKeepParties,
   resetTransactionalData,
 } from "@/server/actions/admin-reset";
+import { importCatalogueFromFiles } from "@/server/actions/catalogue-import";
 import { isNextNavigationError } from "@/lib/next-error";
 
 /**
@@ -27,10 +28,64 @@ import { isNextNavigationError } from "@/lib/next-error";
 export function CleanSlate() {
   return (
     <div className="mt-8 grid gap-4">
+      <ImportCatalogue />
       <ClearOrders />
       <FullReset />
       <EraseEverything />
     </div>
+  );
+}
+
+/**
+ * Go-live step two: load the replacement catalogues from the files shipped
+ * with the build. Sits above the reset boxes because that is the order it
+ * has to run in — importing over the old items collides on their codes.
+ */
+function ImportCatalogue() {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  function run() {
+    startTransition(async () => {
+      try {
+        const res = await importCatalogueFromFiles();
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success(
+          `Kitchen ${res.kitchenCreated} added / ${res.kitchenUpdated} updated · ` +
+            `F&B ${res.fnbCreated} added / ${res.fnbUpdated} updated · ` +
+            `${res.fnbOpeningLines} opening balances received in.`,
+        );
+        router.refresh();
+      } catch (err) {
+        if (isNextNavigationError(err)) throw err;
+        toast.error(err instanceof Error ? err.message : "Import failed");
+      }
+    });
+  }
+
+  return (
+    <section className="rounded-[14px] border border-ik-rule bg-ik-card p-4 sm:p-5">
+      <h3 className="font-serif text-[15px] font-medium text-ik-ink">Import item catalogue</h3>
+      <p className="mt-1 max-w-2xl text-[12.5px] text-ik-ink-2">
+        Loads the client&apos;s catalogues from the spreadsheets shipped with this build:{" "}
+        <strong>405 kitchen items</strong> (GP-001…), <strong>154 in-house F&amp;B</strong>{" "}
+        (GP-IN-001…) and <strong>42 hired F&amp;B</strong> (GP-HR-001…), with their opening
+        counts. Item codes continue from here for anything added later.
+      </p>
+      <p className="mt-2 max-w-2xl text-[12.5px] text-ik-ink-2">
+        Run this <strong>after</strong> Erase everything. All-or-nothing: if any name clashes with
+        an item already in the system, nothing is written and the message names the clash. Safe to
+        press twice — a second run refreshes names, units and rates, and leaves stock alone.
+      </p>
+      <div className="mt-3">
+        <Button type="button" disabled={pending} onClick={run}>
+          {pending ? "Importing… (up to a minute)" : "Import catalogue"}
+        </Button>
+      </div>
+    </section>
   );
 }
 

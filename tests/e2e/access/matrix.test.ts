@@ -7,6 +7,7 @@ import { DocumentEntityType, PaymentMethod } from "@prisma/client";
 import { AuthenticationError, AuthorizationError } from "@/server/rbac";
 import * as adminReset from "@/server/actions/admin-reset";
 import * as banquet from "@/server/actions/banquet";
+import * as catalogueImport from "@/server/actions/catalogue-import";
 import * as chefRequisitions from "@/server/actions/chef-requisitions";
 import * as customerInvoices from "@/server/actions/customer-invoices";
 import * as deliveries from "@/server/actions/deliveries";
@@ -596,6 +597,12 @@ const CASES: GateCase[] = [
   ),
   gate("admin-reset", "resetEverythingKeepParties", ["admin"], () =>
     adminReset.resetEverythingKeepParties("not the phrase"),
+  ),
+  // Takes no arguments, so there is no bad input to die on just past the
+  // gate — the admin probe runs the real import. Harmless: it is idempotent
+  // and the catalogue is already in from the seed, so it writes nothing new.
+  gate("catalogue-import", "importCatalogueFromFiles", ["admin"], () =>
+    catalogueImport.importCatalogueFromFiles(),
   ),
   gate("users", "createUser", ["admin"], () => users.createUser({})),
   gate("users", "updateUser", ["admin"], () => users.updateUser(MISSING_ID, {})),

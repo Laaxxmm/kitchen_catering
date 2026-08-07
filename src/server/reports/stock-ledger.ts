@@ -180,6 +180,10 @@ async function banquetLedger(from: Date, to: Date): Promise<LedgerRow[]> {
   const rI = sum(recIn), tI = sum(retIn), iI = sum(issIn);
 
   return items.map((b) => {
+    // No openingQty term here, unlike the kitchen above: BanquetItem carries
+    // no such column, and both paths that put opening stock on an F&B shelf —
+    // the new-item form and the catalogue import — post a real "Opening
+    // balance" receipt for it, so it is already in the receipt sums.
     // Returns and transfers-in are stock coming back in.
     const opening =
       (rB.get(b.id) ?? 0) + (tB.get(b.id) ?? 0) - (iB.get(b.id) ?? 0)

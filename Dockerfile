@@ -72,6 +72,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/public           ./public
 COPY --from=builder --chown=nextjs:nodejs /app/prisma           ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules     ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/scripts          ./scripts
+# The catalogue JSON is read at RUNTIME, by the admin "Import catalogue"
+# button — not baked into the bundle at build time. Without this the import
+# dies on file-not-found in production, where there is no shell to run it
+# from either.
+COPY --from=builder --chown=nextjs:nodejs /app/data              ./data
 COPY --from=builder --chown=nextjs:nodejs /app/src/lib/env.ts   ./src/lib/env.ts
 COPY --from=builder --chown=nextjs:nodejs /app/package.json     ./package.json
 COPY --from=builder --chown=nextjs:nodejs /app/next.config.mjs  ./next.config.mjs
