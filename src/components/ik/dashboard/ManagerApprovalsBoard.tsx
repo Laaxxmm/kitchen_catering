@@ -65,6 +65,20 @@ export interface InvoiceToApprove {
   onHold: boolean;
 }
 
+/** Hired-labour request waiting on a manager. Figures are the ASK — the
+ *  manager can change them on the request page before approving. */
+export interface ManpowerToApprove {
+  id: string;
+  workDescription: string;
+  orderCode: string | null;
+  requestedBy: string;
+  people: number;
+  days: number;
+  estimate: string;
+  /** ISO createdAt. */
+  createdAt: string;
+}
+
 interface Props {
   ordersToApprove: OrderToApprove[];
   orderChanges: OrderChange[];
@@ -73,6 +87,8 @@ interface Props {
   pendingVendors?: PendingVendor[];
   /** Drafts that can't go to the customer until signed off. */
   invoicesToApprove?: InvoiceToApprove[];
+  /** Hired labour the chef / F&B asked for, awaiting sign-off. */
+  manpowerToApprove?: ManpowerToApprove[];
   viewerIsAdmin?: boolean;
 }
 
@@ -94,10 +110,10 @@ const CHANNEL_LABEL: Record<OrderChannel, string> = {
  * grows downwards and stays on screen. Nothing here gets missed: the order
  * gate sits first since the kitchen waits on it.
  */
-export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseOrders, pendingVendors = [], invoicesToApprove = [], viewerIsAdmin = false }: Props) {
+export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseOrders, pendingVendors = [], invoicesToApprove = [], manpowerToApprove = [], viewerIsAdmin = false }: Props) {
   const total =
     ordersToApprove.length + orderChanges.length + purchaseOrders.length
-    + pendingVendors.length + invoicesToApprove.length;
+    + pendingVendors.length + invoicesToApprove.length + manpowerToApprove.length;
   if (total === 0) return null;
 
   const tabs = [
@@ -106,6 +122,7 @@ export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseO
     { key: "invoices", label: "Invoices", hint: "Release to customer", count: invoicesToApprove.length },
     { key: "po", label: "Purchase orders", hint: "Sign off spend", count: purchaseOrders.length },
     { key: "vendors", label: "New suppliers", hint: "Approve to unblock POs", count: pendingVendors.length },
+    { key: "manpower", label: "Manpower", hint: "Hired labour — sign off", count: manpowerToApprove.length },
   ];
 
   // Soonest event first (the kitchen waits on these); POs keep their order.
@@ -136,6 +153,13 @@ export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseO
             return (
               <CappedList items={invoicesToApprove} className={CARD_GRID} keyOf={(i) => i.id}>
                 {(i) => <InvoiceApprovalCard invoice={i} />}
+              </CappedList>
+            );
+          }
+          if (active === "manpower") {
+            return (
+              <CappedList items={manpowerToApprove} className={CARD_GRID} keyOf={(m) => m.id}>
+                {(m) => <ManpowerApprovalCard req={m} />}
               </CappedList>
             );
           }
@@ -363,6 +387,34 @@ function InvoiceApprovalCard({ invoice }: { invoice: InvoiceToApprove }) {
  * them refuses to submit — so the approve action lives right here on the
  * board instead of only on the vendor detail page, where nobody looked.
  */
+/** No one-click approve here, deliberately: the manager can change the people,
+ *  days and rate before sanctioning, and that belongs on the request page where
+ *  the figures are editable. The card carries enough to decide whether to look. */
+function ManpowerApprovalCard({ req }: { req: ManpowerToApprove }) {
+  return (
+    <li className={CARD + " border border-amber/45 bg-amber-wash/40"}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="font-mono text-[12.5px] text-brand-700">
+          {req.orderCode ?? "No order"}
+        </span>
+        <span className="text-[11.5px] text-ik-ink-3">
+          asked {formatIST(new Date(req.createdAt), "d MMM")}
+        </span>
+      </div>
+      <div className="mt-1 text-[13px] text-ik-ink"><strong>{req.workDescription}</strong></div>
+      <div className="mt-0.5 text-[11.5px] text-ik-ink-2">
+        {req.people} {req.people === 1 ? "person" : "people"} × {req.days}{" "}
+        {req.days === 1 ? "day" : "days"} · est. {req.estimate} · by {req.requestedBy}
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <Link href={`/manpower/${req.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">
+          Review &amp; approve
+        </Link>
+      </div>
+    </li>
+  );
+}
+
 function VendorApprovalCard({ vendor }: { vendor: PendingVendor }) {
   const { pending, run } = useApprove();
   return (

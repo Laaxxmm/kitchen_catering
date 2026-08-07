@@ -28,6 +28,8 @@ import { listVendorPOs, listVendorBills } from "@/server/actions/procurement";
 import { listPendingVendors } from "@/server/actions/vendors";
 import { listBanquetRequisitions } from "@/server/actions/banquet";
 import { listCustomerInvoices, listCustomerInvoicesAwaitingApproval } from "@/server/actions/customer-invoices";
+import { listManpowerRequests } from "@/server/actions/manpower";
+import { effectiveFigures, estimatedCost } from "@/lib/manpower";
 import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
 import { listHousekeepingIssues } from "@/server/actions/housekeeping";
 import { listMaintenanceActivities } from "@/server/actions/maintenance";
@@ -39,6 +41,7 @@ import {
   ChefRequisitionLineStatus,
   ChefRequisitionStatus, VendorPOStatus, OrderStatus,
   CustomerInvoiceStatus, VendorBillStatus, BanquetRequisitionStatus,
+  ManpowerRequestStatus,
 } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 
@@ -150,7 +153,12 @@ export default async function DashboardPage({
         <LauncherGreeting
           firstName={firstName}
           subtitle="Every order that needs you, with the next action on the card — accept, get ingredients, cook, hand to delivery."
-          actions={<Link href="/requisitions/new"><Button variant="outline">New stock request</Button></Link>}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Link href="/requisitions/new"><Button variant="outline">New stock request</Button></Link>
+              <Link href="/manpower/new"><Button variant="outline">Request manpower</Button></Link>
+            </div>
+          }
         />
         <div className="grid grid-cols-1 gap-5">
           <MyTasksPanel />
@@ -517,6 +525,7 @@ export default async function DashboardPage({
             <div className="flex flex-wrap gap-2">
               <Link href="/banquet/issues/new"><Button>Issue to event</Button></Link>
               <Link href="/banquet/receipts/new"><Button variant="outline">Record receipt</Button></Link>
+              <Link href="/manpower/new"><Button variant="outline">Request manpower</Button></Link>
             </div>
           }
         />
@@ -586,6 +595,7 @@ export default async function DashboardPage({
               <Link href="/orders/new"><Button>Take order</Button></Link>
               <Link href="/banquet/issues/new"><Button variant="outline">Issue to event</Button></Link>
               <Link href="/banquet/request"><Button variant="outline">Raise requisition</Button></Link>
+              <Link href="/manpower/new"><Button variant="outline">Request manpower</Button></Link>
             </div>
           }
         />
@@ -665,6 +675,9 @@ export default async function DashboardPage({
         listPendingVendors(),
         // Drafts that can't be given to the customer until signed off.
         listCustomerInvoicesAwaitingApproval(),
+        // Hired labour the chef / F&B asked for — money the manager hasn't
+        // sanctioned yet, so it belongs beside the other approvals.
+        listManpowerRequests({ statuses: [ManpowerRequestStatus.REQUESTED] }),
       ])
     : null;
 
@@ -815,6 +828,19 @@ export default async function DashboardPage({
               createdAt: i.createdAt.toISOString(),
               onHold: i.onHoldAt != null,
             }))}
+            manpowerToApprove={approvals[5].map((m) => {
+              const f = effectiveFigures(m);
+              return {
+                id: m.id,
+                workDescription: m.workDescription,
+                orderCode: m.order?.code ?? null,
+                requestedBy: m.requestedBy?.name ?? "—",
+                people: f.people,
+                days: f.days,
+                estimate: formatINRWhole(estimatedCost(m).toString()),
+                createdAt: m.createdAt.toISOString(),
+              };
+            })}
             viewerIsAdmin={role === "ADMIN"}
           />
         )}
