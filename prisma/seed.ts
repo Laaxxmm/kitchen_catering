@@ -1,4 +1,10 @@
-import { PrismaClient, Role, EmploymentType, MaintenanceCategory } from "@prisma/client";
+import {
+  BanquetItemSource,
+  PrismaClient,
+  Role,
+  EmploymentType,
+  MaintenanceCategory,
+} from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { dishSeed } from "./seed-data/dishes";
 import {
@@ -252,10 +258,18 @@ async function main() {
   ];
   for (const item of banquetItems) {
     await db.banquetItem.upsert({
-      where: { name: item.name },
+      // Name alone stopped being unique when the hire catalogue arrived;
+      // everything seeded here is stock the client owns.
+      where: {
+        name_source_category: {
+          name: item.name,
+          source: BanquetItemSource.IN_HOUSE,
+          category: item.category,
+        },
+      },
       // Fresh stores open with 100 pieces of everything (ops decision) —
       // adjust per item from the Banquet store screen afterwards.
-      create: { ...item, currentStock: 100 },
+      create: { ...item, source: BanquetItemSource.IN_HOUSE, currentStock: 100 },
       update: {}, // don't overwrite category/unit/stock if it already exists
     });
   }

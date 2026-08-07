@@ -1,0 +1,296 @@
+[
+ {
+  "code": "GP-HR-001",
+  "name": "full plate",
+  "unit": "pcs",
+  "rate": "5",
+  "category": "Melamine"
+ },
+ {
+  "code": "GP-HR-002",
+  "name": "half plate",
+  "unit": "pcs",
+  "rate": "4",
+  "category": "Melamine"
+ },
+ {
+  "code": "GP-HR-003",
+  "name": "q plates",
+  "unit": "pcs",
+  "rate": "3",
+  "category": "Melamine"
+ },
+ {
+  "code": "GP-HR-004",
+  "name": "soup bowl",
+  "unit": "pcs",
+  "rate": "2.5",
+  "category": "Melamine"
+ },
+ {
+  "code": "GP-HR-005",
+  "name": "soup saucer",
+  "unit": "pcs",
+  "rate": "2.5",
+  "category": "Melamine"
+ },
+ {
+  "code": "GP-HR-006",
+  "name": "dal bowl",
+  "unit": "pcs",
+  "rate": "3.5",
+  "category": "Melamine"
+ },
+ {
+  "code": "GP-HR-007",
+  "name": "dinner plate",
+  "unit": "pcs",
+  "rate": "12",
+  "category": "Bonechina"
+ },
+ {
+  "code": "GP-HR-008",
+  "name": "soup bowl",
+  "unit": "pcs",
+  "rate": "3.5",
+  "category": "Bonechina"
+ },
+ {
+  "code": "GP-HR-009",
+  "name": "soup saucer",
+  "unit": "pcs",
+  "rate": "3.5",
+  "category": "Bonechina"
+ },
+ {
+  "code": "GP-HR-010",
+  "name": "tea cup & saucer (7 oz)",
+  "unit": "pcs",
+  "rate": "7",
+  "category": "Bonechina"
+ },
+ {
+  "code": "GP-HR-011",
+  "name": "dessert plate",
+  "unit": "pcs",
+  "rate": "11",
+  "category": "Bonechina"
+ },
+ {
+  "code": "GP-HR-012",
+  "name": "ap fork",
+  "unit": "pcs",
+  "rate": "3",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-013",
+  "name": "ap spoon",
+  "unit": "pcs",
+  "rate": "3",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-014",
+  "name": "soup spoon",
+  "unit": "pcs",
+  "rate": "3",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-015",
+  "name": "tea spoon",
+  "unit": "pcs",
+  "rate": "2",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-016",
+  "name": "service ladles",
+  "unit": "pcs",
+  "rate": "10",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-017",
+  "name": "tea kettle",
+  "unit": "pcs",
+  "rate": "100",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-018",
+  "name": "brass chafing dish",
+  "unit": "pcs",
+  "rate": "300",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-019",
+  "name": "ss chafing dish",
+  "unit": "pcs",
+  "rate": "150",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-020",
+  "name": "soup tourine",
+  "unit": "pcs",
+  "rate": "75",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-021",
+  "name": "salad platter",
+  "unit": "pcs",
+  "rate": "30",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-022",
+  "name": "oval platter",
+  "unit": "pcs",
+  "rate": "25",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-023",
+  "name": "platter bowl",
+  "unit": "pcs",
+  "rate": "25",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-024",
+  "name": "plastic tubs",
+  "unit": "pcs",
+  "rate": "100",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-025",
+  "name": "round salwar",
+  "unit": "pcs",
+  "rate": "30",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-026",
+  "name": "ice scooper",
+  "unit": "pcs",
+  "rate": "15",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-027",
+  "name": "half food pan",
+  "unit": "pcs",
+  "rate": "30",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-028",
+  "name": "full food pan",
+  "unit": "pcs",
+  "rate": "50",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-029",
+  "name": "ss  katori",
+  "unit": "pcs",
+  "rate": "3",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-030",
+  "name": "high ball glass",
+  "unit": "pcs",
+  "rate": "6",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-031",
+  "name": "juice glass",
+  "unit": "pcs",
+  "rate": "5",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-032",
+  "name": "ap wine glass",
+  "unit": "pcs",
+  "rate": "6",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-033",
+  "name": "champagne saucer",
+  "unit": "pcs",
+  "rate": "10",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-034",
+  "name": "dustbin",
+  "unit": "pcs",
+  "rate": "100",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-035",
+  "name": "tables",
+  "unit": "pcs",
+  "rate": "500",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-036",
+  "name": "table frills",
+  "unit": "pcs",
+  "rate": "100",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-037",
+  "name": "canopy (10*15)",
+  "unit": "pcs",
+  "rate": "1500",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-038",
+  "name": "man power",
+  "unit": "pcs",
+  "rate": "0",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-039",
+  "name": "food drum",
+  "unit": "pcs",
+  "rate": "100",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-040",
+  "name": "sauce pan",
+  "unit": "pcs",
+  "rate": "25",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-041",
+  "name": "accrolic bowl",
+  "unit": "pcs",
+  "rate": "100",
+  "category": "Regulars"
+ },
+ {
+  "code": "GP-HR-042",
+  "name": "accrolic platter",
+  "unit": "pcs",
+  "rate": "100",
+  "category": "Regulars"
+ }
+]

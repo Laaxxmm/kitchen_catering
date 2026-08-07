@@ -1,0 +1,2432 @@
+[
+ {
+  "code": "GP-001",
+  "name": "Paneer",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-002",
+  "name": "Chicken breast",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-005",
+  "name": "Masoor Dal",
+  "unit": "kg",
+  "openingQty": "8.6999999999999993"
+ },
+ {
+  "code": "GP-006",
+  "name": "Toor dal",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-008",
+  "name": "Urad Dal whole",
+  "unit": "kg",
+  "openingQty": "9"
+ },
+ {
+  "code": "GP-018",
+  "name": "Maida",
+  "unit": "kg",
+  "openingQty": "25"
+ },
+ {
+  "code": "GP-019",
+  "name": "Rice Flour",
+  "unit": "kg",
+  "openingQty": "8"
+ },
+ {
+  "code": "GP-021",
+  "name": "Corn flour",
+  "unit": "kg",
+  "openingQty": "7"
+ },
+ {
+  "code": "GP-022",
+  "name": "Chiroti rava",
+  "unit": "kg",
+  "openingQty": "15.8"
+ },
+ {
+  "code": "GP-024",
+  "name": "Rajma chitra",
+  "unit": "kg",
+  "openingQty": "6"
+ },
+ {
+  "code": "GP-025",
+  "name": "Red rajma",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-030",
+  "name": "Green peas dry",
+  "unit": "kg",
+  "openingQty": "5"
+ },
+ {
+  "code": "GP-032",
+  "name": "White till",
+  "unit": "kg",
+  "openingQty": "0.7"
+ },
+ {
+  "code": "GP-034",
+  "name": "Pista",
+  "unit": "kg",
+  "openingQty": "0.7"
+ },
+ {
+  "code": "GP-037",
+  "name": "Ground nuts/peanuts",
+  "unit": "kg",
+  "openingQty": "9"
+ },
+ {
+  "code": "GP-038",
+  "name": "Super Garam Masala 200gm",
+  "unit": "pct",
+  "openingQty": "8"
+ },
+ {
+  "code": "GP-039",
+  "name": "Everest Garam Masala 500gm",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-040",
+  "name": "MDH Garam masala 100gm",
+  "unit": "pct",
+  "openingQty": "3"
+ },
+ {
+  "code": "GP-042",
+  "name": "Yellow Chilly Powder 100gms",
+  "unit": "pct",
+  "openingQty": "6"
+ },
+ {
+  "code": "GP-043",
+  "name": "MTR Chilly Powder 500gm",
+  "unit": "pct",
+  "openingQty": "5"
+ },
+ {
+  "code": "GP-044",
+  "name": "Meat masala 200Gm",
+  "unit": "pct",
+  "openingQty": "8"
+ },
+ {
+  "code": "GP-045",
+  "name": "Turmeric 500gm",
+  "unit": "pct",
+  "openingQty": "1"
+ },
+ {
+  "code": "GP-046",
+  "name": "chat masala 500gm",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-049",
+  "name": "Sambar powder 1KG",
+  "unit": "pct",
+  "openingQty": "2"
+ },
+ {
+  "code": "GP-050",
+  "name": "Dhaniya powder 500gm",
+  "unit": "pct",
+  "openingQty": "5"
+ },
+ {
+  "code": "GP-051",
+  "name": "Dhaniya seeds",
+  "unit": "kg",
+  "openingQty": "6.5"
+ },
+ {
+  "code": "GP-052",
+  "name": "Byadgi chilli",
+  "unit": "kg",
+  "openingQty": "2.5"
+ },
+ {
+  "code": "GP-053",
+  "name": "Round chilli",
+  "unit": "kg",
+  "openingQty": "0.2"
+ },
+ {
+  "code": "GP-054",
+  "name": "Salem chilli",
+  "unit": "kg",
+  "openingQty": "4"
+ },
+ {
+  "code": "GP-055",
+  "name": "Chakke/Cinnamon stick",
+  "unit": "kg",
+  "openingQty": "0.2"
+ },
+ {
+  "code": "GP-056",
+  "name": "Pulav leaves",
+  "unit": "kg",
+  "openingQty": "0.2"
+ },
+ {
+  "code": "GP-057",
+  "name": "Marati Moggu",
+  "unit": "kg",
+  "openingQty": "0.4"
+ },
+ {
+  "code": "GP-058",
+  "name": "Lavanga",
+  "unit": "kg",
+  "openingQty": "0.41199999999999998"
+ },
+ {
+  "code": "GP-059",
+  "name": "Big elachi",
+  "unit": "kg",
+  "openingQty": "0.21199999999999999"
+ },
+ {
+  "code": "GP-060",
+  "name": "Elachi",
+  "unit": "kg",
+  "openingQty": "0.33"
+ },
+ {
+  "code": "GP-061",
+  "name": "Jaypathra (Javitri)",
+  "unit": "kg",
+  "openingQty": "0.41199999999999998"
+ },
+ {
+  "code": "GP-063",
+  "name": "Sompu seeds",
+  "unit": "kg",
+  "openingQty": "1.8"
+ },
+ {
+  "code": "GP-064",
+  "name": "Mustard seeds",
+  "unit": "kg",
+  "openingQty": "2"
+ },
+ {
+  "code": "GP-065",
+  "name": "Black whole pepper",
+  "unit": "kg",
+  "openingQty": "8.5"
+ },
+ {
+  "code": "GP-066",
+  "name": "Star Annise",
+  "unit": "kg",
+  "openingQty": "0.6"
+ },
+ {
+  "code": "GP-067",
+  "name": "Jeera seeds",
+  "unit": "kg",
+  "openingQty": "2.2999999999999998"
+ },
+ {
+  "code": "GP-068",
+  "name": "Jeera powder 100gm",
+  "unit": "pct",
+  "openingQty": "9"
+ },
+ {
+  "code": "GP-069",
+  "name": "Black pepper powder",
+  "unit": "kg",
+  "openingQty": "8.5"
+ },
+ {
+  "code": "GP-070",
+  "name": "White pepper powder 100Gm",
+  "unit": "kg",
+  "openingQty": "56"
+ },
+ {
+  "code": "GP-071",
+  "name": "Methi seeds",
+  "unit": "kg",
+  "openingQty": "0.7"
+ },
+ {
+  "code": "GP-074",
+  "name": "Kitchen King masala 100gm",
+  "unit": "pct",
+  "openingQty": "3"
+ },
+ {
+  "code": "GP-076",
+  "name": "Kallu hoo/ lichen",
+  "unit": "kg",
+  "openingQty": "0.628"
+ },
+ {
+  "code": "GP-077",
+  "name": "Sugar",
+  "unit": "kg",
+  "openingQty": "21"
+ },
+ {
+  "code": "GP-079",
+  "name": "Jaggery ball",
+  "unit": "kg",
+  "openingQty": "8"
+ },
+ {
+  "code": "GP-080",
+  "name": "Aromatic mix",
+  "unit": "box",
+  "openingQty": "2"
+ },
+ {
+  "code": "GP-083",
+  "name": "Baby cashewnut",
+  "unit": "kg",
+  "openingQty": "2.5"
+ },
+ {
+  "code": "GP-084",
+  "name": "Cashewnut 4p",
+  "unit": "kg",
+  "openingQty": "2.2000000000000002"
+ },
+ {
+  "code": "GP-085",
+  "name": "Rasam powder 200gm",
+  "unit": "pct",
+  "openingQty": "8"
+ },
+ {
+  "code": "GP-086",
+  "name": "Bisibelebath powder 200Gm",
+  "unit": "pct",
+  "openingQty": "6"
+ },
+ {
+  "code": "GP-087",
+  "name": "Puliyogare powder 200gm",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-088",
+  "name": "Puliyogare powder 1kg",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-090",
+  "name": "Vinegar",
+  "unit": "btl",
+  "openingQty": "4"
+ },
+ {
+  "code": "GP-091",
+  "name": "Red chilli sauce",
+  "unit": "btl",
+  "openingQty": null
+ },
+ {
+  "code": "GP-092",
+  "name": "Green chilli sauce",
+  "unit": "btl",
+  "openingQty": "5"
+ },
+ {
+  "code": "GP-093",
+  "name": "Dark soya sauce",
+  "unit": "btl",
+  "openingQty": "4"
+ },
+ {
+  "code": "GP-094",
+  "name": "orange red bush",
+  "unit": "tin",
+  "openingQty": null
+ },
+ {
+  "code": "GP-095",
+  "name": "Kesari bush",
+  "unit": "tin",
+  "openingQty": null
+ },
+ {
+  "code": "GP-097",
+  "name": "Tata salt(powder)",
+  "unit": "kg",
+  "openingQty": "20"
+ },
+ {
+  "code": "GP-098",
+  "name": "Stone salt",
+  "unit": "kg",
+  "openingQty": "42"
+ },
+ {
+  "code": "GP-099",
+  "name": "Mayonnaise",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-101",
+  "name": "Kasuri methi 100gm",
+  "unit": "pct",
+  "openingQty": "5"
+ },
+ {
+  "code": "GP-103",
+  "name": "Roasted vermicelli",
+  "unit": "pct",
+  "openingQty": "9"
+ },
+ {
+  "code": "GP-104",
+  "name": "Roasted North papad(masala papad)",
+  "unit": "pct",
+  "openingQty": "2"
+ },
+ {
+  "code": "GP-105",
+  "name": "Flavour papad(sago chilly)",
+  "unit": "pct",
+  "openingQty": "10"
+ },
+ {
+  "code": "GP-106",
+  "name": "Urad dal papad(lotus)",
+  "unit": "pct",
+  "openingQty": "6"
+ },
+ {
+  "code": "GP-107",
+  "name": "Rice papad 500gm",
+  "unit": "pct",
+  "openingQty": "5"
+ },
+ {
+  "code": "GP-108",
+  "name": "Fryums",
+  "unit": "kg",
+  "openingQty": "5"
+ },
+ {
+  "code": "GP-111",
+  "name": "Coffee Cothas 500gm",
+  "unit": "pct",
+  "openingQty": "4"
+ },
+ {
+  "code": "GP-112",
+  "name": "Sunpure oil",
+  "unit": "lts",
+  "openingQty": "40"
+ },
+ {
+  "code": "GP-113",
+  "name": "Coconut oil",
+  "unit": "pct",
+  "openingQty": "6"
+ },
+ {
+  "code": "GP-114",
+  "name": "Coconut milk",
+  "unit": "tin",
+  "openingQty": "8"
+ },
+ {
+  "code": "GP-115",
+  "name": "Mustard oil",
+  "unit": "btl",
+  "openingQty": "3"
+ },
+ {
+  "code": "GP-118",
+  "name": "Fruit jam",
+  "unit": "jar",
+  "openingQty": "3"
+ },
+ {
+  "code": "GP-119",
+  "name": "Honey Dabur 1kg",
+  "unit": "kg",
+  "openingQty": "2"
+ },
+ {
+  "code": "GP-120",
+  "name": "Tomato Puree",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-121",
+  "name": "Ghus Ghus",
+  "unit": "kg",
+  "openingQty": "0.41599999999999998"
+ },
+ {
+  "code": "GP-125",
+  "name": "Golden Fish Kollam Rice 26kg",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-132",
+  "name": "Ajwin",
+  "unit": "kg",
+  "openingQty": "0.6"
+ },
+ {
+  "code": "GP-133",
+  "name": "Anil shavige Vermicelli",
+  "unit": "pct",
+  "openingQty": "8"
+ },
+ {
+  "code": "GP-134",
+  "name": "Besan / Kadle Hittu",
+  "unit": "kg",
+  "openingQty": "30"
+ },
+ {
+  "code": "GP-135",
+  "name": "Black chana / Kadle Kalu",
+  "unit": "kg",
+  "openingQty": "7.02"
+ },
+ {
+  "code": "GP-136",
+  "name": "Black Urad Dal",
+  "unit": "kg",
+  "openingQty": "11"
+ },
+ {
+  "code": "GP-137",
+  "name": "Chana dal / Kadle Bele Reg",
+  "unit": "kg",
+  "openingQty": "3"
+ },
+ {
+  "code": "GP-138",
+  "name": "Chat masala 200gm",
+  "unit": "pct",
+  "openingQty": "1"
+ },
+ {
+  "code": "GP-139",
+  "name": "Coffee powder-Bru Ins 500gm",
+  "unit": "pct",
+  "openingQty": "5"
+ },
+ {
+  "code": "GP-140",
+  "name": "Dosa Rice / Rice IR8",
+  "unit": "kg",
+  "openingQty": "52"
+ },
+ {
+  "code": "GP-142",
+  "name": "Fried grams / Dried Chenna Reg",
+  "unit": "kg",
+  "openingQty": "23"
+ },
+ {
+  "code": "GP-143",
+  "name": "Jaggery Powder 500g",
+  "unit": "pct",
+  "openingQty": "4"
+ },
+ {
+  "code": "GP-144",
+  "name": "Kashmiri chilli powder 500gm",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-145",
+  "name": "Kismiss / Dry Grapes",
+  "unit": "kg",
+  "openingQty": "1.2"
+ },
+ {
+  "code": "GP-146",
+  "name": "Kitchen King Masala 500gm",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-147",
+  "name": "Macroni Pasta 500gm",
+  "unit": "pct",
+  "openingQty": "4"
+ },
+ {
+  "code": "GP-148",
+  "name": "Magaj",
+  "unit": "kg",
+  "openingQty": "1.2"
+ },
+ {
+  "code": "GP-150",
+  "name": "MDH Kashmiri CHILLI 100GM",
+  "unit": "pct",
+  "openingQty": "3"
+ },
+ {
+  "code": "GP-151",
+  "name": "Millet/Navane",
+  "unit": "kg",
+  "openingQty": "9"
+ },
+ {
+  "code": "GP-152",
+  "name": "MTR Samabar Powder 200 gm",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-153",
+  "name": "Nylon sabudana / Sago 500",
+  "unit": "kg",
+  "openingQty": "7"
+ },
+ {
+  "code": "GP-154",
+  "name": "Orange Atta 50kg Bag / Atta Chakke",
+  "unit": "kg",
+  "openingQty": "45"
+ },
+ {
+  "code": "GP-155",
+  "name": "Orange Idli rice",
+  "unit": "kg",
+  "openingQty": "52"
+ },
+ {
+  "code": "GP-156",
+  "name": "Orange sooji(local rava) / Rave Uppitu Reg",
+  "unit": "kg",
+  "openingQty": "8"
+ },
+ {
+  "code": "GP-157",
+  "name": "Poha / Avalakki Reg",
+  "unit": "kg",
+  "openingQty": "2"
+ },
+ {
+  "code": "GP-158",
+  "name": "Sambar powder500gm",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-159",
+  "name": "Shakti Chilly Powder 500gm",
+  "unit": "pct",
+  "openingQty": "8"
+ },
+ {
+  "code": "GP-160",
+  "name": "Soya bean",
+  "unit": "kg",
+  "openingQty": "3"
+ },
+ {
+  "code": "GP-163",
+  "name": "Tamarind Chap Spl",
+  "unit": "kg",
+  "openingQty": "0.8"
+ },
+ {
+  "code": "GP-164",
+  "name": "Tea powder-red label 950g",
+  "unit": "pct",
+  "openingQty": "3"
+ },
+ {
+  "code": "GP-165",
+  "name": "Urad Dal/Uddin Bele R",
+  "unit": "kg",
+  "openingQty": "2"
+ },
+ {
+  "code": "GP-166",
+  "name": "White chana / Kabuli",
+  "unit": "kg",
+  "openingQty": "7"
+ },
+ {
+  "code": "GP-167",
+  "name": "Yellow moong dal / Hesaru Bele Spl",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-168",
+  "name": "Zaika gulabari / Rose Water",
+  "unit": "btl",
+  "openingQty": "3"
+ },
+ {
+  "code": "GP-169",
+  "name": "CHICKEN CURRY CUT",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-170",
+  "name": "Baby corn fresh",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-171",
+  "name": "Fresh cream",
+  "unit": "lts",
+  "openingQty": null
+ },
+ {
+  "code": "GP-175",
+  "name": "Sandwich Bread",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-186",
+  "name": "Cabbage",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-188",
+  "name": "Ooty carrot",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-189",
+  "name": "Cauliflower",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-192",
+  "name": "Cucumber",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-195",
+  "name": "Ginger",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-200",
+  "name": "Musk melon",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-210",
+  "name": "Water melon",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-215",
+  "name": "Curry Leaves",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-236",
+  "name": "Chicken Leg Piece",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-240",
+  "name": "Idiyappam",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-249",
+  "name": "Ice cubes",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-251",
+  "name": "Badam seeds",
+  "unit": "kg",
+  "openingQty": "0.4"
+ },
+ {
+  "code": "GP-267",
+  "name": "Samosa",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-273",
+  "name": "ALO SAMOSA",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-274",
+  "name": "APPLE RED",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-275",
+  "name": "Bullet Kolam Rice",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-276",
+  "name": "CHACOLATE COOKIES",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-277",
+  "name": "CHEESE CORN SAMOSA",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-278",
+  "name": "CHICKEN BONELESS",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-279",
+  "name": "CHILLI GREEN",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-280",
+  "name": "LEMON",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-281",
+  "name": "MUSHROOM FRESH",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-282",
+  "name": "PARSLEY FRESH",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-283",
+  "name": "POMEGRANATE FRUIT",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-285",
+  "name": "SPINACH FRESH",
+  "unit": "bunch",
+  "openingQty": null
+ },
+ {
+  "code": "GP-286",
+  "name": "VEG NUGGETS",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-287",
+  "name": "VEG SPRING ROLL",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-292",
+  "name": "AKKI ROTTI",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-293",
+  "name": "ALO BUN",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-294",
+  "name": "ALOO TIKKI",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-295",
+  "name": "APPLE GREEN IMP",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-296",
+  "name": "ARABIAN DELIGHT",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-297",
+  "name": "AVOCADO INDIAN",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-298",
+  "name": "BABY SPINACH",
+  "unit": "bunch",
+  "openingQty": null
+ },
+ {
+  "code": "GP-299",
+  "name": "BANANA CAKE 40 GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-300",
+  "name": "BANANA CAKE 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-301",
+  "name": "BANANA KELA PHOOL KG",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-302",
+  "name": "BANANA LEAVES",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-303",
+  "name": "BANANA MUFFIN 25GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-304",
+  "name": "BANANA MUFFIN 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-305",
+  "name": "BANANA MUFFIN 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-306",
+  "name": "BANANAN CAKE 25 GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-307",
+  "name": "BANANA ROBUSTA",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-308",
+  "name": "BANANA Yelakki",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-309",
+  "name": "BASIL FRESH",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-310",
+  "name": "BEANS HARICOT",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-311",
+  "name": "BEET ROOT",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-312",
+  "name": "BELE HOLIGE",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-313",
+  "name": "BELGIAN CHOCOLATE PASTRY 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-314",
+  "name": "BELGIAN CHOCOLATE PASTRY 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-315",
+  "name": "BITTER GOURD (KARELA)",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-316",
+  "name": "BLACK FOREST PASTRY 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-317",
+  "name": "BLACK FOREST PASTRY 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-319",
+  "name": "BLUE BERRY MUFFIN 25GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-320",
+  "name": "BLUE BERRY MUFFIN 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-321",
+  "name": "BLUE BERRY MUFFIN 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-322",
+  "name": "BOTTLE GOURD (LAUKI/DUDHI))",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-323",
+  "name": "BRINJAL BIG",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-324",
+  "name": "BRINJAL SMALL",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-325",
+  "name": "BROCCOLI",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-326",
+  "name": "BROWNIE 25GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-327",
+  "name": "BROWNIE 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-328",
+  "name": "BROWNIE 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-329",
+  "name": "BUTTERSCOTCH",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-330",
+  "name": "BUTTER SCOTCH 4L PLAIN",
+  "unit": "blocks",
+  "openingQty": null
+ },
+ {
+  "code": "GP-331",
+  "name": "CAPSICUM GREEN",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-332",
+  "name": "CAPSICUM RED",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-333",
+  "name": "CAPSICUM YELLOW",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-334",
+  "name": "CARROT Indian",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-335",
+  "name": "CASHEW COOKIES",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-336",
+  "name": "CELERY FRESH",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-337",
+  "name": "CHAMPAKALI/ CHUM CHUM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-338",
+  "name": "CHAPATI",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-339",
+  "name": "CHEESE BLOCKS",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-340",
+  "name": "CHEESE SLICE",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-341",
+  "name": "CHERRY TOMATO",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-342",
+  "name": "CHICKEN LOLLIPOP",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-343",
+  "name": "CHICKEN PUFFS",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-344",
+  "name": "CHIKOO (SAPOTA)",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-345",
+  "name": "CHILLI BHAVNAGRI",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-346",
+  "name": "CHINESE CABBAGE",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-347",
+  "name": "CHOCODREAM",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-348",
+  "name": "CHOCOLATE",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-349",
+  "name": "CHOCOLATE 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-350",
+  "name": "CHOCOLATE CAKE 25G",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-351",
+  "name": "CHOCOLATE CAKE 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-352",
+  "name": "CHOCOLATE CHIP MUFFIN 25GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-353",
+  "name": "CHOCOLATE CHIP MUFFIN 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-354",
+  "name": "CHOCOLATE CHIP MUFFIN 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-355",
+  "name": "CHOCOLATE CREAM BUN",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-356",
+  "name": "CHOCOLATE LITE 4L PLAIN",
+  "unit": "blocks",
+  "openingQty": null
+ },
+ {
+  "code": "GP-357",
+  "name": "CHOCOLATE MUFFIN 25GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-358",
+  "name": "CHOCOLATE MUFFIN 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-359",
+  "name": "CHOCOLATE MUFFIN 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-360",
+  "name": "CHOCOLATE PASTRY 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-361",
+  "name": "CHOCOLATE PASTRY 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-362",
+  "name": "CHOCONUTZ",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-363",
+  "name": "CHOW CHOW VEG",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-364",
+  "name": "COCONUT COOKIES",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-366",
+  "name": "Coconut Milk Powder",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-367",
+  "name": "COCONUT WHOLE",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-368",
+  "name": "CORIANDER LEAVES (DHANIA)",
+  "unit": "bunch",
+  "openingQty": null
+ },
+ {
+  "code": "GP-369",
+  "name": "CORN SAMOSA",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-370",
+  "name": "CUCUMBER EUROPEAN",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-371",
+  "name": "CYLINDER HP GAS",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-372",
+  "name": "Dawat Basmati rice",
+  "unit": "kg",
+  "openingQty": "52"
+ },
+ {
+  "code": "GP-373",
+  "name": "DILL FRESH",
+  "unit": "bunch",
+  "openingQty": null
+ },
+ {
+  "code": "GP-374",
+  "name": "DRAGON FRUIT RED",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-375",
+  "name": "DRUM STICK (SINGH)",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-376",
+  "name": "DRY JAMUN",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-377",
+  "name": "Dry mango powder/Amchur powder",
+  "unit": "pct",
+  "openingQty": "5"
+ },
+ {
+  "code": "GP-378",
+  "name": "EGG PUFFS FULL",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-379",
+  "name": "EGG PUFFS SEMI HALF",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-380",
+  "name": "EGG",
+  "unit": "tray",
+  "openingQty": "8"
+ },
+ {
+  "code": "GP-381",
+  "name": "FISH",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-382",
+  "name": "FISH FINGERS",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-383",
+  "name": "FRENCH FRIES",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-384",
+  "name": "FRUIT CAKE 25GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-385",
+  "name": "FRUIT CAKE 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-386",
+  "name": "FRUIT CAKE 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-389",
+  "name": "GONGURA",
+  "unit": "bunch",
+  "openingQty": null
+ },
+ {
+  "code": "GP-390",
+  "name": "GRAPE FRUIT",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-391",
+  "name": "GRAPES BLACK SEEDLESS",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-392",
+  "name": "GRAPES GREEN LOCAL",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-393",
+  "name": "Green Moong Whole",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-394",
+  "name": "GREEN PEAS",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-395",
+  "name": "GREEN PEAS FRESH",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-396",
+  "name": "GUAVAS",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-397",
+  "name": "GULAB JAMUN",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-399",
+  "name": "IDLY SML SIZE",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-401",
+  "name": "JACKFRUIT ( KATHAL) RAW",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-402",
+  "name": "JALEBI",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-403",
+  "name": "Jaypal / Jakai Pc",
+  "unit": "kg",
+  "openingQty": "0.02"
+ },
+ {
+  "code": "GP-404",
+  "name": "JEERA SALT COOKIES",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-405",
+  "name": "KAAYI HOLIGE",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-406",
+  "name": "KACHORI",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-408",
+  "name": "KHOVA",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-409",
+  "name": "Kibs Badam Feast Powder 500g",
+  "unit": "pct",
+  "openingQty": "3"
+ },
+ {
+  "code": "GP-410",
+  "name": "LADY FINGER",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-411",
+  "name": "LEMON GRASS FRESH",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-412",
+  "name": "LETTUCE ICEBERG",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-413",
+  "name": "MADRAS ONION",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-414",
+  "name": "Maggie",
+  "unit": "pct",
+  "openingQty": "6"
+ },
+ {
+  "code": "GP-415",
+  "name": "MALPAV",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-416",
+  "name": "MANGO Alphonso",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-417",
+  "name": "MANGO CANDY",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-418",
+  "name": "MASALA COOKIES",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-419",
+  "name": "METHI CHAPATI",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-420",
+  "name": "METHI FRESH (FENUGREEK LEAVES)",
+  "unit": "bunch",
+  "openingQty": null
+ },
+ {
+  "code": "GP-421",
+  "name": "METHI PHULKA",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-422",
+  "name": "MILK BREAD",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-423",
+  "name": "MINI CHUM CHUM DRY",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-424",
+  "name": "MINI PUNJABI SAMOSA",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-425",
+  "name": "MINI SUNDAE CHOCOLATE",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-426",
+  "name": "MINT LEAVES",
+  "unit": "bunch",
+  "openingQty": null
+ },
+ {
+  "code": "GP-427",
+  "name": "MORE THAN AAM",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-428",
+  "name": "MULTI GRAIN COOKIES",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-429",
+  "name": "MUTTON BIRIYANI PIIECE",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-430",
+  "name": "MUTTON LEG PIECE",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-432",
+  "name": "NORMAL BUN FOR GULKHAND",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-433",
+  "name": "OATS COOKIES",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-435",
+  "name": "ONION RED BIG (8 TO 10 PC)",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-436",
+  "name": "ONION SAMOSA",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-437",
+  "name": "ORANGE IMP",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-438",
+  "name": "Orange Local",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-440",
+  "name": "PANEER PUFFS",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-441",
+  "name": "PANEER ROLLS",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-442",
+  "name": "PAPAYA RAW",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-443",
+  "name": "PAPAYA RIPE",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-444",
+  "name": "PASSION FRUIT",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-445",
+  "name": "PAV BUN 60GM",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-446",
+  "name": "PAVBUN 80GM",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-447",
+  "name": "PHULKA",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-449",
+  "name": "PINEAPPLE FRESH",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-450",
+  "name": "PINEAPPLE MUFFIN 25 GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-451",
+  "name": "PINEAPPLE MUFFIN 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-452",
+  "name": "PINEAPPLE MUFFIN 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-453",
+  "name": "PINEAPPLE PASTRY 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-454",
+  "name": "PINEAPPLE PASTRY 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-455",
+  "name": "PISTA LITE 4L PLAIN",
+  "unit": "blocks",
+  "openingQty": null
+ },
+ {
+  "code": "GP-456",
+  "name": "PLAIN CAKE 25 GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-457",
+  "name": "PLAIN CAKE 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-458",
+  "name": "PLAIN CAKE 60 GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-459",
+  "name": "POTATO CHIPS",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-460",
+  "name": "POTATO LARGE",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-461",
+  "name": "POTATO SMALL (DUM ALOO)",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-462",
+  "name": "POTATO WEDGES",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-463",
+  "name": "PRAWNS",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-464",
+  "name": "PUMPKIN RED",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-465",
+  "name": "RADDISH RED",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-466",
+  "name": "RADDISH WHITE",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-468",
+  "name": "RASAMALAI",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-469",
+  "name": "RED CABBAGE",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-470",
+  "name": "RED CHILLI FRESH",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-472",
+  "name": "RIDGE GOURD",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-474",
+  "name": "Saffron",
+  "unit": "pct",
+  "openingQty": "0.02"
+ },
+ {
+  "code": "GP-475",
+  "name": "SNAKE GOURD (PADVAL)",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-476",
+  "name": "SPRING ONION GREEN",
+  "unit": "bunch",
+  "openingQty": null
+ },
+ {
+  "code": "GP-477",
+  "name": "STRAWBERRY LITE 4L PLAIN",
+  "unit": "blocks",
+  "openingQty": null
+ },
+ {
+  "code": "GP-478",
+  "name": "STRAW BERRY MUFFIN 25GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-479",
+  "name": "STRAW BERRY MUFFIN 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-480",
+  "name": "STRAW BERRY MUFFIN 60GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-482",
+  "name": "SWEET CORN COB NOS (WHOLE)",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-483",
+  "name": "SWEET POTATO",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-484",
+  "name": "TENDER COCONUT",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-485",
+  "name": "TOMATO HYBRID BIG",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-486",
+  "name": "TRIPPLE SUNDAE",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-487",
+  "name": "TWISTER",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-488",
+  "name": "UNSALTED BUTTER",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-489",
+  "name": "VANILLA",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-490",
+  "name": "VANILLA BALL",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-491",
+  "name": "VANILLA CREAM BUN",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-492",
+  "name": "VANILLA LITE 4L PLAIN",
+  "unit": "blocks",
+  "openingQty": null
+ },
+ {
+  "code": "GP-493",
+  "name": "VANILLA MUFFIN 25GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-494",
+  "name": "VANILLA MUFFIN 40GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-495",
+  "name": "VANILLA MUFFIN 60 GM",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-496",
+  "name": "VEG BREADED ROLL",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-497",
+  "name": "VEG CHEESE BALLS / POTATO KIEWS",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-498",
+  "name": "VEG CUTLETS 18PIC",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-499",
+  "name": "VEG FINGERS",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-500",
+  "name": "VEG LOLLIPOP",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-501",
+  "name": "VEG PUFFS",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-502",
+  "name": "WHOLE CHICKEN",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-503",
+  "name": "Whole Ragi",
+  "unit": "kg",
+  "openingQty": "2"
+ },
+ {
+  "code": "GP-504",
+  "name": "ZUCCHINI GREEN / SQUASH",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-505",
+  "name": "ZUCCHINI YELLOW / SQUASH",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-509",
+  "name": "Ragi flour",
+  "unit": "kg",
+  "openingQty": "5"
+ },
+ {
+  "code": "GP-510",
+  "name": "Halasande",
+  "unit": "kg",
+  "openingQty": "2"
+ },
+ {
+  "code": "GP-511",
+  "name": "Black till",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-513",
+  "name": "Ingu(LG powder)",
+  "unit": "btl",
+  "openingQty": "10"
+ },
+ {
+  "code": "GP-514",
+  "name": "Keora water",
+  "unit": "btl",
+  "openingQty": "5"
+ },
+ {
+  "code": "GP-515",
+  "name": "TOMATO KETCHUP",
+  "unit": "btl",
+  "openingQty": "4"
+ },
+ {
+  "code": "GP-516",
+  "name": "Noodles",
+  "unit": "pct",
+  "openingQty": "37"
+ },
+ {
+  "code": "GP-518",
+  "name": "Olive oil",
+  "unit": "btl",
+  "openingQty": "1"
+ },
+ {
+  "code": "GP-519",
+  "name": "Pickle 5kg",
+  "unit": "kg",
+  "openingQty": "2"
+ },
+ {
+  "code": "GP-520",
+  "name": "Sabudana",
+  "unit": "kg",
+  "openingQty": "3"
+ },
+ {
+  "code": "GP-521",
+  "name": "Oregano Leaves 1kg",
+  "unit": "nos",
+  "openingQty": "1"
+ },
+ {
+  "code": "GP-522",
+  "name": "Soap",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-524",
+  "name": "Nandhini milk",
+  "unit": "lts",
+  "openingQty": null
+ },
+ {
+  "code": "GP-525",
+  "name": "Nandhini curd",
+  "unit": "lts",
+  "openingQty": null
+ },
+ {
+  "code": "GP-526",
+  "name": "chilli bhajji",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-527",
+  "name": "Raw Banana",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-528",
+  "name": "HARA BARA KEBAB",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-530",
+  "name": "WATER BOTTLE 300 ML",
+  "unit": "lts",
+  "openingQty": null
+ },
+ {
+  "code": "GP-531",
+  "name": "WATER BOTTLE 500 ML",
+  "unit": "lts",
+  "openingQty": null
+ },
+ {
+  "code": "GP-532",
+  "name": "CHARCOAL",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-533",
+  "name": "CASTING SODA",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-534",
+  "name": "MINI CHICKEN PUFF",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-535",
+  "name": "STAFF RICE",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-673",
+  "name": "SONA MASOORIE ZEEBA",
+  "unit": "kg",
+  "openingQty": "1"
+ },
+ {
+  "code": "GP-674",
+  "name": "Arna Ghee",
+  "unit": "lts",
+  "openingQty": null
+ },
+ {
+  "code": "GP-675",
+  "name": "Nandhini Ghee",
+  "unit": "lts",
+  "openingQty": null
+ },
+ {
+  "code": "GP-676",
+  "name": "cheese Greated",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-677",
+  "name": "Cheese process.",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-678",
+  "name": "Turnip",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-679",
+  "name": "Dantu Soppu",
+  "unit": "bunch",
+  "openingQty": null
+ },
+ {
+  "code": "GP-680",
+  "name": "Elephant foot.",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-681",
+  "name": "Sabena powder",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-682",
+  "name": "Surf Excel",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-683",
+  "name": "Pitambari powder",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-684",
+  "name": "Chicken chettinad Masala",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-685",
+  "name": "Kodo millet",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-686",
+  "name": "Ragi Cookies",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-687",
+  "name": "Rava Cake",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-688",
+  "name": "Veg cheese Ball",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-689",
+  "name": "Veg Gold Coin",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-690",
+  "name": "Strawberry Crush",
+  "unit": "btl",
+  "openingQty": null
+ },
+ {
+  "code": "GP-691",
+  "name": "Mango Crush",
+  "unit": "btl",
+  "openingQty": null
+ },
+ {
+  "code": "GP-692",
+  "name": "Tatte Idly",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-693",
+  "name": "Kokum Syrup",
+  "unit": "btl",
+  "openingQty": null
+ },
+ {
+  "code": "GP-694",
+  "name": "Millet Cookies",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-695",
+  "name": "Carrot Cake 25gm",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-696",
+  "name": "Carrot Cake 40gm",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-697",
+  "name": "Carroke Cake 60 gm",
+  "unit": "pcs",
+  "openingQty": null
+ },
+ {
+  "code": "GP-698",
+  "name": "Salt Cookies",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-699",
+  "name": "Sweet Cookies",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-700",
+  "name": "Bisi bele bath - 1 kg",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-701",
+  "name": "Custard Powder 200gm",
+  "unit": "pct",
+  "openingQty": null
+ },
+ {
+  "code": "GP-702",
+  "name": "Kerala Spinach",
+  "unit": "bunch",
+  "openingQty": null
+ },
+ {
+  "code": "GP-703",
+  "name": "Idli rice",
+  "unit": "kg",
+  "openingQty": "52"
+ },
+ {
+  "code": "GP-704",
+  "name": "Charmagaz seeds",
+  "unit": "kg",
+  "openingQty": "1.4"
+ },
+ {
+  "code": "GP-705",
+  "name": "Biriyani Pulav masala",
+  "unit": "kg",
+  "openingQty": null
+ },
+ {
+  "code": "GP-706",
+  "name": "Chunky chat masala 100gm",
+  "unit": "pct",
+  "openingQty": "22"
+ },
+ {
+  "code": "GP-707",
+  "name": "Packet ketchup",
+  "unit": "pct",
+  "openingQty": "4"
+ },
+ {
+  "code": "GP-708",
+  "name": "Steel nar",
+  "unit": "nos",
+  "openingQty": null
+ },
+ {
+  "code": "GP-709",
+  "name": "Scrub green",
+  "unit": "nos",
+  "openingQty": null
+ }
+]

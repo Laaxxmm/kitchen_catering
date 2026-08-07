@@ -36,6 +36,8 @@ async function nextSequenceValue(
     | "VendorBillNumberSequence"
     | "VendorCodeSequence"
     | "GPItemCodeSequence"
+    | "GPInhouseItemCodeSequence"
+    | "GPHiredItemCodeSequence"
     | "PettyCashVoucherNumberSequence",
   storageYear: number,
 ): Promise<number> {
@@ -125,13 +127,36 @@ export function formatGPItemCode(n: number): string {
 }
 
 /**
- * Item code for BOTH stores — kitchen (Ingredient) and F&B (BanquetItem)
- * draw from the one GPItemCodeSequence slot (year=0, not FY-scoped), so a
- * code identifies exactly one item across the whole operation.
+ * Kitchen item code (Ingredient.sku). Draws from the GPItemCodeSequence
+ * slot (year=0, not FY-scoped).
  */
 export async function nextGPItemCode(tx: Tx): Promise<string> {
   const n = await nextSequenceValue(tx, "GPItemCodeSequence", 0);
   return formatGPItemCode(n);
+}
+
+/**
+ * F&B item codes. The prefix carries the source, so the three catalogues
+ * count independently and a code can never collide across them — the
+ * kitchen's GP-042 and the hire list's GP-HR-042 are different strings.
+ * Same padding rule as formatGPItemCode: pad to 3, never truncate.
+ */
+export function formatGPInhouseItemCode(n: number): string {
+  return `GP-IN-${String(n).padStart(3, "0")}`;
+}
+
+export function formatGPHiredItemCode(n: number): string {
+  return `GP-HR-${String(n).padStart(3, "0")}`;
+}
+
+export async function nextGPInhouseItemCode(tx: Tx): Promise<string> {
+  const n = await nextSequenceValue(tx, "GPInhouseItemCodeSequence", 0);
+  return formatGPInhouseItemCode(n);
+}
+
+export async function nextGPHiredItemCode(tx: Tx): Promise<string> {
+  const n = await nextSequenceValue(tx, "GPHiredItemCodeSequence", 0);
+  return formatGPHiredItemCode(n);
 }
 
 // ─── Finance (Phase 3) ───────────────────────────────────────────────────

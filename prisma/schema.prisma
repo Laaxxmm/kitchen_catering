@@ -687,8 +687,9 @@ enum IngredientSubStore {
 
 model Ingredient {
   id                String             @id @default(cuid())
-  // GP item code (GP-001…) assigned by nextGPItemCode from a counter shared
-  // with BanquetItem — one code never means two different items.
+  // GP item code (GP-001…) assigned by nextGPItemCode from the kitchen
+  // counter — one code never means two different kitchen items. F&B runs
+  // its own prefixed counters, so the prefix tells you which catalogue.
   sku               String             @unique
   // Whatever `sku` held before the GP codes went in (supplier part numbers,
   // import codes). Kept so the switch is reversible; nothing reads it.
@@ -2184,9 +2185,23 @@ model VendorCodeSequence {
   next Int @default(1)
 }
 
-// Shared by BOTH item catalogues (Ingredient + BanquetItem), not FY-scoped:
-// a GP code is permanent and must never mean two different items.
+// Kitchen item codes (GP-nnn), not FY-scoped: a GP code is permanent and
+// must never mean two different items.
 model GPItemCodeSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+// F&B item codes. Two counters beside the kitchen one, because the three
+// catalogues carry different prefixes (GP-nnn / GP-IN-nnn / GP-HR-nnn) and
+// the client numbers each list from 1 — one shared counter would leave
+// visible gaps in all three.
+model GPInhouseItemCodeSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model GPHiredItemCodeSequence {
   year Int @id
   next Int @default(1)
 }
@@ -2594,22 +2609,35 @@ model MaintenanceActivityLine {
 // The current PO engine handles the threshold rule; per-category
 // override comes in a later phase.
 
+// Where the item comes from. Enum, not a boolean — the client has already
+// asked about a third bucket (rented-in from a sister branch), and widening
+// an enum is an ALTER TYPE, widening a boolean is a data migration.
+enum BanquetItemSource {
+  IN_HOUSE // owned stock, consumed or washed and put back
+  HIRED // rented per event from a hire vendor, charged per unit
+}
+
 model BanquetItem {
-  id           String   @id @default(cuid())
+  id           String            @id @default(cuid())
   name         String
-  // GP item code — same counter as Ingredient.sku, see nextGPItemCode.
+  // GP item code. Three independent counters — kitchen GP-nnn, in-house
+  // GP-IN-nnn, hired GP-HR-nnn — see src/lib/sequences.ts.
   sku          String?
   legacySku    String?
-  // Free-text sub-grouping for the catalog: "Packaging", "Tissue",
-  // "Tape", "Ketchup", "Cutlery", "Foil"… seeded from the FnB Excel.
+  source       BanquetItemSource @default(IN_HOUSE)
+  // Free-text sub-grouping for the catalog. In-house: "Disposables",
+  // "Crockery". Hired: "Regulars", "Melamine", "Bonechina".
   category     String?
-  unit         String   @default("piece")
-  currentStock Decimal  @default(0) @db.Decimal(14, 3)
-  minStock     Decimal? @db.Decimal(14, 3)
+  unit         String            @default("piece")
+  // Hire charge per unit per event; also the purchase rate on in-house
+  // disposables. Null where the client never priced the item.
+  rate         Decimal?          @db.Decimal(12, 2)
+  currentStock Decimal           @default(0) @db.Decimal(14, 3)
+  minStock     Decimal?          @db.Decimal(14, 3)
   notes        String?
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  active       Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 
   receiptLines     BanquetReceiptLine[]
   issueLines       BanquetIssueLine[]
@@ -2617,9 +2645,14 @@ model BanquetItem {
   requisitionLines BanquetRequisitionLine[]
   vendorPOLines    VendorPOLine[]           @relation("VendorPOLineToBanquetItem")
 
-  @@unique([name])
+  // Name alone is no longer unique: "soup bowl" is a real in-house item AND
+  // a hired Melamine one AND a hired Bonechina one, at three different
+  // rates. The name means something only once you know the source and the
+  // grade, so that triple is the key.
+  @@unique([name, source, category])
   @@index([active])
   @@index([category])
+  @@index([source])
 }
 
 // Stock IN — bought from vendor (or transferred in from another store).

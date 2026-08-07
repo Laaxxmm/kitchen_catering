@@ -332,3 +332,205 @@ async function clearOrdersKeepFinanceInner(
 
   return { ok: true, ...summary };
 }
+
+// =====================================================================
+// FULL CLEAN SLATE — transactional history AND both item catalogues
+// =====================================================================
+
+const FULL_RESET_PHRASE = "ERASE EVERYTHING";
+
+/**
+ * The ONLY tables the full clean slate leaves standing. Everything else in
+ * the schema is truncated — both item catalogues, every document, every
+ * sequence, the audit log included.
+ *
+ * The list is a KEEP list, not a delete list, on purpose: a table added to
+ * the schema later is transactional far more often than it is master data,
+ * so "wipe unless named" is the safe default for an action whose whole job
+ * is to leave nothing behind. The trade-off is that a future master table
+ * must be added here — hence the typo guard below, which aborts if a name
+ * in this list matches no real table.
+ */
+const FULL_RESET_KEEP = [
+  // The people and the parties. These are the relationships the business
+  // is made of, and the client asked for them explicitly.
+  "User",
+  "MobileDevice",
+  "EmployeeRateCard",
+  "SalaryStructure",
+  "Customer",
+  "CustomerGroup",
+  "Vendor",
+  // The menu. Recipe LINES cannot survive — they point at the kitchen
+  // catalogue that is being replaced — so recipes come back as shells and
+  // the chef re-links them against the new codes. Deleting the dishes
+  // outright was not asked for and is not reversible.
+  "Dish",
+  "Recipe",
+  "RecipeSubRecipe",
+  // Order presets: customer + dish only, both of which survive.
+  "OrderTemplate",
+  "OrderTemplateItem",
+  // Departments this replacement does not touch. Their item lists stay;
+  // their stock goes to zero below, with everything else.
+  "HousekeepingItem",
+  "MaintenanceItem",
+  "Room",
+  "HousekeepingStaff",
+  "MaintenanceStaff",
+  "TaskTemplate",
+  "Settings",
+];
+
+export interface FullResetSummary {
+  orders: number;
+  quotes: number;
+  customerInvoices: number;
+  vendorBills: number;
+  /** Ingredient rows — the kitchen catalogue. */
+  kitchenItems: number;
+  /** BanquetItem rows — the F&B catalogue, both sources. */
+  fnbItems: number;
+  /** Recipe ingredient lines, lost with the catalogue they point at. */
+  recipeLines: number;
+  tasks: number;
+  notifications: number;
+  auditRows: number;
+  tablesCleared: number;
+}
+
+/**
+ * Total clean slate — every transaction AND both item catalogues, so the
+ * client can load their replacement lists into an empty system. Keeps only
+ * what FULL_RESET_KEEP names: users, customers, vendors, the menu, the
+ * other departments' item lists and settings.
+ *
+ * Irreversible. ADMIN only, gated behind typing "ERASE EVERYTHING".
+ *
+ * One TRUNCATE, not ninety deleteMany calls in dependency order. Postgres
+ * resolves the ordering itself inside a single multi-table TRUNCATE, and —
+ * the reason this shape was chosen — it REFUSES to run if any surviving
+ * table has a foreign key into one being cleared. A hand-ordered delete
+ * chain that misses a table half-wipes and then fails; this one cannot
+ * start. It is DDL but fully transactional in Postgres, so the wipe and the
+ * audit row below either both land or neither does.
+ */
+export async function resetEverythingKeepParties(
+  confirm: string,
+): Promise<ActionResultWith<FullResetSummary>> {
+  try {
+    return await resetEverythingKeepPartiesInner(confirm);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function resetEverythingKeepPartiesInner(
+  confirm: string,
+): Promise<{ ok: true } & FullResetSummary> {
+  const session = await requireRole([Role.ADMIN]);
+  if (confirm !== FULL_RESET_PHRASE) {
+    throw new ActionError(
+      `Type ${FULL_RESET_PHRASE} exactly to confirm. This erases all history and both item catalogues.`,
+    );
+  }
+
+  const summary = await db.$transaction(
+    async (tx) => {
+      // Counted before the wipe — afterwards there is nothing left to count.
+      const [
+        orders,
+        quotes,
+        customerInvoices,
+        vendorBills,
+        kitchenItems,
+        fnbItems,
+        recipeLines,
+        tasks,
+        notifications,
+        auditRows,
+      ] = await Promise.all([
+        tx.order.count(),
+        tx.quote.count(),
+        tx.customerInvoice.count(),
+        tx.vendorBill.count(),
+        tx.ingredient.count(),
+        tx.banquetItem.count(),
+        tx.recipeIngredient.count(),
+        tx.task.count(),
+        tx.notification.count(),
+        tx.auditLog.count(),
+      ]);
+
+      const rows = await tx.$queryRaw<Array<{ tablename: string }>>`
+        SELECT tablename FROM pg_tables WHERE schemaname = current_schema()`;
+      const present = new Set(rows.map((r) => r.tablename));
+
+      // A typo in FULL_RESET_KEEP would silently wipe the table it meant to
+      // save. Refuse to start instead.
+      const unknown = FULL_RESET_KEEP.filter((t) => !present.has(t));
+      if (unknown.length > 0) {
+        throw new ActionError(
+          `Reset aborted — keep-list names no such table: ${unknown.join(", ")}.`,
+        );
+      }
+
+      // "_prisma_migrations" and any Prisma-managed join table are internal
+      // plumbing; clearing the migration ledger would make the next boot
+      // re-run every migration.
+      const keep = new Set(FULL_RESET_KEEP);
+      const wipe = [...present].filter((t) => !keep.has(t) && !t.startsWith("_"));
+      await tx.$executeRawUnsafe(
+        `TRUNCATE TABLE ${wipe.map((t) => `"${t.replace(/"/g, '""')}"`).join(", ")}`,
+      );
+
+      // The two department catalogues we kept hold their stock on the item
+      // row itself, so it does not go with the movement rows.
+      await tx.$executeRaw`UPDATE "HousekeepingItem" SET "currentStock" = 0, "inCirculation" = 0`;
+      await tx.$executeRaw`UPDATE "MaintenanceItem" SET "currentStock" = 0`;
+
+      // Written INSIDE the transaction, after the truncate that emptied the
+      // audit log — so the row naming who did this cannot be lost to a
+      // failure between the wipe and the record of it.
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "FULL_RESET",
+          entity: "System",
+          entityId: "full-clean-slate",
+          payloadHash: sha256Json({
+            orders,
+            kitchenItems,
+            fnbItems,
+            tablesCleared: wipe.length,
+          }),
+        },
+      });
+
+      return {
+        orders,
+        quotes,
+        customerInvoices,
+        vendorBills,
+        kitchenItems,
+        fnbItems,
+        recipeLines,
+        tasks,
+        notifications,
+        auditRows,
+        tablesCleared: wipe.length,
+      };
+    },
+    { timeout: 120_000, maxWait: 10_000 },
+  );
+
+  revalidatePath("/dashboard");
+  revalidatePath("/orders");
+  revalidatePath("/invoices");
+  revalidatePath("/notifications");
+  // Both catalogue screens, which are now empty.
+  revalidatePath("/inventory/ingredients");
+  revalidatePath("/banquet/items");
+
+  return { ok: true, ...summary };
+}

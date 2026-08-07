@@ -1,0 +1,1237 @@
+[
+ {
+  "name": "Ripple Cups [110ml]",
+  "unit": "pcs",
+  "rate": "1.27",
+  "openingQty": "100",
+  "category": "Disposables",
+  "code": "GP-IN-001"
+ },
+ {
+  "name": "Ripple Cups [210 ml]",
+  "unit": "pcs",
+  "rate": "1.48",
+  "openingQty": "5250",
+  "category": "Disposables",
+  "code": "GP-IN-002"
+ },
+ {
+  "name": "Plain white Water Cups [210ml]",
+  "unit": "pcs",
+  "rate": "0.64",
+  "openingQty": "2000",
+  "category": "Disposables",
+  "code": "GP-IN-003"
+ },
+ {
+  "name": "Printed Tissue Paper",
+  "unit": "pcts",
+  "rate": "0",
+  "openingQty": "150",
+  "category": "Disposables",
+  "code": "GP-IN-004"
+ },
+ {
+  "name": "Areca Round Plates [10 inch]",
+  "unit": "pcs",
+  "rate": "6.5",
+  "openingQty": "0",
+  "category": "Disposables",
+  "code": "GP-IN-005"
+ },
+ {
+  "name": "Areca Square Plates [ 10iNCH]",
+  "unit": "pcs",
+  "rate": "6.7",
+  "openingQty": "780",
+  "category": "Disposables",
+  "code": "GP-IN-006"
+ },
+ {
+  "name": "Eco Bloom Plates [7 inch]",
+  "unit": "pcs",
+  "rate": "1.9",
+  "openingQty": "25",
+  "category": "Disposables",
+  "code": "GP-IN-007"
+ },
+ {
+  "name": "5 Compartment Meal Tray",
+  "unit": "pcs",
+  "rate": "11.43",
+  "openingQty": "1275",
+  "category": "Disposables",
+  "code": "GP-IN-008"
+ },
+ {
+  "name": "3 Compartment Meal Tray [10.5 inch]",
+  "unit": "pcs",
+  "rate": "3.71",
+  "openingQty": "325",
+  "category": "Disposables",
+  "code": "GP-IN-009"
+ },
+ {
+  "name": "Tomato Ketchup [1/2 kg]",
+  "unit": "pct",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Disposables",
+  "code": "GP-IN-010"
+ },
+ {
+  "name": "Butter Paper",
+  "unit": "roll",
+  "rate": "127.12",
+  "openingQty": "2",
+  "category": "Disposables",
+  "code": "GP-IN-011"
+ },
+ {
+  "name": "Round Printed Logo Sticker",
+  "unit": "sheets",
+  "rate": "0",
+  "openingQty": "34",
+  "category": "Disposables",
+  "code": "GP-IN-012"
+ },
+ {
+  "name": "Printed Square Logo Sticker",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1000",
+  "category": "Disposables",
+  "code": "GP-IN-013"
+ },
+ {
+  "name": "Table Roll",
+  "unit": "roll",
+  "rate": "508.47",
+  "openingQty": "3",
+  "category": "Disposables",
+  "code": "GP-IN-014"
+ },
+ {
+  "name": "Cling Wrap",
+  "unit": "roll",
+  "rate": "300",
+  "openingQty": "5",
+  "category": "Disposables",
+  "code": "GP-IN-015"
+ },
+ {
+  "name": "Windsor 8 Compartment Box",
+  "unit": "pcs",
+  "rate": "12",
+  "openingQty": "300",
+  "category": "Disposables",
+  "code": "GP-IN-016"
+ },
+ {
+  "name": "Windsor 8CP LID",
+  "unit": "pcs",
+  "rate": "10.029999999999999",
+  "openingQty": "300",
+  "category": "Disposables",
+  "code": "GP-IN-017"
+ },
+ {
+  "name": "Corn Strach 8CP",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "150",
+  "category": "Disposables",
+  "code": "GP-IN-018"
+ },
+ {
+  "name": "Windsor 5 Compartment Box",
+  "unit": "pcs",
+  "rate": "10.42",
+  "openingQty": "600",
+  "category": "Disposables",
+  "code": "GP-IN-019"
+ },
+ {
+  "name": "Windsor 5 CP LID",
+  "unit": "pcs",
+  "rate": "9.07",
+  "openingQty": "600",
+  "category": "Disposables",
+  "code": "GP-IN-020"
+ },
+ {
+  "name": "Wooden Spoon[16 MM]",
+  "unit": "pcs",
+  "rate": "0.86",
+  "openingQty": "300",
+  "category": "Disposables",
+  "code": "GP-IN-021"
+ },
+ {
+  "name": "Wooden Fork [16 MM]",
+  "unit": "pcs",
+  "rate": "0.85",
+  "openingQty": "900",
+  "category": "Disposables",
+  "code": "GP-IN-022"
+ },
+ {
+  "name": "Agri Leaf Container 750 Ml",
+  "unit": "pcs",
+  "rate": "6.57",
+  "openingQty": "30",
+  "category": "Disposables",
+  "code": "GP-IN-023"
+ },
+ {
+  "name": "Agri Leag Container 500 Ml",
+  "unit": "pcs",
+  "rate": "5.87",
+  "openingQty": "10",
+  "category": "Disposables",
+  "code": "GP-IN-024"
+ },
+ {
+  "name": "Agri Leaf Container 750ml LID",
+  "unit": "nos",
+  "rate": "4.5999999999999996",
+  "openingQty": "30",
+  "category": "Disposables",
+  "code": "GP-IN-025"
+ },
+ {
+  "name": "Agri Leaf Container 500ml LID",
+  "unit": "nos",
+  "rate": "3.5",
+  "openingQty": "10",
+  "category": "Disposables",
+  "code": "GP-IN-026"
+ },
+ {
+  "name": "Plastic Container 100ml with LID",
+  "unit": "nos",
+  "rate": "2.4",
+  "openingQty": "150",
+  "category": "Disposables",
+  "code": "GP-IN-027"
+ },
+ {
+  "name": "Cello Tape [1 inch]",
+  "unit": "roll",
+  "rate": "21.19",
+  "openingQty": "79",
+  "category": "Disposables",
+  "code": "GP-IN-028"
+ },
+ {
+  "name": "Brown Tape [2.5 inch}",
+  "unit": "roll",
+  "rate": "33.9",
+  "openingQty": "32",
+  "category": "Disposables",
+  "code": "GP-IN-029"
+ },
+ {
+  "name": "Double Tape",
+  "unit": "roll",
+  "rate": "30",
+  "openingQty": "9",
+  "category": "Disposables",
+  "code": "GP-IN-030"
+ },
+ {
+  "name": "Cello Tape [2.5 inch]",
+  "unit": "roll",
+  "rate": "25.42",
+  "openingQty": "36",
+  "category": "Disposables",
+  "code": "GP-IN-031"
+ },
+ {
+  "name": "Aluminium Paper Plates [7 inch]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "165",
+  "category": "Disposables",
+  "code": "GP-IN-032"
+ },
+ {
+  "name": "Biodegradable Bowl 100ml / Desert Bowl",
+  "unit": "pcs",
+  "rate": "1.19",
+  "openingQty": "1500",
+  "category": "Disposables",
+  "code": "GP-IN-033"
+ },
+ {
+  "name": "Baggase Bowl [20nz]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1900",
+  "category": "Disposables",
+  "code": "GP-IN-034"
+ },
+ {
+  "name": "Brown Paper Bag [size 3]",
+  "unit": "pcs",
+  "rate": "5.93",
+  "openingQty": "605",
+  "category": "Disposables",
+  "code": "GP-IN-035"
+ },
+ {
+  "name": "Aluminium Foil Unipac  1 kg",
+  "unit": "roll",
+  "rate": "470.34",
+  "openingQty": "1",
+  "category": "Disposables",
+  "code": "GP-IN-036"
+ },
+ {
+  "name": "Hair Net",
+  "unit": "pouch",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Disposables",
+  "code": "GP-IN-037"
+ },
+ {
+  "name": "Burger Clam Shell [6*6]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1850",
+  "category": "Disposables",
+  "code": "GP-IN-038"
+ },
+ {
+  "name": "Burger Clam Shell [8*8]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "375",
+  "category": "Disposables",
+  "code": "GP-IN-039"
+ },
+ {
+  "name": "Burger Clam Shell [9*9]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "500",
+  "category": "Disposables",
+  "code": "GP-IN-040"
+ },
+ {
+  "name": "Sandwich Clam Shell",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1200",
+  "category": "Disposables",
+  "code": "GP-IN-041"
+ },
+ {
+  "name": "Fuel",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "72",
+  "category": "Disposables",
+  "code": "GP-IN-042"
+ },
+ {
+  "name": "Corn Starch 8 CP Meal Box",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "150",
+  "category": "Disposables",
+  "code": "GP-IN-043"
+ },
+ {
+  "name": "Disposable Plastic Juice Cups with lid [300 ml]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "350",
+  "category": "Disposables",
+  "code": "GP-IN-044"
+ },
+ {
+  "name": "Paper Straw [8 mm]",
+  "unit": "pct",
+  "rate": "0.48",
+  "openingQty": "6",
+  "category": "Disposables",
+  "code": "GP-IN-045"
+ },
+ {
+  "name": "Black Hand Gloves",
+  "unit": "pouch",
+  "rate": "300",
+  "openingQty": "2",
+  "category": "Disposables",
+  "code": "GP-IN-046"
+ },
+ {
+  "name": "Ketchup Sachet",
+  "unit": "pct",
+  "rate": "100",
+  "openingQty": "3",
+  "category": "Disposables",
+  "code": "GP-IN-047"
+ },
+ {
+  "name": "Tooth Picks",
+  "unit": "pct",
+  "rate": "17.14",
+  "openingQty": "20",
+  "category": "Disposables",
+  "code": "GP-IN-048"
+ },
+ {
+  "name": "Chocos",
+  "unit": "pct",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Disposables",
+  "code": "GP-IN-049"
+ },
+ {
+  "name": "Corn Flakes",
+  "unit": "pct",
+  "rate": "0",
+  "openingQty": "3",
+  "category": "Disposables",
+  "code": "GP-IN-050"
+ },
+ {
+  "name": "Garbage covers",
+  "unit": "kg",
+  "rate": "0",
+  "openingQty": "41",
+  "category": "Disposables",
+  "code": "GP-IN-051"
+ },
+ {
+  "name": "PEPPER SACHETS",
+  "unit": "pct",
+  "rate": "0",
+  "openingQty": "0",
+  "category": "Disposables",
+  "code": "GP-IN-052"
+ },
+ {
+  "name": "SALT SACHETS",
+  "unit": "pct",
+  "rate": "0",
+  "openingQty": "0",
+  "category": "Disposables",
+  "code": "GP-IN-053"
+ },
+ {
+  "name": "SUGAR SACHETS",
+  "unit": "pct",
+  "rate": "0",
+  "openingQty": "0",
+  "category": "Disposables",
+  "code": "GP-IN-054"
+ },
+ {
+  "name": "WATER CAN 20 LITRES",
+  "unit": "nos",
+  "rate": "0",
+  "openingQty": "0",
+  "category": "Disposables",
+  "code": "GP-IN-055"
+ },
+ {
+  "name": "WATER BOTTLES 300 ML",
+  "unit": "nos",
+  "rate": "0",
+  "openingQty": "0",
+  "category": "Disposables",
+  "code": "GP-IN-056"
+ },
+ {
+  "name": "WATER BOTTLES 500 ML",
+  "unit": "nos",
+  "rate": "0",
+  "openingQty": "0",
+  "category": "Disposables",
+  "code": "GP-IN-057"
+ },
+ {
+  "name": "14\" * 14\" *3\" Wooden Bowl",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "0",
+  "category": "Disposables",
+  "code": "GP-IN-058"
+ },
+ {
+  "name": "FOMEX BOWL",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "0",
+  "category": "Disposables",
+  "code": "GP-IN-059"
+ },
+ {
+  "name": "Green Tea Sachets",
+  "unit": "pct",
+  "rate": "0",
+  "openingQty": "0",
+  "category": "Disposables",
+  "code": "GP-IN-060"
+ },
+ {
+  "name": "Sunraise Bru Sachets",
+  "unit": "pct",
+  "rate": "0",
+  "openingQty": "0",
+  "category": "Disposables",
+  "code": "GP-IN-061"
+ },
+ {
+  "name": "Assam Tea Sachets",
+  "unit": "pct",
+  "rate": "0",
+  "openingQty": "0",
+  "category": "Disposables",
+  "code": "GP-IN-062"
+ },
+ {
+  "name": "Hi Ball Glass",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "76",
+  "category": "Crockery",
+  "code": "GP-IN-063"
+ },
+ {
+  "name": "Rock Glass",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-064"
+ },
+ {
+  "name": "Juice Glass",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "82",
+  "category": "Crockery",
+  "code": "GP-IN-065"
+ },
+ {
+  "name": "Water Jug Glass",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "10",
+  "category": "Crockery",
+  "code": "GP-IN-066"
+ },
+ {
+  "name": "AP Spoon",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "140",
+  "category": "Crockery",
+  "code": "GP-IN-067"
+ },
+ {
+  "name": "Ap Fork",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "22",
+  "category": "Crockery",
+  "code": "GP-IN-068"
+ },
+ {
+  "name": "Tea Spoon",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "20",
+  "category": "Crockery",
+  "code": "GP-IN-069"
+ },
+ {
+  "name": "Soup Bowl",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "15",
+  "category": "Crockery",
+  "code": "GP-IN-070"
+ },
+ {
+  "name": "Soup Spoon [Chinese]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "80",
+  "category": "Crockery",
+  "code": "GP-IN-071"
+ },
+ {
+  "name": "Butter Knife",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "4",
+  "category": "Crockery",
+  "code": "GP-IN-072"
+ },
+ {
+  "name": "Tea Cup [7 OZ]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "60",
+  "category": "Crockery",
+  "code": "GP-IN-073"
+ },
+ {
+  "name": "Tea Saucer",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "90",
+  "category": "Crockery",
+  "code": "GP-IN-074"
+ },
+ {
+  "name": "Tea Pot [Small]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "3",
+  "category": "Crockery",
+  "code": "GP-IN-075"
+ },
+ {
+  "name": "Tea Pot [Medium]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-076"
+ },
+ {
+  "name": "Tea Pot [Large]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "7",
+  "category": "Crockery",
+  "code": "GP-IN-077"
+ },
+ {
+  "name": "Creamer",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-078"
+ },
+ {
+  "name": "Sugar Basin",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-079"
+ },
+ {
+  "name": "Cereal Bowl",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-080"
+ },
+ {
+  "name": "Twin Bowl",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "9",
+  "category": "Crockery",
+  "code": "GP-IN-081"
+ },
+ {
+  "name": "Monkey Bowl",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "23",
+  "category": "Crockery",
+  "code": "GP-IN-082"
+ },
+ {
+  "name": "Dinner Plate [Full Plate]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "195",
+  "category": "Crockery",
+  "code": "GP-IN-083"
+ },
+ {
+  "name": "Quarter Plate",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "43",
+  "category": "Crockery",
+  "code": "GP-IN-084"
+ },
+ {
+  "name": "pasta plate",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "5",
+  "category": "Crockery",
+  "code": "GP-IN-085"
+ },
+ {
+  "name": "Starter / Salad Platter",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "9",
+  "category": "Crockery",
+  "code": "GP-IN-086"
+ },
+ {
+  "name": "Portion Bowl [Handi]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "18",
+  "category": "Crockery",
+  "code": "GP-IN-087"
+ },
+ {
+  "name": "Portion Bowl [ Kadai ]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "16",
+  "category": "Crockery",
+  "code": "GP-IN-088"
+ },
+ {
+  "name": "Portion Bowl [Steel Entrees]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "5",
+  "category": "Crockery",
+  "code": "GP-IN-089"
+ },
+ {
+  "name": "Bread Basket [Buffet]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "3",
+  "category": "Crockery",
+  "code": "GP-IN-090"
+ },
+ {
+  "name": "Juice Dispenser",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-091"
+ },
+ {
+  "name": "Cereal Dispenser",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-092"
+ },
+ {
+  "name": "Food Tier",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-093"
+ },
+ {
+  "name": "Soup Tourine",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-094"
+ },
+ {
+  "name": "Bread Toaster",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-095"
+ },
+ {
+  "name": "Tea Flask [10 l]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-096"
+ },
+ {
+  "name": "5 l",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-097"
+ },
+ {
+  "name": "Carafe",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-098"
+ },
+ {
+  "name": "Decanter",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-099"
+ },
+ {
+  "name": "Heat Plate",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-100"
+ },
+ {
+  "name": "Insulated Drum  [8 l]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "5",
+  "category": "Crockery",
+  "code": "GP-IN-101"
+ },
+ {
+  "name": "20 l",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-102"
+ },
+ {
+  "name": "Food Drum 20 lit",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "9",
+  "category": "Crockery",
+  "code": "GP-IN-103"
+ },
+ {
+  "name": "Food Carrier",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-104"
+ },
+ {
+  "name": "Chafing Dishes",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "9",
+  "category": "Crockery",
+  "code": "GP-IN-105"
+ },
+ {
+  "name": "Oval Chafing Dish",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "3",
+  "category": "Crockery",
+  "code": "GP-IN-106",
+  "note": "3 Full Food Pan"
+ },
+ {
+  "name": "Square Induction Chafing Dish",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "4",
+  "category": "Crockery",
+  "code": "GP-IN-107",
+  "note": "Half Food Pan-12"
+ },
+ {
+  "name": "Rectangular Chafing Dish",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-108",
+  "note": "Full Food Pan-2"
+ },
+ {
+  "name": "Cruet Set",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "7",
+  "category": "Crockery",
+  "code": "GP-IN-109"
+ },
+ {
+  "name": "Tissue Stand",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "8",
+  "category": "Crockery",
+  "code": "GP-IN-110"
+ },
+ {
+  "name": "Platter Bowl",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-111"
+ },
+ {
+  "name": "Salad Crescent",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "3",
+  "category": "Crockery",
+  "code": "GP-IN-112"
+ },
+ {
+  "name": "Micro Oven",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-113"
+ },
+ {
+  "name": "Hot Box",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "11",
+  "category": "Crockery",
+  "code": "GP-IN-114"
+ },
+ {
+  "name": "Table Frill",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "4",
+  "category": "Crockery",
+  "code": "GP-IN-115"
+ },
+ {
+  "name": "Ladle [Rice]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-116"
+ },
+ {
+  "name": "Ladle [Flat]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "14",
+  "category": "Crockery",
+  "code": "GP-IN-117"
+ },
+ {
+  "name": "Tong",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "9",
+  "category": "Crockery",
+  "code": "GP-IN-118"
+ },
+ {
+  "name": "Ladle [Dal]",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "23",
+  "category": "Crockery",
+  "code": "GP-IN-119"
+ },
+ {
+  "name": "Bill Folder",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-120"
+ },
+ {
+  "name": "Wooden Platter",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "6",
+  "category": "Crockery",
+  "code": "GP-IN-121"
+ },
+ {
+  "name": "Wooden Sizzling Platter",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "3",
+  "category": "Crockery",
+  "code": "GP-IN-122"
+ },
+ {
+  "name": "Ice Cream Scoop",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "3",
+  "category": "Crockery",
+  "code": "GP-IN-123"
+ },
+ {
+  "name": "Tent Card",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "17",
+  "category": "Crockery",
+  "code": "GP-IN-124"
+ },
+ {
+  "name": "Bud Vase",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "8",
+  "category": "Crockery",
+  "code": "GP-IN-125"
+ },
+ {
+  "name": "Ketchup Dispenser",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "6",
+  "category": "Crockery",
+  "code": "GP-IN-126"
+ },
+ {
+  "name": "Condiments Dispenser",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-127"
+ },
+ {
+  "name": "Glass Serving Bowl",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-128"
+ },
+ {
+  "name": "Wati Cups",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "80",
+  "category": "Crockery",
+  "code": "GP-IN-129"
+ },
+ {
+  "name": "Ice Cream Dispenser",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-130"
+ },
+ {
+  "name": "Bread Basket (Dine in& Room Service)",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "7",
+  "category": "Crockery",
+  "code": "GP-IN-131"
+ },
+ {
+  "name": "Steel Bucket",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "9",
+  "category": "Crockery",
+  "code": "GP-IN-132"
+ },
+ {
+  "name": "Steel Water Drum",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-133"
+ },
+ {
+  "name": "Cookies Jar",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "8",
+  "category": "Crockery",
+  "code": "GP-IN-134"
+ },
+ {
+  "name": "Aluminium SS Tray",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "5",
+  "category": "Crockery",
+  "code": "GP-IN-135"
+ },
+ {
+  "name": "Aluminium Baking Tray",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "8",
+  "category": "Crockery",
+  "code": "GP-IN-136"
+ },
+ {
+  "name": "Reservation Tag",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-137"
+ },
+ {
+  "name": "Ice Bucket",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-138"
+ },
+ {
+  "name": "Rice Cooker",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "1",
+  "category": "Crockery",
+  "code": "GP-IN-139"
+ },
+ {
+  "name": "Table Mat",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "23",
+  "category": "Crockery",
+  "code": "GP-IN-140"
+ },
+ {
+  "name": "Salvar Round",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "4",
+  "category": "Crockery",
+  "code": "GP-IN-141"
+ },
+ {
+  "name": "Salvar Rectangular",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "4",
+  "category": "Crockery",
+  "code": "GP-IN-142"
+ },
+ {
+  "name": "Finger Bowl",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "7",
+  "category": "Crockery",
+  "code": "GP-IN-143"
+ },
+ {
+  "name": "Ben Bowl",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "12",
+  "category": "Crockery",
+  "code": "GP-IN-144"
+ },
+ {
+  "name": "Rectangular Platter",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "6",
+  "category": "Crockery",
+  "code": "GP-IN-145"
+ },
+ {
+  "name": "Papad Basket",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "3",
+  "category": "Crockery",
+  "code": "GP-IN-146"
+ },
+ {
+  "name": "Portion Bowl (Bucket)",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "6",
+  "category": "Crockery",
+  "code": "GP-IN-147"
+ },
+ {
+  "name": "Snacks Plates",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "6",
+  "category": "Crockery",
+  "code": "GP-IN-148"
+ },
+ {
+  "name": "Juice Mug",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "2",
+  "category": "Crockery",
+  "code": "GP-IN-149"
+ },
+ {
+  "name": "SS TABLES",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "10",
+  "category": "Crockery",
+  "code": "GP-IN-150"
+ },
+ {
+  "name": "BANQUET CHAIR",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "24",
+  "category": "Crockery",
+  "code": "GP-IN-151"
+ },
+ {
+  "name": "PLASTIC CHAIR",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "30",
+  "category": "Crockery",
+  "code": "GP-IN-152"
+ },
+ {
+  "name": "PLASTIC TUBS",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "7",
+  "category": "Crockery",
+  "code": "GP-IN-153"
+ },
+ {
+  "name": "Price",
+  "unit": "pcs",
+  "rate": "0",
+  "openingQty": "0",
+  "category": "Crockery",
+  "code": "GP-IN-154"
+ }
+]

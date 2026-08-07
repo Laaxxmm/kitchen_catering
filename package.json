@@ -17,6 +17,7 @@
     "prisma:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset-transactional": "tsx prisma/reset-transactional.ts",
+    "catalogue:import": "tsx --env-file=.env scripts/import-catalogue.ts",
     "icons:regen": "node scripts/regen-icons.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
