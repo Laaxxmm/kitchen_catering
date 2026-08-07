@@ -5,7 +5,11 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { clearOrdersKeepFinance, resetTransactionalData } from "@/server/actions/admin-reset";
+import {
+  clearOrdersKeepFinance,
+  resetEverythingKeepParties,
+  resetTransactionalData,
+} from "@/server/actions/admin-reset";
 import { isNextNavigationError } from "@/lib/next-error";
 
 /**
@@ -13,14 +17,19 @@ import { isNextNavigationError } from "@/lib/next-error";
  *   1. Clear orders (keep finance) — wipes the operational order pipeline but
  *      preserves every invoice, payment, bill, petty-cash + salary record and
  *      the audit log. The everyday "start the season fresh" button.
- *   2. Clean slate — wipes ALL transactional data including finance.
- * Both are ADMIN-only (the actions re-check) and gated behind a typed phrase.
+ *   2. Clean slate — wipes ALL transactional data including finance, but
+ *      KEEPS both item catalogues.
+ *   3. Erase everything — the above PLUS both catalogues, so a replacement
+ *      list can be imported into an empty system. The only one that clears
+ *      items; the other two deliberately leave them alone.
+ * All ADMIN-only (the actions re-check) and gated behind a typed phrase.
  */
 export function CleanSlate() {
   return (
     <div className="mt-8 grid gap-4">
       <ClearOrders />
       <FullReset />
+      <EraseEverything />
     </div>
   );
 }
@@ -160,6 +169,85 @@ function FullReset() {
         </div>
         <Button type="button" variant="destructive" disabled={!armed || pending} onClick={run}>
           {pending ? "Clearing…" : "Clear everything"}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The hard one: wipes both item catalogues as well, so a replacement
+ * catalogue can be imported into an empty system. Separate from Clean slate
+ * because that one keeps items on purpose — reaching for the wrong button
+ * here is expensive, so the copy says plainly what only this one does.
+ */
+function EraseEverything() {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [confirm, setConfirm] = useState("");
+  const armed = confirm.trim().toUpperCase() === "ERASE EVERYTHING";
+
+  function run() {
+    if (!armed) {
+      toast.error("Type ERASE EVERYTHING to confirm");
+      return;
+    }
+    startTransition(async () => {
+      try {
+        const res = await resetEverythingKeepParties("ERASE EVERYTHING");
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success(
+          `Erased — ${res.kitchenItems} kitchen and ${res.fnbItems} F&B items, ` +
+            `${res.orders} orders, ${res.customerInvoices} invoices. Import the new catalogue now.`,
+        );
+        setConfirm("");
+        router.refresh();
+      } catch (err) {
+        if (isNextNavigationError(err)) throw err;
+        toast.error(err instanceof Error ? err.message : "Erase failed");
+      }
+    });
+  }
+
+  return (
+    <section className="rounded-2xl border border-alert bg-alert-wash p-4">
+      <h3 className="text-[14px] font-semibold text-alert">Danger zone · Erase everything</h3>
+      <p className="mt-1 text-[12.5px] text-ik-ink-2">
+        Everything Clean slate wipes, <strong>plus both item catalogues</strong> — every kitchen
+        ingredient and every F&amp;B item. Use this only when a replacement catalogue is ready to
+        import straight afterwards, or the team is left with nothing to pick from.
+      </p>
+      <p className="mt-2 text-[12.5px] text-ik-ink-2">
+        <strong>Kept:</strong> users &amp; logins, customers, vendors, the dish menu and recipes,
+        order templates, housekeeping / maintenance masters, settings.
+      </p>
+      <p className="mt-2 text-[12.5px] text-ik-ink-2">
+        Recipe ingredient lines cannot survive — they point at the kitchen catalogue being
+        replaced. Dishes and recipes remain, but their ingredient lists come back empty and dish
+        costing reads zero until they are rebuilt.
+      </p>
+      <p className="mt-2 text-[12.5px] font-medium text-alert">
+        There is no backup and no undo. Once this runs, the history is gone.
+      </p>
+      <div className="mt-3 flex flex-wrap items-end gap-2">
+        <div className="grid gap-1">
+          <label htmlFor="erase-confirm" className="text-[11.5px] text-ik-ink-2">
+            Type <span className="font-mono font-semibold">ERASE EVERYTHING</span> to confirm
+          </label>
+          <Input
+            id="erase-confirm"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder="ERASE EVERYTHING"
+            className="w-56"
+            autoComplete="off"
+          />
+        </div>
+        <Button type="button" variant="destructive" disabled={!armed || pending} onClick={run}>
+          {pending ? "Erasing…" : "Erase everything"}
         </Button>
       </div>
     </section>
