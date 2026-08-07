@@ -47,7 +47,11 @@ import { ChefApprovalBlock } from "./_components/ChefApprovalBlock";
 import { ManagerChangeBlock } from "./_components/ManagerChangeBlock";
 import { OrderCostSummary } from "./_components/OrderCostSummary";
 import { FeedbackAllocation } from "./_components/FeedbackAllocation";
-import { RAISE_ROLES as MANPOWER_RAISE_ROLES, can } from "../../manpower/_components/gates";
+import {
+  RAISE_ROLES as MANPOWER_RAISE_ROLES,
+  VIEW_ROLES as MANPOWER_VIEW_ROLES,
+  can,
+} from "../../manpower/_components/gates";
 import { STATUS_META as MANPOWER_STATUS_META } from "../../manpower/_components/display";
 import { RETURN_STATUS_META } from "../../inventory/returns/_components/status";
 
@@ -136,6 +140,12 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // confirmation does — which is exactly why the chef may do it.
   const canDeclareKitchenReturn = isManager || role === Role.KITCHEN_HEAD;
   const canRecordFnbReturn = isManager || isFnb || role === Role.STORE_KEEPER;
+  // The per-line "open" link goes to /inventory/returns/[id], which the
+  // middleware admits for these roles only. The panel itself is visible to
+  // anyone who can read the order, so without this the link handed accounts,
+  // sales and F&B a straight trip to Access denied.
+  const canOpenKitchenReturn =
+    isManager || role === Role.STORE_KEEPER || role === Role.KITCHEN_HEAD;
   // getOrderBanquetLedger has its own read gate — only call it for the roles
   // it admits, or the page throws for sales.
   const canSeeFnbLedger = canRecordFnbReturn || role === Role.ACCOUNTS;
@@ -202,6 +212,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // Raising a manpower request — a different thing from allocating our own
   // serving staff above, and a different role set (the chef raises these).
   const canRequestManpower = can(role, MANPOWER_RAISE_ROLES);
+  // /manpower admits admin, manager, chef, F&B, delivery and accounts — NOT
+  // the store keeper or sales. The panel below is visible to anyone who can
+  // read the order, so the per-row link needs its own gate or those two get
+  // Access denied from a link the page offered them.
+  const canOpenManpower = can(role, MANPOWER_VIEW_ROLES);
   // Leftover returns only apply to walk-up counter sales and outdoor catering.
   const showLeftovers =
     order.channel === OrderChannel.COUNTER_SALE || order.channel === OrderChannel.ODC;
@@ -716,9 +731,13 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                   const meta = MANPOWER_STATUS_META[m.status];
                   return (
                     <li key={m.id} className="grid gap-0.5">
-                      <Link href={`/manpower/${m.id}`} className="text-brand hover:underline">
-                        {m.workDescription}
-                      </Link>
+                      {canOpenManpower ? (
+                        <Link href={`/manpower/${m.id}`} className="text-brand hover:underline">
+                          {m.workDescription}
+                        </Link>
+                      ) : (
+                        <span className="text-ik-ink">{m.workDescription}</span>
+                      )}
                       <div className="flex flex-wrap items-center gap-2">
                         <StatusPill tone={meta.tone}>{meta.label}</StatusPill>
                         <span className="font-mono text-[12px] text-ik-ink-2">
@@ -825,12 +844,14 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                                 l.return.rejectionReason && (
                                   <span className="text-alert">{l.return.rejectionReason}</span>
                                 )}
-                              <Link
-                                href={`/inventory/returns/${l.return.id}`}
-                                className="text-brand hover:underline"
-                              >
-                                open
-                              </Link>
+                              {canOpenKitchenReturn && (
+                                <Link
+                                  href={`/inventory/returns/${l.return.id}`}
+                                  className="text-brand hover:underline"
+                                >
+                                  open
+                                </Link>
+                              )}
                             </div>
                           </li>
                         );
