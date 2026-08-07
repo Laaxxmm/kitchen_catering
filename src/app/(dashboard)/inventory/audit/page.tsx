@@ -1,15 +1,18 @@
 import type { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
-import { auth } from "@/server/auth";
+import { gateRolePage } from "@/server/rbac";
 import { listAuditTargets, postInventoryAudit } from "@/server/actions/inventory-audit";
+import { STOCK_EDIT_ROLES } from "@/lib/stock-movement";
 import { InventoryNav } from "../_components/InventoryNav";
 import { AuditForm } from "./_components/AuditForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function InventoryAuditPage() {
-  const [session, ingredients] = await Promise.all([auth(), listAuditTargets()]);
-  const role = session?.user?.role as Role | undefined;
+  // Posting a count sets on-hand by hand — admin/manager only.
+  const session = await gateRolePage(STOCK_EDIT_ROLES);
+  const ingredients = await listAuditTargets();
+  const role = session.user.role as Role;
 
   async function post(input: { lines: Array<{ ingredientId: string; physicalCount: string }>; notes: string | null }) {
     "use server";

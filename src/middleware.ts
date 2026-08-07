@@ -76,9 +76,14 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // rule for the whole module: every screen is safe to reach for all of them,
   // and the actions enforce who may approve vs. who may move money.
   { pattern: /^\/manpower(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "FNB_SERVICE", "DELIVERY", "ACCOUNTS"] },
-  // Manual stock adjustments are admin/manager only (write-offs, opening fixes).
-  // STORE_KEEPER allowed through statically; the adjust actions enforce the
-  // stock.storeDirectEdit admin toggle server-side (middleware has no DB).
+  // Setting a stock figure by hand — the single-item adjustment and the bulk
+  // physical count — is admin/manager only (STOCK_EDIT_ROLES in
+  // lib/stock-movement.ts; the actions enforce the same set). The store keeper
+  // keeps the adjustments *log* below: it records what a manager corrected
+  // under them, and that page says who to ask for a correction. These two
+  // must precede the log rule, which precedes the /inventory catch-all.
+  { pattern: /^\/inventory\/adjustments\/new(\/|$)/, allow: ["ADMIN", "MANAGER"] },
+  { pattern: /^\/inventory\/audit(\/|$)/, allow: ["ADMIN", "MANAGER"] },
   { pattern: /^\/inventory\/adjustments(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
   // Issuing stock out is the store's job (not the chef, not accounts).
   { pattern: /^\/inventory\/issues(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
@@ -133,8 +138,12 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   { pattern: /^\/maintenance(\/|$)/, allow: ["ADMIN", "MANAGER", "MAINTENANCE_MANAGER"] },
 
   // Banquet — the F&B Service store (role DELIVERY, FNB_SERVICE its retired
-  // alias). The whole team runs it end to end: catalogue, receipts, issues,
-  // adjustments.
+  // alias). The team runs it end to end: receipts, issues, returns,
+  // requisitions. Editing a stock figure by hand is not part of that — the
+  // adjust screen and the bulk count are admin/manager, same as the kitchen
+  // side. Specific before the /banquet rule below.
+  { pattern: /^\/banquet\/adjust(\/|$)/, allow: ["ADMIN", "MANAGER"] },
+  { pattern: /^\/banquet\/stock-count(\/|$)/, allow: ["ADMIN", "MANAGER"] },
   { pattern: /^\/banquet(\/|$)/, allow: ["ADMIN", "MANAGER", "FNB_SERVICE", "DELIVERY", "STORE_KEEPER"] },
 
   // Finance — invoices are accounts/management. The in-house (room service)

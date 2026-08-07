@@ -17,9 +17,15 @@ import type { ActionResultWith } from "@/lib/action-result";
 export interface TransferItem {
   id: string;
   store: StockStore;
+  sku: string | null;
   name: string;
   unit: string;
   stock: string;
+}
+
+/** Code first where the catalogue has one — F&B names repeat across sources. */
+function itemLabel(i: TransferItem): string {
+  return `${i.sku ? `${i.sku} · ` : ""}${i.name} (${i.stock} ${i.unit})`;
 }
 
 interface Props {
@@ -147,7 +153,7 @@ export function TransferForm({ items, onSubmit }: Props) {
               <option value="">Select an item…</option>
               {fromItems.map((i) => (
                 <option key={i.id} value={i.id}>
-                  {i.name} ({i.stock} {i.unit})
+                  {itemLabel(i)}
                 </option>
               ))}
             </select>
@@ -190,7 +196,7 @@ export function TransferForm({ items, onSubmit }: Props) {
               <option value="">Select an item…</option>
               {toItems.map((i) => (
                 <option key={i.id} value={i.id}>
-                  {i.name} ({i.stock} {i.unit})
+                  {itemLabel(i)}
                 </option>
               ))}
             </select>

@@ -8,9 +8,13 @@ import { requireRole } from "@/server/rbac";
 import { InventoryAuditPostInput } from "@/lib/validators";
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
+import { STOCK_EDIT_ROLES } from "@/lib/stock-movement";
 import { ActionError, actionFailure, type ActionResultWith } from "@/server/action-result";
 
-const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
+// Posting a physical count sets on-hand by hand, so it is direct stock
+// editing — admin/manager only (STOCK_EDIT_ROLES). The store keeper still
+// walks the store and counts; a manager posts the correction.
+const WRITE_ROLES = STOCK_EDIT_ROLES;
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.ACCOUNTS];
 
 /**

@@ -33,8 +33,8 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   // chef. So they get Purchase orders + Vendors (but not supplier bills /
   // payments, which stay with finance).
   STORE_KEEPER: new Set([
-    // "banquet": the store keeper loads/corrects F&B + cutlery stock too
-    // (writes gated by the stock.storeDirectEdit toggle server-side).
+    // "banquet": the store keeper works the F&B counter too — receipts and
+    // issues. Correcting a figure by hand is admin/manager (STOCK_EDIT_ROLES).
     "dashboard", "tasks", "requisitions", "inventory", "banquet", "purchaseorders", "vendors", "supplierbills",
   ]),
   // Kitchen head: cooking-side work only. No Sales section — they drive

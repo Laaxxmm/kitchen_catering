@@ -16,12 +16,17 @@ import {
 } from "@/lib/validators";
 import { nextGPItemCode } from "@/lib/sequences";
 import { newMovingAverage } from "@/lib/inventory-cost";
-import { STORE_LABELS, checkDeclareQty, checkReturnQty, remainingReturnable } from "@/lib/stock-movement";
+import {
+  STOCK_EDIT_ROLES,
+  STORE_LABELS,
+  checkDeclareQty,
+  checkReturnQty,
+  remainingReturnable,
+} from "@/lib/stock-movement";
 import { unitsEquivalent } from "@/lib/units";
 import { istToUtc } from "@/lib/time";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
-import { getSettingOr } from "@/lib/settings";
 import {
   ActionError,
   actionFailure,
@@ -57,10 +62,10 @@ const CATALOG_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN
 // now a deliberate management decision.
 const CATALOG_CREATE_ROLES = [Role.ADMIN, Role.MANAGER];
 // Manual stock corrections (write-offs, opening fixes, post-count tweaks)
-// are admin/manager only. Storekeeper records new stock through receipts
-// — that path has a unit cost + supplier, this one is a free-form quantity
-// edit and is sensitive.
-const ADJUST_ROLES = [Role.ADMIN, Role.MANAGER];
+// are admin/manager only — see STOCK_EDIT_ROLES. The storekeeper records new
+// stock through receipts: that path has a unit cost + supplier behind it,
+// this one is a free-form quantity edit with no event behind it at all.
+const ADJUST_ROLES = STOCK_EDIT_ROLES;
 const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.SALES, Role.ACCOUNTS,
 ];
@@ -1152,12 +1157,7 @@ export async function adjustIngredientStock(raw: unknown): Promise<ActionResultW
 }
 
 async function adjustIngredientStockInner(raw: unknown): Promise<{ ok: true; id: string }> {
-  // Admin toggle (Admin → Settings → stock.storeDirectEdit): during the
-  // stock-loading phase the store keeper may set on-hand directly.
-  const directEdit = await getSettingOr<boolean>("stock.storeDirectEdit", false);
-  const session = await requireRole(
-    directEdit ? [...ADJUST_ROLES, Role.STORE_KEEPER] : ADJUST_ROLES,
-  );
+  const session = await requireRole(ADJUST_ROLES);
   const input = IngredientAdjustmentInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {
@@ -1357,9 +1357,9 @@ export async function listRecentReceipts(opts: { limit?: number } = {}) {
 
 // Stock-adjustment audit list — admin/manager only.
 export async function listRecentAdjustments(opts: { limit?: number } = {}) {
-  // Reading the adjustments log is open to the store keeper too — they
-  // can hold the write permission via the stock.storeDirectEdit toggle,
-  // and the list is their receipt of what they changed.
+  // Reading the adjustments log stays open to the store keeper even though
+  // they can no longer post one: it is the record of what a manager changed
+  // under their feet, and they need to see it to reconcile their own counts.
   await requireRole([...ADJUST_ROLES, Role.STORE_KEEPER]);
   return db.ingredientAdjustment.findMany({
     orderBy: { adjustedAt: "desc" },

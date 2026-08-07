@@ -1,11 +1,14 @@
 import { PageHeader } from "@/components/ui/page-header";
+import { gateRolePage } from "@/server/rbac";
 import { adjustIngredientStock, listIngredients } from "@/server/actions/inventory";
+import { STOCK_EDIT_ROLES } from "@/lib/stock-movement";
 import type { IngredientAdjustmentInputT } from "@/lib/validators";
 import { AdjustmentForm } from "../../_components/AdjustmentForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewAdjustmentPage() {
+  await gateRolePage(STOCK_EDIT_ROLES);
   const ingredients = await listIngredients({ active: true });
 
   async function submit(input: IngredientAdjustmentInputT) {

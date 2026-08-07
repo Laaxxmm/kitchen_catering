@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Role } from "@prisma/client";
+import { canEditStockDirectly } from "@/lib/stock-movement";
 
 interface Props {
   active: "ingredients" | "receipts" | "issues" | "returns" | "transfers" | "adjustments" | "audit";
@@ -25,15 +26,15 @@ export function InventoryNav({ active, role }: Props) {
   // that lands on /forbidden is worse than no tab.
   //   receipts: ADMIN/MANAGER/STORE_KEEPER/ACCOUNTS
   //   issues / returns / transfers: ADMIN/MANAGER/STORE_KEEPER
-  //   adjustments: ADMIN/MANAGER/STORE_KEEPER (writes behind the
-  //     stock.storeDirectEdit toggle — a clear refusal, not a dead end)
-  //   audit (bulk count): ADMIN/MANAGER/STORE_KEEPER/KITCHEN_HEAD/ACCOUNTS
+  //   adjustments: ADMIN/MANAGER/STORE_KEEPER — the store keeper reads the
+  //     log (that page says who to ask); posting one is admin/manager
+  //   audit (bulk count): ADMIN/MANAGER — it sets on-hand by hand
   const canStock = role === "ADMIN" || role === "MANAGER" || role === "STORE_KEEPER";
   const tabs = [
     BASE_TABS[0],
     ...(canStock || role === "ACCOUNTS" ? [BASE_TABS[1]] : []),
     ...(canStock ? [BASE_TABS[2], ...STOCK_TABS] : []),
-    BASE_TABS[3],
+    ...(canEditStockDirectly(role) ? [BASE_TABS[3]] : []),
   ];
 
   return (

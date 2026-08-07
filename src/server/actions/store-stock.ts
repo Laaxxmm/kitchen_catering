@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Role, type Prisma } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
-import { getSettingOr } from "@/lib/settings";
+import { STOCK_EDIT_ROLES } from "@/lib/stock-movement";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
 import {
@@ -17,16 +17,21 @@ const READ_ROLES = [
   Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER, Role.MAINTENANCE_MANAGER,
   // F&B Service (role DELIVERY, FNB_SERVICE its retired alias) runs the banquet store.
   Role.FNB_SERVICE, Role.DELIVERY,
-  // Store keeper: loads/corrects F&B stock (writes gated per store below +
-  // the stock.storeDirectEdit toggle for banquet).
+  // Store keeper: works the F&B counter (receipts, issues) — reads on-hand,
+  // no longer writes it (see WRITE_ROLES_BY_STORE).
   Role.STORE_KEEPER,
 ];
 // Who may correct on-hand for a given store: admin/manager + the store's
 // own manager. Mirrors the receipt-write roles for each module.
+//
+// Banquet is the exception: the F&B team lost direct editing — hand-setting
+// an F&B figure is admin/manager only now (STOCK_EDIT_ROLES), the same gate
+// the kitchen adjustment and both bulk counts use. They still record
+// receipts, issues and returns, which move the same stock off a document.
 const WRITE_ROLES_BY_STORE: Record<StoreKey, Role[]> = {
   housekeeping: [Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER],
   maintenance: [Role.ADMIN, Role.MANAGER, Role.MAINTENANCE_MANAGER],
-  banquet: [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY],
+  banquet: STOCK_EDIT_ROLES,
 };
 
 export type StoreKey = "housekeeping" | "maintenance" | "banquet";
@@ -125,7 +130,7 @@ export async function getStoreStock(store: StoreKey) {
 /** Active items for a store's adjust-stock picker (id · name · unit · on-hand). */
 export async function listStoreItems(store: StoreKey) {
   // Read-only picker for the adjust screen — read roles, not write roles
-  // (the write itself is gated in adjustStoreStock, incl. the toggle).
+  // (the write itself is gated in adjustStoreStock).
   await requireRole(READ_ROLES);
   const select = { id: true, name: true, unit: true, currentStock: true } as const;
   const rows =
@@ -169,15 +174,7 @@ async function adjustStoreStockInner(input: {
   reason: string;
   note?: string;
 }): Promise<{ ok: true }> {
-  // Admin toggle: store keeper may set F&B (banquet) stock directly
-  // during the stock-loading phase.
-  const directEdit =
-    input.store === "banquet" ? await getSettingOr<boolean>("stock.storeDirectEdit", false) : false;
-  const session = await requireRole(
-    directEdit
-      ? [...WRITE_ROLES_BY_STORE[input.store], Role.STORE_KEEPER]
-      : WRITE_ROLES_BY_STORE[input.store],
-  );
+  const session = await requireRole(WRITE_ROLES_BY_STORE[input.store]);
   if (!input.reason?.trim()) throw new ActionError("A reason is required");
   const amount = toDecimal(input.qty || "0");
 

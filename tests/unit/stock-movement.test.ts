@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Decimal } from "decimal.js";
 import {
+  banquetItemLabel,
+  canEditStockDirectly,
   checkDeclareQty,
   checkReturnQty,
   checkTransferQty,
@@ -343,5 +345,58 @@ describe("checkTransferQty", () => {
     // Callers blank-guard ("" || "0") before this — decimalString permits "".
     expect(checkTransferQty({ ...base, want: "0", onHand: "3" })).toContain("greater than 0");
     expect(checkTransferQty({ ...base, want: "-2", onHand: "3" })).toContain("greater than 0");
+  });
+});
+
+describe("canEditStockDirectly", () => {
+  // The client's rule: only the admin or the manager may set a stock figure
+  // by hand, on the kitchen store and the F&B store alike. Everyone else
+  // moves stock through a receipt / issue / return / transfer, which has a
+  // real event behind it. This is the predicate the four adjust + bulk-count
+  // actions and their screens all read.
+  it("admits admin and manager", () => {
+    expect(canEditStockDirectly("ADMIN")).toBe(true);
+    expect(canEditStockDirectly("MANAGER")).toBe(true);
+  });
+
+  it("refuses the store keeper and the F&B / delivery team", () => {
+    expect(canEditStockDirectly("STORE_KEEPER")).toBe(false);
+    expect(canEditStockDirectly("FNB_SERVICE")).toBe(false);
+    expect(canEditStockDirectly("DELIVERY")).toBe(false);
+  });
+
+  it("refuses every other role, and a signed-out caller", () => {
+    for (const r of ["SALES", "KITCHEN_HEAD", "ACCOUNTS", "HOUSEKEEPING_MANAGER", "MAINTENANCE_MANAGER"] as const) {
+      expect(canEditStockDirectly(r)).toBe(false);
+    }
+    expect(canEditStockDirectly(undefined)).toBe(false);
+  });
+});
+
+describe("banquetItemLabel", () => {
+  // The F&B catalogue allows one name across sources and hire grades, so the
+  // option text is the only thing standing between the store and billing a
+  // ₹3.50 Bonechina bowl at the ₹2.50 Melamine rate.
+  const bowl = { name: "Soup bowl", unit: "piece", currentStock: "40" };
+
+  it("keeps two same-named hired grades apart", () => {
+    const melamine = banquetItemLabel({ ...bowl, sku: "GP-HR-012", category: "Melamine", rate: "2.50" });
+    const bonechina = banquetItemLabel({ ...bowl, sku: "GP-HR-031", category: "Bonechina", rate: "3.50" });
+    expect(melamine).not.toBe(bonechina);
+    expect(melamine).toContain("GP-HR-012");
+    expect(melamine).toContain("Melamine");
+    expect(melamine).toContain("₹2.50");
+  });
+
+  it("keeps the in-house and hired bowl apart", () => {
+    expect(banquetItemLabel({ ...bowl, sku: "GP-IN-007", category: "Crockery", rate: null })).not.toBe(
+      banquetItemLabel({ ...bowl, sku: "GP-HR-012", category: "Melamine", rate: "2.50" }),
+    );
+  });
+
+  it("drops the optional bits rather than printing empties", () => {
+    expect(banquetItemLabel({ sku: null, name: "Foil roll", unit: "roll", category: null, rate: null })).toBe(
+      "— · Foil roll",
+    );
   });
 });

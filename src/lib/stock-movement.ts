@@ -1,5 +1,5 @@
 import { Decimal } from "decimal.js";
-import type { StockStore } from "@prisma/client";
+import type { BanquetItemSource, Role, StockStore } from "@prisma/client";
 import { toDecimal } from "./money";
 
 /** What each store is called on screen. Type-only enum import so the client
@@ -9,6 +9,54 @@ export const STORE_LABELS: Record<StockStore, string> = {
   FNB: "F&B store",
   HOUSEKEEPING: "Housekeeping store",
 };
+
+/** In-house stock vs cutlery/crockery hired in from outside, as the client says it. */
+export const BANQUET_SOURCE_LABELS: Record<BanquetItemSource, string> = {
+  IN_HOUSE: "In-house",
+  HIRED: "Hired from outside",
+};
+
+/**
+ * How an F&B item reads once it is off the catalogue screen.
+ *
+ * The name does not identify the item: "soup bowl" exists in-house, as hired
+ * Melamine and as hired Bonechina, at three different rates. So the code
+ * leads (the only unique thing on the row) and the grade and rate follow —
+ * picking by name alone bills the customer for the wrong one.
+ */
+export function banquetItemLabel(i: {
+  sku: string | null;
+  name: string;
+  unit: string;
+  category: string | null;
+  rate: string | null;
+  currentStock?: string;
+}): string {
+  const bits = [i.sku ?? "—", i.name];
+  if (i.category) bits.push(i.category);
+  if (i.rate) bits.push(`₹${i.rate}`);
+  if (i.currentStock !== undefined) bits.push(`have ${i.currentStock} ${i.unit}`);
+  return bits.join(" · ");
+}
+
+/**
+ * Who may set a stock figure by hand — single-item adjustments and bulk
+ * physical counts, on the kitchen store and the F&B (banquet) store alike.
+ * Admin and manager only.
+ *
+ * Everything else that moves stock (receipt, issue, return, transfer,
+ * requisition fulfilment) is a *consequence* of a real event with a document
+ * behind it, and keeps its own wider role set. This list is only for the
+ * paths where a number is typed in with no such event.
+ *
+ * String literals, not `Role.ADMIN`, so the type-only Prisma import above
+ * still holds and this file stays safe to pull into a client bundle.
+ */
+export const STOCK_EDIT_ROLES: Role[] = ["ADMIN", "MANAGER"];
+
+export function canEditStockDirectly(role: Role | undefined): boolean {
+  return role !== undefined && STOCK_EDIT_ROLES.includes(role);
+}
 
 /**
  * Ceilings for the two movements that can take stock the wrong way.
