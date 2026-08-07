@@ -245,6 +245,7 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
           canReceive={canReceive}
           canRecordBill={canRecordBill}
           receiveHref={`/procurement/grns/new?poId=${po.id}`}
+          recordBillHref={`/procurement/vendor-bills/new?poId=${po.id}`}
         />
       )}
 
@@ -391,6 +392,7 @@ interface NextStepProps {
   canReceive: boolean;
   canRecordBill: boolean;
   receiveHref: string;
+  recordBillHref: string;
 }
 
 /**
@@ -398,7 +400,7 @@ interface NextStepProps {
  * gets the richer NotifyVendorBlock with WhatsApp/email/mark-sent actions;
  * everything else just needs a one-liner pointing at the next button.
  */
-function NextStep({ status, vendorPending, vendorName, approveVendorSlot, canReceive, canRecordBill, receiveHref }: NextStepProps) {
+function NextStep({ status, vendorPending, vendorName, approveVendorSlot, canReceive, canRecordBill, receiveHref, recordBillHref }: NextStepProps) {
   if (status === VendorPOStatus.CANCELLED || status === VendorPOStatus.CLOSED) return null;
 
   let body: React.ReactNode = null;
@@ -468,7 +470,10 @@ function NextStep({ status, vendorPending, vendorName, approveVendorSlot, canRec
         <strong>Next:</strong> All goods received. When the supplier sends the bill, record it — the
         system checks it against this PO + the delivery notes before letting accounts pay.
         <div className="mt-2">
-          <Link href="/procurement/vendor-bills/new">
+          {/* Carry the PO so the bill form opens prefilled — vendor, linked
+              PO and lines at the RECEIVED quantities. Without ?poId= it
+              landed on a blank form and the whole PO had to be re-keyed. */}
+          <Link href={recordBillHref}>
             <Button size="sm" variant="outline">Record supplier bill</Button>
           </Link>
         </div>
