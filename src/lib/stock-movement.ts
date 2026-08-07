@@ -53,6 +53,47 @@ export function checkReturnQty(input: {
   return null;
 }
 
+/**
+ * Refusal message for a DECLARATION line, or null when it's allowed.
+ *
+ * A declaration moves nothing, so it cannot invent stock — the ceiling that
+ * protects the ledger is `checkReturnQty`, re-run against confirmed
+ * movements only at the moment stock actually goes back. This is the other
+ * check: it stops the chef queueing up promises that add to more than is
+ * out, so the mismatch surfaces at the kitchen desk where it can be
+ * corrected, not at the counter with the stock already in hand.
+ *
+ * Hence `alreadyDeclared` (other DECLARED, not-yet-confirmed lines against
+ * the same issue) counts here and nowhere else. A declaration that gets
+ * rejected is no longer DECLARED, so it stops counting the moment it is
+ * turned down — whatever it was holding is free again.
+ */
+export function checkDeclareQty(input: {
+  want: Decimal | string;
+  issuedQty: Decimal | string;
+  alreadyReturned: Decimal | string;
+  alreadyDeclared: Decimal | string;
+  name: string;
+  unit: string;
+}): string | null {
+  const want = toDecimal(input.want);
+  if (want.lte(0)) return "Return quantity must be greater than 0";
+  const pending = toDecimal(input.alreadyDeclared);
+  const left = remainingReturnable(
+    input.issuedQty,
+    toDecimal(input.alreadyReturned).plus(pending),
+  );
+  if (want.gt(left)) {
+    const pendingNote = pending.gt(0)
+      ? ` (${pending.toString()} ${input.unit} is already declared and waiting on the store)`
+      : "";
+    return left.isZero()
+      ? `${input.name} on this issue has nothing left to send back${pendingNote}.`
+      : `Only ${left.toString()} ${input.unit} of ${input.name} can still be declared against this issue${pendingNote}.`;
+  }
+  return null;
+}
+
 /** One movement of one item against one order — issued or returned. */
 export interface OrderItemQty {
   orderId: string;

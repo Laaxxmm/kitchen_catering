@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Decimal } from "decimal.js";
 import {
+  checkDeclareQty,
   checkReturnQty,
   checkTransferQty,
   itemsStillOutByOrder,
@@ -60,6 +61,158 @@ describe("checkReturnQty", () => {
   it("refuses a zero or negative quantity", () => {
     expect(checkReturnQty({ ...base, want: "0", alreadyReturned: "0" })).toContain("greater than 0");
     expect(checkReturnQty({ ...base, want: "-1", alreadyReturned: "0" })).toContain("greater than 0");
+  });
+});
+
+// ─── The chef-declares → store-confirms handover ────────────────────────
+//
+// Two ceilings, deliberately measuring different things:
+//
+//   checkDeclareQty  — at the kitchen desk, against INTENT. Counts what is
+//                      already declared and waiting, so the chef can't queue
+//                      two promises for the same stock.
+//   checkReturnQty   — at the counter, against REALITY. Counts CONFIRMED
+//                      movements only, because only those have ever touched
+//                      on-hand. This is the one standing between a mistyped
+//                      quantity and invented stock.
+//
+// Getting the split backwards is the failure that matters: count pending
+// declarations at confirmation and a real handover is refused with the stock
+// already on the counter; stop counting confirmed returns and stock can be
+// conjured out of nothing.
+describe("checkDeclareQty — the ceiling with an unconfirmed declaration in play", () => {
+  const base = { issuedQty: "5", name: "Paneer", unit: "kg" };
+
+  it("allows a declaration within what is still out", () => {
+    expect(
+      checkDeclareQty({ ...base, want: "2", alreadyReturned: "0", alreadyDeclared: "0" }),
+    ).toBeNull();
+  });
+
+  it("counts a pending declaration against the next one", () => {
+    // 5 issued, 4 already declared and waiting on the store → 1 left to
+    // promise. Without this the chef could declare 5 twice and the store
+    // would be holding a second document it can never fulfil.
+    expect(
+      checkDeclareQty({ ...base, want: "2", alreadyReturned: "0", alreadyDeclared: "4" }),
+    ).toContain("Only 1 kg");
+    expect(
+      checkDeclareQty({ ...base, want: "1", alreadyReturned: "0", alreadyDeclared: "4" }),
+    ).toBeNull();
+  });
+
+  it("stacks confirmed returns and pending declarations on the same ceiling", () => {
+    // 5 issued, 2 already back, 2 declared → 1 left.
+    expect(
+      checkDeclareQty({ ...base, want: "1", alreadyReturned: "2", alreadyDeclared: "2" }),
+    ).toBeNull();
+    expect(
+      checkDeclareQty({ ...base, want: "1.5", alreadyReturned: "2", alreadyDeclared: "2" }),
+    ).toContain("Only 1 kg");
+  });
+
+  it("says the pending part out loud, so the chef knows why they're blocked", () => {
+    const msg = checkDeclareQty({
+      ...base,
+      want: "5",
+      alreadyReturned: "0",
+      alreadyDeclared: "5",
+    });
+    expect(msg).toContain("nothing left to send back");
+    expect(msg).toContain("5 kg is already declared and waiting on the store");
+  });
+
+  it("frees what a declaration was holding once it is rejected", () => {
+    // A rejected declaration is no longer DECLARED, so it drops out of
+    // alreadyDeclared and the same 5 kg is declarable again. It never moved,
+    // so alreadyReturned is untouched by the rejection — nothing to reverse.
+    const blocked = checkDeclareQty({
+      ...base,
+      want: "5",
+      alreadyReturned: "0",
+      alreadyDeclared: "5",
+    });
+    const afterRejection = checkDeclareQty({
+      ...base,
+      want: "5",
+      alreadyReturned: "0",
+      alreadyDeclared: "0",
+    });
+    expect(blocked).not.toBeNull();
+    expect(afterRejection).toBeNull();
+  });
+
+  it("holds exact decimals — a float drift here strands returnable stock", () => {
+    expect(
+      checkDeclareQty({
+        ...base,
+        issuedQty: "0.3",
+        want: "0.2",
+        alreadyReturned: "0",
+        alreadyDeclared: "0.1",
+      }),
+    ).toBeNull();
+  });
+
+  it("refuses a zero or negative quantity", () => {
+    expect(
+      checkDeclareQty({ ...base, want: "0", alreadyReturned: "0", alreadyDeclared: "0" }),
+    ).toContain("greater than 0");
+    expect(
+      checkDeclareQty({ ...base, want: "-1", alreadyReturned: "0", alreadyDeclared: "0" }),
+    ).toContain("greater than 0");
+  });
+});
+
+describe("confirming a declaration — the ceiling measures what MOVED, not what was promised", () => {
+  const base = { issuedQty: "5", name: "Paneer", unit: "kg" };
+  // The document being confirmed is still DECLARED at the moment of the
+  // check, so it is never counted against itself: `alreadyReturned` here is
+  // confirmed movements only.
+
+  it("accepts a confirmation BELOW the declared quantity", () => {
+    // Chef declared 2 kg, 1.5 kg physically arrived — the case the client is
+    // buying this change for.
+    expect(checkReturnQty({ ...base, want: "1.5", alreadyReturned: "0" })).toBeNull();
+  });
+
+  it("accepts a confirmation EQUAL to the declared quantity", () => {
+    expect(checkReturnQty({ ...base, want: "2", alreadyReturned: "0" })).toBeNull();
+  });
+
+  it("accepts a confirmation ABOVE the declared quantity while it fits the issue", () => {
+    // The chef under-declared and 3 kg turned up against a 5 kg issue. The
+    // store books what actually arrived: the declaration is a claim, the
+    // issue is the ceiling.
+    expect(checkReturnQty({ ...base, want: "3", alreadyReturned: "0" })).toBeNull();
+  });
+
+  it("still refuses a confirmation above what the ISSUE can give back", () => {
+    // Even 6 kg declared against a 5 kg issue dies here. The safety ceiling
+    // is always the issue, never the declaration.
+    expect(checkReturnQty({ ...base, want: "6", alreadyReturned: "0" })).toContain("Only 5 kg");
+  });
+
+  it("counts an earlier DIRECT return against the confirmation", () => {
+    // The hole worth guarding: the store books 4 kg straight in at the
+    // counter, then goes to confirm a 2 kg declaration on the same issue.
+    // Confirmed movements are 4 of 5, so only 1 can still come back —
+    // otherwise 6 kg returns against a 5 kg issue and stock is invented.
+    expect(checkReturnQty({ ...base, want: "2", alreadyReturned: "4" })).toContain("Only 1 kg");
+    expect(checkReturnQty({ ...base, want: "1", alreadyReturned: "4" })).toBeNull();
+  });
+
+  it("does NOT let another pending declaration block a real handover", () => {
+    // 5 issued, nothing confirmed, another 5 kg declaration sitting in the
+    // queue. That one has moved nothing, so it cannot have consumed
+    // anything — the stock physically on the counter still goes back.
+    expect(checkReturnQty({ ...base, want: "5", alreadyReturned: "0" })).toBeNull();
+  });
+
+  it("refuses once the issue is fully back, whatever was declared", () => {
+    expect(checkReturnQty({ ...base, want: "1", alreadyReturned: "5" })).toContain(
+      "already been returned in full",
+    );
   });
 });
 

@@ -27,6 +27,7 @@ import { listChefRequisitions } from "@/server/actions/chef-requisitions";
 import { listVendorPOs, listVendorBills } from "@/server/actions/procurement";
 import { listPendingVendors } from "@/server/actions/vendors";
 import { listBanquetRequisitions } from "@/server/actions/banquet";
+import { listPendingReturnDeclarations } from "@/server/actions/inventory";
 import { listCustomerInvoices, listCustomerInvoicesAwaitingApproval } from "@/server/actions/customer-invoices";
 import { listManpowerRequests } from "@/server/actions/manpower";
 import { effectiveFigures, estimatedCost } from "@/lib/manpower";
@@ -127,12 +128,17 @@ export default async function DashboardPage({
     // Scoped board for the cards + unscoped list for pill counts, so the
     // chef sees "Tomorrow (2)" at a glance instead of an empty Today with
     // no hint that work is queued ahead.
-    const [board, allBoard, revised] = await Promise.all([
+    const [board, allBoard, revised, myDeclarations] = await Promise.all([
       listChefBoardOrders(window ?? undefined),
       listChefBoardOrders(),
       // Never scoped by the date pills — a revision the kitchen hasn't seen
       // must show up whatever window they happen to be looking at.
       listRevisedOrders("chef"),
+      // Stock the chef has handed over and is still owed a credit for.
+      // Unscoped for the same reason: a handover the store hasn't counted in
+      // is exactly the thing that gets forgotten if it only shows up on one
+      // day's view.
+      listPendingReturnDeclarations({ mine: true }),
     ]);
     const inWindow = (d: Date, w: { from: Date; toExclusive: Date }) =>
       d.getTime() >= w.from.getTime() && d.getTime() < w.toExclusive.getTime();
@@ -156,12 +162,33 @@ export default async function DashboardPage({
           actions={
             <div className="flex flex-wrap gap-2">
               <Link href="/requisitions/new"><Button variant="outline">New stock request</Button></Link>
+              <Link href="/inventory/returns/declare"><Button variant="outline">Declare leftover return</Button></Link>
               <Link href="/manpower/new"><Button variant="outline">Request manpower</Button></Link>
             </div>
           }
         />
         <div className="grid grid-cols-1 gap-5">
           <MyTasksPanel />
+          {myDeclarations.length > 0 && (
+            <div className="rounded-md border border-amber bg-amber-wash px-3 py-2 text-[12.5px] text-amber-700">
+              <span className="font-medium">
+                {myDeclarations.length} leftover return{myDeclarations.length === 1 ? "" : "s"} you
+                declared {myDeclarations.length === 1 ? "is" : "are"} still waiting on the store
+              </span>{" "}
+              — nothing goes back on the shelf and no order is credited until they count it in.
+              <ul className="mt-1 grid gap-0.5">
+                {myDeclarations.map((d) => (
+                  <li key={d.id}>
+                    <Link href={`/inventory/returns/${d.id}`} className="hover:underline">
+                      {formatIST(d.returnedAt, "d MMM")} ·{" "}
+                      {d.lines.find((l) => l.issue.order)?.issue.order?.code ?? "no order"} ·{" "}
+                      {d.lines.length} {d.lines.length === 1 ? "item" : "items"} →
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <EventScopePills basePath="/dashboard" scope={scope} date={sp.date} counts={pillCounts} />
             <Link href="/dashboard?scope=all" className="text-[12px] text-brand hover:underline">
@@ -269,7 +296,7 @@ export default async function DashboardPage({
           ? sp.scope
           : "all";
     const window = istScopeWindow(scope, sp.date);
-    const [chefReqs, fnbReqs, pos, upcoming, allUpcoming, revised] = await Promise.all([
+    const [chefReqs, fnbReqs, pos, upcoming, allUpcoming, revised, returnDeclarations] = await Promise.all([
       listChefRequisitions({
         status: [ChefRequisitionStatus.SUBMITTED, ChefRequisitionStatus.PARTIALLY_ISSUED],
         activeOrderOnly: true,
@@ -297,6 +324,10 @@ export default async function DashboardPage({
       // Unscoped for the same reason as the chef board: a revision must
       // surface whatever date window the store is browsing.
       listRevisedOrders("store"),
+      // Kitchen returns the chef has declared. Real work waiting on this
+      // bench: stock is on its way to the counter and neither the stock nor
+      // the order's cost moves until the store counts it in.
+      listPendingReturnDeclarations(),
     ]);
     const inWindow = (iso: string, w: { from: Date; toExclusive: Date }) => {
       const t = new Date(iso).getTime();
@@ -358,6 +389,16 @@ export default async function DashboardPage({
               status: p.status,
               vendor: p.vendor.name,
               total: p.grandTotal.toString(),
+            }))}
+            returnDeclarations={returnDeclarations.map((d) => ({
+              id: d.id,
+              declaredAt: d.returnedAt.toISOString(),
+              declaredBy: d.recordedBy.name ?? "Kitchen",
+              orderCode: d.lines.find((l) => l.issue.order)?.issue.order?.code ?? null,
+              lines: d.lines.length,
+              summary: d.lines
+                .map((l) => `${l.quantity.toString()} ${l.issue.ingredient.unit} ${l.issue.ingredient.name}`)
+                .join(" · "),
             }))}
           />
           {/* #5: forward planning view — confirmed orders the store still
@@ -525,6 +566,7 @@ export default async function DashboardPage({
             <div className="flex flex-wrap gap-2">
               <Link href="/banquet/issues/new"><Button>Issue to event</Button></Link>
               <Link href="/banquet/receipts/new"><Button variant="outline">Record receipt</Button></Link>
+              <Link href="/banquet/returns"><Button variant="outline">Record F&amp;B return</Button></Link>
               <Link href="/manpower/new"><Button variant="outline">Request manpower</Button></Link>
             </div>
           }
@@ -594,6 +636,7 @@ export default async function DashboardPage({
             <div className="flex flex-wrap gap-2">
               <Link href="/orders/new"><Button>Take order</Button></Link>
               <Link href="/banquet/issues/new"><Button variant="outline">Issue to event</Button></Link>
+              <Link href="/banquet/returns"><Button variant="outline">Record F&amp;B return</Button></Link>
               <Link href="/banquet/request"><Button variant="outline">Raise requisition</Button></Link>
               <Link href="/manpower/new"><Button variant="outline">Request manpower</Button></Link>
             </div>

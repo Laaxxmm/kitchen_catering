@@ -82,8 +82,19 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   { pattern: /^\/inventory\/adjustments(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
   // Issuing stock out is the store's job (not the chef, not accounts).
   { pattern: /^\/inventory\/issues(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
-  // Stock coming back from the kitchen, and stock moving between the three
-  // stores — same hands that issue it out.
+  // Stock coming back from the kitchen. The handover has two halves and they
+  // gate separately, so these three must precede the /inventory/returns rule
+  // below — which itself is unchanged.
+  //   …/new     — the store's direct counter entry. Moves stock. Store only.
+  //   …/declare — the chef saying what they're sending back. Moves nothing.
+  //   …/<id>    — one document: the store's confirm screen, and the screen
+  //               the chef opens to see whether their handover landed. The
+  //               page renders controls only for the roles each action admits.
+  { pattern: /^\/inventory\/returns\/new(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
+  { pattern: /^\/inventory\/returns\/declare(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD"] },
+  { pattern: /^\/inventory\/returns\/[^/]+$/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "KITCHEN_HEAD"] },
+  // The returns list, and stock moving between the three stores — same hands
+  // that issue it out.
   { pattern: /^\/inventory\/returns(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
   { pattern: /^\/inventory\/transfers(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
   // Recording incoming stock — store + accounts (books-side receipt). The

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Role, StockStore, type Prisma } from "@prisma/client";
+import { IngredientReturnStatus, Role, StockStore, type Prisma } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
@@ -11,10 +11,12 @@ import {
   IngredientReceiptInput,
   IngredientIssueInput,
   IngredientReturnInput,
+  IngredientReturnConfirmInput,
+  IngredientReturnDeclarationInput,
 } from "@/lib/validators";
 import { nextGPItemCode } from "@/lib/sequences";
 import { newMovingAverage } from "@/lib/inventory-cost";
-import { STORE_LABELS, checkReturnQty, remainingReturnable } from "@/lib/stock-movement";
+import { STORE_LABELS, checkDeclareQty, checkReturnQty, remainingReturnable } from "@/lib/stock-movement";
 import { unitsEquivalent } from "@/lib/units";
 import { istToUtc } from "@/lib/time";
 import { toDecimal } from "@/lib/money";
@@ -40,7 +42,12 @@ async function lockIngredientRow(tx: Prisma.TransactionClient, id: string) {
 }
 
 // Stock movements (receipts / issues) — the store's job (+ management).
+// Also the set that CONFIRMS a kitchen return declaration, because
+// confirming is what moves the stock.
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
+// Declaring a kitchen return — the chef says what they're sending back.
+// Moves nothing, so it is deliberately NOT the stock-write set.
+const DECLARE_ROLES = [Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD];
 // Maintaining EXISTING catalogue entries (edit / deactivate / reorder level)
 // stays broad — the store and the chef curate the items they work with daily.
 const CATALOG_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD];
@@ -393,6 +400,76 @@ async function recordDirectIngredientIssueInner(raw: unknown): Promise<{ ok: tru
 }
 
 /**
+ * How much has actually COME BACK against each issue, per issue id.
+ *
+ * CONFIRMED only, and that filter is the whole safety story of the
+ * declaration flow: a DECLARED document is a promise the store hasn't met
+ * yet and a REJECTED one is a promise that died — neither has ever touched
+ * Ingredient.onHandQty, so counting either as returned stock would let the
+ * next real return be refused, or (worse, read the other way round) let
+ * stock be conjured. Everything that measures "what came back" goes through
+ * this function.
+ */
+async function confirmedReturnedByIssue(
+  tx: Prisma.TransactionClient,
+  issueIds: string[],
+): Promise<Map<string, Decimal>> {
+  const rows = await tx.ingredientReturnLine.groupBy({
+    by: ["issueId"],
+    where: {
+      issueId: { in: issueIds },
+      return: { status: IngredientReturnStatus.CONFIRMED },
+    },
+    _sum: { quantity: true },
+  });
+  return new Map(rows.map((r) => [r.issueId, toDecimal(r._sum.quantity ?? 0)]));
+}
+
+/**
+ * Fold returned lines back into stock at the cost they left at. Several
+ * lines can hit one ingredient at different issue costs, so the average is
+ * recomputed line by line off a running figure, then written once.
+ *
+ * Shared by both routes into a return — the store's direct counter entry and
+ * the store's confirmation of a chef's declaration — so the two can never
+ * drift into valuing the same movement differently. Callers must already
+ * hold the ingredient row locks.
+ */
+async function foldReturnedStockOnHand(
+  tx: Prisma.TransactionClient,
+  lines: readonly { ingredientId: string; quantity: Decimal; unitCost: string }[],
+) {
+  if (lines.length === 0) return;
+  const ingredientIds = [...new Set(lines.map((l) => l.ingredientId))];
+  const ingredients = await tx.ingredient.findMany({
+    where: { id: { in: ingredientIds } },
+    select: { id: true, onHandQty: true, avgUnitCost: true },
+  });
+  const running = new Map(
+    ingredients.map((i) => [i.id, { qty: toDecimal(i.onHandQty), avg: toDecimal(i.avgUnitCost) }]),
+  );
+  for (const l of lines) {
+    const cur = running.get(l.ingredientId)!;
+    const next = newMovingAverage({
+      onHandQty: cur.qty,
+      avgUnitCost: cur.avg,
+      receiptQty: l.quantity,
+      receiptUnitCost: l.unitCost,
+    });
+    running.set(l.ingredientId, { qty: next.qty, avg: next.avgUnitCost });
+  }
+  for (const [ingredientId, v] of running) {
+    await tx.ingredient.update({
+      where: { id: ingredientId },
+      data: {
+        onHandQty: v.qty.toDecimalPlaces(3).toString(),
+        avgUnitCost: v.avg.toDecimalPlaces(4).toString(),
+      },
+    });
+  }
+}
+
+/**
  * Stock coming back from the kitchen — the chef drew 5 kg of onions and used
  * 3. The store's F&B counterpart is recordBanquetReturn (banquet.ts); this is
  * the kitchen version, with the one thing food cost needs that cutlery
@@ -442,18 +519,7 @@ async function recordIngredientReturnInner(raw: unknown): Promise<{ ok: true; id
     // deadlock against each other.
     for (const id of ingredientIds) await lockIngredientRow(tx, id);
 
-    const [prior, ingredients] = await Promise.all([
-      tx.ingredientReturnLine.groupBy({
-        by: ["issueId"],
-        where: { issueId: { in: issueIds } },
-        _sum: { quantity: true },
-      }),
-      tx.ingredient.findMany({
-        where: { id: { in: ingredientIds } },
-        select: { id: true, onHandQty: true, avgUnitCost: true },
-      }),
-    ]);
-    const returnedBy = new Map(prior.map((p) => [p.issueId, toDecimal(p._sum.quantity ?? 0)]));
+    const returnedBy = await confirmedReturnedByIssue(tx, issueIds);
 
     // Two lines against the same issue share one ceiling — check the total,
     // not each line, or a split return walks straight past the cap.
@@ -477,13 +543,21 @@ async function recordIngredientReturnInner(raw: unknown): Promise<{ ok: true; id
 
     const created = await tx.ingredientReturn.create({
       data: {
+        // The store recorded it at the counter with no declaration behind
+        // it — recorder and confirmer are the same person, and the stock
+        // moves in this same transaction.
+        status: IngredientReturnStatus.CONFIRMED,
         returnedAt: istToUtc(input.returnedAt),
         recordedById: session.user.id,
+        confirmedById: session.user.id,
+        confirmedAt: new Date(),
         notes: input.notes?.trim() || null,
         lines: {
           create: input.lines.map((l) => ({
             issueId: l.issueId,
             quantity: toDecimal(l.quantity).toDecimalPlaces(3).toString(),
+            // No declaration behind this line — NULL is the truth.
+            declaredQuantity: null,
             unitCost: issueById.get(l.issueId)!.unitCostAtIssue.toString(),
             reason: l.reason.trim(),
           })),
@@ -491,32 +565,14 @@ async function recordIngredientReturnInner(raw: unknown): Promise<{ ok: true; id
       },
     });
 
-    // Fold each line back into stock at the cost it left at. Several lines can
-    // hit one ingredient at different issue costs, so the average is
-    // recomputed line by line off a running figure, then written once.
-    const running = new Map(
-      ingredients.map((i) => [i.id, { qty: toDecimal(i.onHandQty), avg: toDecimal(i.avgUnitCost) }]),
+    await foldReturnedStockOnHand(
+      tx,
+      input.lines.map((l) => ({
+        ingredientId: issueById.get(l.issueId)!.ingredientId,
+        quantity: toDecimal(l.quantity),
+        unitCost: issueById.get(l.issueId)!.unitCostAtIssue.toString(),
+      })),
     );
-    for (const l of input.lines) {
-      const issue = issueById.get(l.issueId)!;
-      const cur = running.get(issue.ingredientId)!;
-      const next = newMovingAverage({
-        onHandQty: cur.qty,
-        avgUnitCost: cur.avg,
-        receiptQty: toDecimal(l.quantity),
-        receiptUnitCost: issue.unitCostAtIssue.toString(),
-      });
-      running.set(issue.ingredientId, { qty: next.qty, avg: next.avgUnitCost });
-    }
-    for (const [ingredientId, v] of running) {
-      await tx.ingredient.update({
-        where: { id: ingredientId },
-        data: {
-          onHandQty: v.qty.toDecimalPlaces(3).toString(),
-          avgUnitCost: v.avg.toDecimalPlaces(4).toString(),
-        },
-      });
-    }
 
     await tx.auditLog.create({
       data: {
@@ -535,18 +591,421 @@ async function recordIngredientReturnInner(raw: unknown): Promise<{ ok: true; id
   revalidatePath("/inventory/ingredients");
   revalidatePath("/inventory/issues");
   revalidatePath("/inventory/returns");
+  revalidatePath("/dashboard");
   // The order pages show what came back for the event — refresh each one the
   // document touched.
   for (const orderId of result.orderIds) revalidatePath(`/orders/${orderId}`);
   return { ok: true, id: result.created.id };
 }
 
+// ─── Chef declares → store confirms ──────────────────────────────────────
+//
+// The custody handover the client asked for. The chef tells the store what
+// they are sending back; the store confirms what physically turned up,
+// correcting the quantity where the two differ, and only that confirmation
+// moves stock. Both figures are kept: a declaration's `declaredQuantity` is
+// written once and never touched again, so "declared 2 kg, received 1.5 kg"
+// survives — which is the discrepancy the old one-step path absorbed in
+// silence.
+//
+// The store's direct counter path above is untouched. Stock does arrive
+// without a declaration, and making the store invent one to book it in
+// would be worse than the problem. Both routes end in the same
+// `foldReturnedStockOnHand` and the same ceiling.
+
 /**
- * Issues that still have something returnable, for the return screen's
- * picker. Scoped to an order when the store keeper came from one.
+ * The chef declaring what they are sending back to the store. Writes a
+ * DECLARED document and NOTHING else: no stock moves, no cost reverses, no
+ * order is credited until the store confirms it.
+ *
+ * Gate: KITCHEN_HEAD + management. Deliberately not the stock-write set —
+ * a declaration is a statement of intent, not a movement.
  */
-export async function listReturnableIssues(opts: { orderId?: string; limit?: number } = {}) {
-  await requireRole(WRITE_ROLES);
+export async function declareIngredientReturn(
+  raw: unknown,
+): Promise<ActionResultWith<{ id: string }>> {
+  try {
+    return await declareIngredientReturnInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function declareIngredientReturnInner(raw: unknown): Promise<{ ok: true; id: string }> {
+  const session = await requireRole(DECLARE_ROLES);
+  const input = IngredientReturnDeclarationInput.parse(raw);
+
+  const result = await db.$transaction(async (tx) => {
+    const issueIds = [...new Set(input.lines.map((l) => l.issueId))];
+    const issues = await tx.ingredientIssue.findMany({
+      where: { id: { in: issueIds } },
+      select: {
+        id: true,
+        qty: true,
+        unitCostAtIssue: true,
+        orderId: true,
+        ingredient: { select: { name: true, unit: true } },
+      },
+    });
+    if (issues.length !== issueIds.length) {
+      throw new ActionError("One of those issues no longer exists — refresh and try again.");
+    }
+    const issueById = new Map(issues.map((i) => [i.id, i]));
+
+    // No ingredient row lock here, on purpose: this writes no stock, so
+    // there is nothing for a lock to protect, and taking one would block
+    // real receipts and issues for the duration. The worst a race can do is
+    // let two declarations queue up past the ceiling — and confirmation
+    // re-checks against confirmed movements under the lock before anything
+    // moves, so the ledger is still safe.
+    const [returnedBy, pendingRows] = await Promise.all([
+      confirmedReturnedByIssue(tx, issueIds),
+      tx.ingredientReturnLine.groupBy({
+        by: ["issueId"],
+        where: {
+          issueId: { in: issueIds },
+          return: { status: IngredientReturnStatus.DECLARED },
+        },
+        _sum: { quantity: true },
+      }),
+    ]);
+    const declaredBy = new Map(pendingRows.map((p) => [p.issueId, toDecimal(p._sum.quantity ?? 0)]));
+
+    // Normalise every quantity ONCE, here, and use that figure from here on.
+    // `decimalString` permits "" and `new Decimal("")` throws, so the blank
+    // guard has to sit before the first Decimal and the row that gets
+    // written has to reuse the guarded value rather than re-parsing the raw
+    // input further down.
+    const qtyByLine = input.lines.map((l) => {
+      const raw = (l.quantity ?? "").toString().trim();
+      if (raw === "") throw new ActionError("Return quantity must be greater than 0");
+      const want = toDecimal(raw).toDecimalPlaces(3);
+      if (want.lte(0)) throw new ActionError("Return quantity must be greater than 0");
+      return want;
+    });
+
+    // Several lines against one issue share one ceiling — total them first,
+    // exactly as the direct path does.
+    const wantByIssue = new Map<string, Decimal>();
+    input.lines.forEach((l, idx) => {
+      wantByIssue.set(
+        l.issueId,
+        (wantByIssue.get(l.issueId) ?? new Decimal(0)).plus(qtyByLine[idx]),
+      );
+    });
+    for (const [issueId, want] of wantByIssue) {
+      const issue = issueById.get(issueId)!;
+      const refusal = checkDeclareQty({
+        want,
+        issuedQty: issue.qty.toString(),
+        alreadyReturned: returnedBy.get(issueId) ?? "0",
+        alreadyDeclared: declaredBy.get(issueId) ?? "0",
+        name: issue.ingredient.name,
+        unit: issue.ingredient.unit,
+      });
+      if (refusal) throw new ActionError(refusal);
+    }
+
+    const created = await tx.ingredientReturn.create({
+      data: {
+        status: IngredientReturnStatus.DECLARED,
+        returnedAt: istToUtc(input.returnedAt),
+        recordedById: session.user.id,
+        notes: input.notes?.trim() || null,
+        lines: {
+          create: input.lines.map((l, idx) => {
+            const qty = qtyByLine[idx].toString();
+            return {
+              issueId: l.issueId,
+              // Both start at the declared figure. `quantity` is what this
+              // document is currently for; confirmation overwrites it with
+              // what arrived and leaves `declaredQuantity` alone.
+              quantity: qty,
+              declaredQuantity: qty,
+              unitCost: issueById.get(l.issueId)!.unitCostAtIssue.toString(),
+              reason: l.reason.trim(),
+            };
+          }),
+        },
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "INGREDIENT_RETURN_DECLARED",
+        entity: "IngredientReturn",
+        entityId: created.id,
+        payloadHash: sha256Json({
+          lines: input.lines.map((l) => ({ issueId: l.issueId, qty: l.quantity, reason: l.reason })),
+        }),
+      },
+    });
+    return {
+      id: created.id,
+      orderIds: [...new Set(issues.map((i) => i.orderId).filter((o): o is string => o != null))],
+    };
+  });
+
+  revalidatePath("/inventory/returns");
+  revalidatePath("/dashboard");
+  for (const orderId of result.orderIds) revalidatePath(`/orders/${orderId}`);
+  return { ok: true, id: result.id };
+}
+
+/**
+ * The store confirming a declaration: what actually turned up at the
+ * counter, line by line. THIS is where stock moves and the order is
+ * credited — through the same ceiling and the same costing as the direct
+ * path, neither weakened nor bypassed.
+ *
+ * A line may be confirmed at 0 ("the chef declared it, nothing arrived");
+ * the declared figure stays on the row so the discrepancy is readable.
+ *
+ * Gate: WRITE_ROLES — unchanged from the direct path.
+ */
+export async function confirmIngredientReturn(raw: unknown): Promise<ActionResult> {
+  try {
+    return await confirmIngredientReturnInner(raw);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function confirmIngredientReturnInner(raw: unknown): Promise<{ ok: true }> {
+  const session = await requireRole(WRITE_ROLES);
+  const input = IngredientReturnConfirmInput.parse(raw);
+  const confirmedAt = new Date();
+
+  const result = await db.$transaction(async (tx) => {
+    const doc = await tx.ingredientReturn.findUnique({
+      where: { id: input.id },
+      select: {
+        id: true,
+        status: true,
+        lines: {
+          select: {
+            id: true,
+            issueId: true,
+            issue: {
+              select: {
+                id: true,
+                qty: true,
+                unitCostAtIssue: true,
+                ingredientId: true,
+                orderId: true,
+                ingredient: { select: { name: true, unit: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!doc) {
+      throw new ActionError("That declaration no longer exists — refresh and try again.");
+    }
+    if (doc.status !== IngredientReturnStatus.DECLARED) {
+      throw new ActionError(
+        doc.status === IngredientReturnStatus.CONFIRMED
+          ? "This return has already been confirmed — the stock is back on hand."
+          : "This declaration was turned down and can't be confirmed.",
+      );
+    }
+
+    // Every line must be answered — a silent omission would book part of a
+    // handover and leave the rest in limbo.
+    const lineById = new Map(doc.lines.map((l) => [l.id, l]));
+    const received = new Map<string, Decimal>();
+    for (const l of input.lines) {
+      const line = lineById.get(l.lineId);
+      if (!line) throw new ActionError("That declaration changed — refresh and try again.");
+      // The validator already refused "" and negatives, so this is safe to
+      // hand to Decimal.
+      received.set(l.lineId, toDecimal(l.receivedQty).toDecimalPlaces(3));
+    }
+    if (received.size !== doc.lines.length) {
+      throw new ActionError("Say what arrived for every line before confirming.");
+    }
+
+    const ingredientIds = [...new Set(doc.lines.map((l) => l.issue.ingredientId))].sort();
+    for (const id of ingredientIds) await lockIngredientRow(tx, id);
+
+    // Ceiling, re-read under the lock and against CONFIRMED movements only —
+    // the same guard the direct path uses, on the same numbers. This
+    // document is still DECLARED, so it isn't counted against itself.
+    const issueIds = [...new Set(doc.lines.map((l) => l.issueId))];
+    const returnedBy = await confirmedReturnedByIssue(tx, issueIds);
+    const wantByIssue = new Map<string, Decimal>();
+    for (const line of doc.lines) {
+      const qty = received.get(line.id)!;
+      if (qty.lte(0)) continue; // nothing arrived on this line — nothing to cap
+      wantByIssue.set(line.issueId, (wantByIssue.get(line.issueId) ?? new Decimal(0)).plus(qty));
+    }
+    for (const [issueId, want] of wantByIssue) {
+      const issue = doc.lines.find((l) => l.issueId === issueId)!.issue;
+      const refusal = checkReturnQty({
+        want,
+        issuedQty: issue.qty.toString(),
+        alreadyReturned: returnedBy.get(issueId) ?? "0",
+        name: issue.ingredient.name,
+        unit: issue.ingredient.unit,
+      });
+      if (refusal) throw new ActionError(refusal);
+    }
+
+    // Guarded transition: a second store keeper on a stale tab loses the
+    // race here instead of double-booking the stock.
+    const flipped = await tx.ingredientReturn.updateMany({
+      where: { id: doc.id, status: IngredientReturnStatus.DECLARED },
+      data: {
+        status: IngredientReturnStatus.CONFIRMED,
+        confirmedById: session.user.id,
+        confirmedAt,
+        confirmationNote: input.note?.trim() || null,
+      },
+    });
+    if (flipped.count === 0) {
+      throw new ActionError("This declaration just changed — refresh the page.");
+    }
+
+    // `declaredQuantity` is untouched: only `quantity` moves to what arrived.
+    for (const line of doc.lines) {
+      await tx.ingredientReturnLine.update({
+        where: { id: line.id },
+        data: { quantity: received.get(line.id)!.toString() },
+      });
+    }
+
+    await foldReturnedStockOnHand(
+      tx,
+      doc.lines
+        .filter((l) => received.get(l.id)!.gt(0))
+        .map((l) => ({
+          ingredientId: l.issue.ingredientId,
+          quantity: received.get(l.id)!,
+          unitCost: l.issue.unitCostAtIssue.toString(),
+        })),
+    );
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "INGREDIENT_RETURN_CONFIRMED",
+        entity: "IngredientReturn",
+        entityId: doc.id,
+        payloadHash: sha256Json({
+          lines: doc.lines.map((l) => ({ lineId: l.id, received: received.get(l.id)!.toString() })),
+        }),
+      },
+    });
+    return {
+      orderIds: [...new Set(doc.lines.map((l) => l.issue.orderId).filter((o): o is string => o != null))],
+    };
+  });
+
+  revalidatePath("/inventory/ingredients");
+  revalidatePath("/inventory/issues");
+  revalidatePath("/inventory/returns");
+  revalidatePath("/dashboard");
+  for (const orderId of result.orderIds) revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}
+
+/**
+ * Turn down a declaration before anything moves — the store saying nothing
+ * turned up, or the chef withdrawing what they said they'd send.
+ *
+ * One state covers both, because the difference is already stored and
+ * exact: `rejectedById === recordedById` means the declarer withdrew it,
+ * anyone else means the store refused it. A reason is required either way —
+ * "2 kg of paneer was declared and never arrived" is precisely the kind of
+ * gap this flow exists to leave a trace of.
+ *
+ * Gate: the confirm set, plus the chef who wrote it (their own row only).
+ */
+export async function rejectIngredientReturnDeclaration(
+  id: string,
+  reason: string,
+): Promise<ActionResult> {
+  try {
+    const session = await requireRole([...WRITE_ROLES, Role.KITCHEN_HEAD]);
+    const trimmed = reason?.trim() ?? "";
+    if (!trimmed) throw new ActionError("Say why this declaration is being turned down.");
+    const rejectedAt = new Date();
+
+    const result = await db.$transaction(async (tx) => {
+      const doc = await tx.ingredientReturn.findUnique({
+        where: { id },
+        select: {
+          status: true,
+          recordedById: true,
+          lines: { select: { issue: { select: { orderId: true } } } },
+        },
+      });
+      if (!doc) {
+        throw new ActionError("That declaration no longer exists — refresh and try again.");
+      }
+      // The chef is in this gate only to withdraw their OWN declaration —
+      // never to overrule the store on someone else's.
+      if (
+        session.user.role === Role.KITCHEN_HEAD &&
+        doc.recordedById !== session.user.id
+      ) {
+        throw new ActionError("You can only withdraw a declaration you raised yourself.");
+      }
+      if (doc.status !== IngredientReturnStatus.DECLARED) {
+        throw new ActionError(
+          doc.status === IngredientReturnStatus.CONFIRMED
+            ? "This return is already confirmed — the stock is back on hand and can't be undone here."
+            : "This declaration has already been turned down.",
+        );
+      }
+
+      const flipped = await tx.ingredientReturn.updateMany({
+        where: { id, status: IngredientReturnStatus.DECLARED },
+        data: {
+          status: IngredientReturnStatus.REJECTED,
+          rejectedById: session.user.id,
+          rejectedAt,
+          rejectionReason: trimmed,
+        },
+      });
+      if (flipped.count === 0) {
+        throw new ActionError("This declaration just changed — refresh the page.");
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "INGREDIENT_RETURN_DECLARATION_REJECTED",
+          entity: "IngredientReturn",
+          entityId: id,
+          payloadHash: sha256Json({ reason: trimmed }),
+        },
+      });
+      return {
+        orderIds: [
+          ...new Set(doc.lines.map((l) => l.issue.orderId).filter((o): o is string => o != null)),
+        ],
+      };
+    });
+
+    revalidatePath("/inventory/returns");
+    revalidatePath("/dashboard");
+    for (const orderId of result.orderIds) revalidatePath(`/orders/${orderId}`);
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+/**
+ * Issues with something still open against them, for the two return
+ * pickers. `returnable` is the hard ceiling (issued − CONFIRMED returns);
+ * `declarable` takes off what is already declared and waiting on the store,
+ * so the chef can't queue a second promise for the same stock.
+ */
+async function openIssueRows(opts: { orderId?: string; limit?: number }) {
   const issues = await db.ingredientIssue.findMany({
     where: opts.orderId ? { orderId: opts.orderId } : {},
     orderBy: { issuedAt: "desc" },
@@ -557,46 +1016,121 @@ export async function listReturnableIssues(opts: { orderId?: string; limit?: num
     include: {
       ingredient: { select: { name: true, sku: true, unit: true } },
       order: { select: { code: true } },
-      returnLines: { select: { quantity: true } },
+      returnLines: { select: { quantity: true, return: { select: { status: true } } } },
     },
   });
-  return issues
-    .map((i) => {
-      const returned = i.returnLines.reduce((s, l) => s.plus(toDecimal(l.quantity)), new Decimal(0));
-      return {
-        id: i.id,
-        issuedAt: i.issuedAt,
-        ingredientName: i.ingredient.name,
-        sku: i.ingredient.sku,
-        unit: i.ingredient.unit,
-        orderId: i.orderId,
-        orderCode: i.order?.code ?? null,
-        issuedQty: i.qty.toString(),
-        unitCostAtIssue: i.unitCostAtIssue.toString(),
-        returnable: remainingReturnable(i.qty.toString(), returned).toString(),
-      };
-    })
-    .filter((i) => toDecimal(i.returnable).gt(0));
+  return issues.map((i) => {
+    const sumWhere = (status: IngredientReturnStatus) =>
+      i.returnLines
+        .filter((l) => l.return.status === status)
+        .reduce((s, l) => s.plus(toDecimal(l.quantity)), new Decimal(0));
+    const returned = sumWhere(IngredientReturnStatus.CONFIRMED);
+    const declared = sumWhere(IngredientReturnStatus.DECLARED);
+    return {
+      id: i.id,
+      issuedAt: i.issuedAt,
+      ingredientName: i.ingredient.name,
+      sku: i.ingredient.sku,
+      unit: i.ingredient.unit,
+      orderId: i.orderId,
+      orderCode: i.order?.code ?? null,
+      issuedQty: i.qty.toString(),
+      unitCostAtIssue: i.unitCostAtIssue.toString(),
+      returnable: remainingReturnable(i.qty.toString(), returned).toString(),
+      pendingDeclared: declared.toString(),
+      declarable: remainingReturnable(i.qty.toString(), returned.plus(declared)).toString(),
+    };
+  });
 }
+
+/**
+ * Issues that still have something returnable, for the store's direct
+ * return screen. Capped at CONFIRMED returns only — a pending declaration
+ * has moved nothing, so it must not stop the store booking in stock that
+ * physically arrived at the counter.
+ */
+export async function listReturnableIssues(opts: { orderId?: string; limit?: number } = {}) {
+  await requireRole(WRITE_ROLES);
+  const rows = await openIssueRows(opts);
+  return rows.filter((i) => toDecimal(i.returnable).gt(0));
+}
+
+/** The same list for the chef's declaration screen, capped at what isn't
+ *  already promised to the store. */
+export async function listDeclarableIssues(opts: { orderId?: string; limit?: number } = {}) {
+  await requireRole(DECLARE_ROLES);
+  const rows = await openIssueRows(opts);
+  return rows.filter((i) => toDecimal(i.declarable).gt(0));
+}
+
+/** Columns every return screen needs, so the list, the confirm page and the
+ *  order panel all read the same row shape. */
+const RETURN_SELECT = {
+  id: true,
+  status: true,
+  returnedAt: true,
+  notes: true,
+  confirmedAt: true,
+  confirmationNote: true,
+  rejectedAt: true,
+  rejectionReason: true,
+  rejectedById: true,
+  recordedById: true,
+  recordedBy: { select: { name: true } },
+  confirmedBy: { select: { name: true } },
+  rejectedBy: { select: { name: true } },
+  createdAt: true,
+  lines: {
+    select: {
+      id: true,
+      quantity: true,
+      declaredQuantity: true,
+      unitCost: true,
+      reason: true,
+      issue: {
+        select: {
+          id: true,
+          qty: true,
+          ingredient: { select: { name: true, unit: true } },
+          order: { select: { id: true, code: true } },
+        },
+      },
+    },
+  },
+} satisfies Prisma.IngredientReturnSelect;
+
+export type IngredientReturnRow = Prisma.IngredientReturnGetPayload<{
+  select: typeof RETURN_SELECT;
+}>;
 
 export async function listRecentReturns(opts: { limit?: number } = {}) {
   await requireRole(READ_ROLES);
   return db.ingredientReturn.findMany({
     orderBy: { returnedAt: "desc" },
     take: opts.limit ?? 50,
-    include: {
-      recordedBy: { select: { name: true } },
-      lines: {
-        include: {
-          issue: {
-            select: {
-              ingredient: { select: { name: true, unit: true } },
-              order: { select: { id: true, code: true } },
-            },
-          },
-        },
-      },
+    select: RETURN_SELECT,
+  });
+}
+
+/** One return / declaration, for the store's confirm screen. */
+export async function getIngredientReturn(id: string): Promise<IngredientReturnRow | null> {
+  await requireRole(READ_ROLES);
+  return db.ingredientReturn.findUnique({ where: { id }, select: RETURN_SELECT });
+}
+
+/**
+ * Declarations waiting on the store — their queue, and the chef's "still
+ * waiting" list. `mine` scopes it to the caller's own declarations.
+ */
+export async function listPendingReturnDeclarations(opts: { mine?: boolean } = {}) {
+  const session = await requireRole(READ_ROLES);
+  return db.ingredientReturn.findMany({
+    where: {
+      status: IngredientReturnStatus.DECLARED,
+      ...(opts.mine ? { recordedById: session.user.id } : {}),
     },
+    orderBy: { returnedAt: "asc" },
+    select: RETURN_SELECT,
   });
 }
 

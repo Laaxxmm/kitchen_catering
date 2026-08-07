@@ -1,3 +1,4 @@
+import { IngredientReturnStatus } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { toDecimal } from "./money";
@@ -87,8 +88,12 @@ export async function computeOrderPnL(orderId: string): Promise<OrderPnL | null>
   // …minus what came back. The return line carries the issue's own unit cost,
   // so the credit is at the price this order was charged, and it reaches this
   // order only because the line points at an issue that belongs to it.
+  // CONFIRMED only: the chef declaring that 2 kg is on its way back does not
+  // credit this order's food cost. The stock has to physically reach the
+  // store and be counted in first — otherwise the event reads cheaper than
+  // it is, on a promise.
   const returnLines = await db.ingredientReturnLine.findMany({
-    where: { issue: { orderId } },
+    where: { issue: { orderId }, return: { status: IngredientReturnStatus.CONFIRMED } },
     select: {
       quantity: true,
       unitCost: true,

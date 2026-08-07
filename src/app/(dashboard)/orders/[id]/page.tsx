@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ChefRequisitionStatus, ManpowerRequestStatus, OrderChannel, OrderStatus, ProductionJobItemStatus, Role } from "@prisma/client";
+import { ChefRequisitionStatus, IngredientReturnStatus, ManpowerRequestStatus, OrderChannel, OrderStatus, ProductionJobItemStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -33,7 +33,7 @@ import {
   REVISABLE_ORDER_STATUSES,
   STATUS_LABEL,
 } from "@/lib/order-status";
-import { formatINR } from "@/lib/money";
+import { formatINR, toDecimal } from "@/lib/money";
 import { formatIST } from "@/lib/time";
 import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { StatusPill, type PillTone } from "@/components/ik/StatusPill";
@@ -49,6 +49,7 @@ import { OrderCostSummary } from "./_components/OrderCostSummary";
 import { FeedbackAllocation } from "./_components/FeedbackAllocation";
 import { RAISE_ROLES as MANPOWER_RAISE_ROLES, can } from "../../manpower/_components/gates";
 import { STATUS_META as MANPOWER_STATUS_META } from "../../manpower/_components/display";
+import { RETURN_STATUS_META } from "../../inventory/returns/_components/status";
 
 export const dynamic = "force-dynamic";
 
@@ -130,6 +131,10 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // Visibility is not permission: nothing on this panel records anything,
   // and none of it touches the order's status.
   const canRecordKitchenReturn = isManager || role === Role.STORE_KEEPER;
+  // The chef's own half of the handover: declare what's going back. Mirrors
+  // declareIngredientReturn's gate. Nothing here moves stock — the store's
+  // confirmation does — which is exactly why the chef may do it.
+  const canDeclareKitchenReturn = isManager || role === Role.KITCHEN_HEAD;
   const canRecordFnbReturn = isManager || isFnb || role === Role.STORE_KEEPER;
   // getOrderBanquetLedger has its own read gate — only call it for the roles
   // it admits, or the page throws for sales.
@@ -142,8 +147,17 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
       select: {
         id: true,
         quantity: true,
+        declaredQuantity: true,
         reason: true,
-        return: { select: { returnedAt: true } },
+        return: {
+          select: {
+            id: true,
+            status: true,
+            returnedAt: true,
+            rejectionReason: true,
+            recordedBy: { select: { name: true } },
+          },
+        },
         issue: { select: { ingredient: { select: { name: true, unit: true } } } },
       },
     }),
@@ -759,8 +773,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
               <h3 className="mb-1 font-medium text-[14px] text-ik-ink">Returned to store</h3>
               <p className="mb-3 text-[12px] text-ik-ink-3">
-                Stock handed back after the event. The store books it in against this order — it goes
-                back on the shelf as sellable stock.
+                Stock handed back after the event. The chef declares what&apos;s going back, the store
+                confirms what arrived — and that confirmation is what puts it on the shelf as
+                sellable stock and credits this order.
               </p>
 
               {kitchenIssueCount > 0 && (
@@ -772,26 +787,68 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                     <p className="text-[12.5px] text-ik-ink-3">Nothing returned yet.</p>
                   ) : (
                     <ul className="grid gap-1">
-                      {kitchenReturnLines.map((l) => (
-                        <li key={l.id} className="flex items-baseline justify-between gap-2">
-                          <span>
-                            {l.issue.ingredient.name}
-                            <span className="ml-1 text-[11.5px] text-ik-ink-3">
-                              {l.reason} · {formatIST(l.return.returnedAt, "d MMM")}
-                            </span>
-                          </span>
-                          <span className="shrink-0 font-mono text-[12px]">
-                            {l.quantity.toString()} {l.issue.ingredient.unit}
-                          </span>
-                        </li>
-                      ))}
+                      {kitchenReturnLines.map((l) => {
+                        const meta = RETURN_STATUS_META[l.return.status];
+                        const declared = l.declaredQuantity;
+                        // Only worth spelling out when the store received
+                        // something other than what was declared — that gap
+                        // is the point of the two-step.
+                        const short =
+                          declared != null &&
+                          l.return.status === IngredientReturnStatus.CONFIRMED &&
+                          !toDecimal(l.quantity).eq(toDecimal(declared));
+                        return (
+                          <li key={l.id} className="grid gap-0.5">
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span>
+                                {l.issue.ingredient.name}
+                                <span className="ml-1 text-[11.5px] text-ik-ink-3">
+                                  {l.reason} · {formatIST(l.return.returnedAt, "d MMM")}
+                                </span>
+                              </span>
+                              <span className="shrink-0 font-mono text-[12px]">
+                                {l.quantity.toString()} {l.issue.ingredient.unit}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-ik-ink-3">
+                              <StatusPill tone={meta.tone}>{meta.label}</StatusPill>
+                              {declared != null && (
+                                <span>declared by {l.return.recordedBy.name}</span>
+                              )}
+                              {short && (
+                                <span className="font-medium text-amber-700">
+                                  declared {declared!.toString()} {l.issue.ingredient.unit}, received{" "}
+                                  {l.quantity.toString()}
+                                </span>
+                              )}
+                              {l.return.status === IngredientReturnStatus.REJECTED &&
+                                l.return.rejectionReason && (
+                                  <span className="text-alert">{l.return.rejectionReason}</span>
+                                )}
+                              <Link
+                                href={`/inventory/returns/${l.return.id}`}
+                                className="text-brand hover:underline"
+                              >
+                                open
+                              </Link>
+                            </div>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
-                  {canRecordKitchenReturn && (
-                    <Link href={`/inventory/returns/new?orderId=${order.id}`} className="mt-1 inline-block">
-                      <Button size="sm" variant="outline">Record kitchen return</Button>
-                    </Link>
-                  )}
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {canDeclareKitchenReturn && (
+                      <Link href={`/inventory/returns/declare?orderId=${order.id}`}>
+                        <Button size="sm" variant="outline">Declare leftover return</Button>
+                      </Link>
+                    )}
+                    {canRecordKitchenReturn && (
+                      <Link href={`/inventory/returns/new?orderId=${order.id}`}>
+                        <Button size="sm" variant="outline">Record kitchen return</Button>
+                      </Link>
+                    )}
+                  </div>
                 </div>
               )}
 

@@ -403,6 +403,8 @@ model User {
   ingredientIssues                IngredientIssue[]
   ingredientReceiptsRecorded      IngredientReceipt[]      @relation("IngredientReceiptRecordedBy")
   ingredientReturnsRecorded       IngredientReturn[]       @relation("IngredientReturnRecordedBy")
+  ingredientReturnsConfirmed      IngredientReturn[]       @relation("IngredientReturnConfirmedBy")
+  ingredientReturnsRejected       IngredientReturn[]       @relation("IngredientReturnRejectedBy")
   ingredientAdjustmentsRecorded   IngredientAdjustment[]   @relation("IngredientAdjustmentAdjustedBy")
   stockTransfersRecorded          StockTransfer[]          @relation("StockTransferRecordedBy")
   quotesCreated                   Quote[]                  @relation("QuoteCreatedBy")
@@ -814,17 +816,58 @@ model IngredientIssue {
 // lands on the order that was charged, at the price it was charged at. A
 // return tied only to the item would credit whichever event happened to be
 // open — which is exactly why food cost is overstated today.
+//
+// Custody handover. The chef DECLARES what they are sending back; the store
+// CONFIRMS what physically turned up, adjusting the quantity where the two
+// differ, and only that confirmation moves stock. A CONFIRMED document is
+// the only one that ever touched on-hand — DECLARED and REJECTED rows have
+// moved nothing and must never be counted as returned stock.
+//
+// The store's own one-step counter path still exists: it inserts straight
+// at CONFIRMED with no declaration behind it.
 model IngredientReturn {
-  id           String   @id @default(cuid())
-  returnedAt   DateTime
+  id     String                 @id @default(cuid())
+  // CONFIRMED is the default because that was the only state this table had
+  // — a bare insert keeps the old one-step meaning, and pre-existing rows
+  // backfill to it.
+  status IngredientReturnStatus @default(CONFIRMED)
+
+  returnedAt DateTime
+  // Who wrote the document: the chef on a declaration, the store keeper on
+  // a direct counter return.
   recordedById String
-  recordedBy   User     @relation("IngredientReturnRecordedBy", fields: [recordedById], references: [id])
+  recordedBy   User   @relation("IngredientReturnRecordedBy", fields: [recordedById], references: [id])
   notes        String?
   createdAt    DateTime @default(now())
+
+  // Who booked the stock in, and when. Always set on a CONFIRMED row —
+  // equal to recordedBy on the direct path, so "who took delivery" reads
+  // off one column without a "was there a declaration?" branch.
+  confirmedById String?
+  confirmedBy   User?     @relation("IngredientReturnConfirmedBy", fields: [confirmedById], references: [id])
+  confirmedAt   DateTime?
+  // Note the store left when what arrived differed from what was declared.
+  confirmationNote String?
+
+  // Turned down before anything moved. Covers both directions and the
+  // difference is readable: rejectedById == recordedById means the chef
+  // withdrew it, anyone else means the store refused it.
+  rejectedById    String?
+  rejectedBy      User?     @relation("IngredientReturnRejectedBy", fields: [rejectedById], references: [id])
+  rejectedAt      DateTime?
+  rejectionReason String?
 
   lines IngredientReturnLine[]
 
   @@index([returnedAt])
+  // The store's pending-declaration queue.
+  @@index([status])
+}
+
+enum IngredientReturnStatus {
+  DECLARED
+  CONFIRMED
+  REJECTED
 }
 
 model IngredientReturnLine {
@@ -833,7 +876,15 @@ model IngredientReturnLine {
   return   IngredientReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
   issueId  String
   issue    IngredientIssue  @relation(fields: [issueId], references: [id])
+  // What this document is for right now: the declared figure while it is
+  // DECLARED, the received figure once the store has confirmed it. Only
+  // counts as moved stock when the parent is CONFIRMED.
   quantity Decimal          @db.Decimal(14, 3)
+  // What the chef said they were sending. Set once at declaration and never
+  // overwritten, so "declared 2 kg, received 1.5 kg" survives confirmation —
+  // same shape as ManpowerRequest.requested* vs approved*. NULL means the
+  // store recorded this line directly, with no declaration behind it.
+  declaredQuantity Decimal? @db.Decimal(14, 3)
   // Snapshot of the issue's unitCostAtIssue: the value credited back is
   // quantity × this, never quantity × today's moving average.
   unitCost Decimal          @db.Decimal(12, 4)

@@ -172,6 +172,33 @@ export const IngredientReturnInput = z.object({
 });
 export type IngredientReturnInputT = z.infer<typeof IngredientReturnInput>;
 
+// The chef declaring what they are sending back to the store. Identical
+// shape to the store's direct return — same issue link, same per-line
+// reason — because a declaration IS a return that hasn't been confirmed.
+export const IngredientReturnDeclarationInput = IngredientReturnInput;
+export type IngredientReturnDeclarationInputT = IngredientReturnInputT;
+
+// The store confirming a declaration: what actually turned up, line by line.
+// `receivedQty` may be "0" — "the chef declared it, nothing arrived" is a
+// real outcome and the whole point of confirming separately. Blank is NOT
+// allowed here (decimalString permits ""), because a blank quantity would
+// reach `new Decimal("")` and throw.
+export const IngredientReturnConfirmInput = z.object({
+  id: z.string().min(1),
+  note: z.string().max(500).nullable().optional(),
+  lines: z
+    .array(
+      z.object({
+        lineId: z.string().min(1),
+        receivedQty: decimalString
+          .refine((s) => s !== "", "Enter what actually arrived (0 if nothing did)")
+          .refine((s) => !s.startsWith("-"), "Received quantity can't be negative"),
+      }),
+    )
+    .min(1, "Nothing to confirm"),
+});
+export type IngredientReturnConfirmInputT = z.infer<typeof IngredientReturnConfirmInput>;
+
 // Moving stock between the three stores. Source and destination items are
 // picked explicitly — never matched by name, since "Aluminium Foil" and
 // "Aluminium Foil [Roll]" are different rows with possibly different units.

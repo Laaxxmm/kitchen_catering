@@ -1,4 +1,4 @@
-import { StockStore } from "@prisma/client";
+import { IngredientReturnStatus, StockStore } from "@prisma/client";
 import { db } from "@/server/db";
 import { toDecimal } from "@/lib/money";
 
@@ -55,10 +55,14 @@ function bucket(b: Buckets, at: Date, from: Date, to: Date, id: string, qty: num
   else if (at <= to) b.window.set(id, (b.window.get(id) ?? 0) + qty);
 }
 
-/** Stock the kitchen sent back, per ingredient. */
+/** Stock the kitchen sent back, per ingredient. CONFIRMED only — a
+ *  declaration the store hasn't counted in yet has moved nothing, so it
+ *  would show up here as a movement that never happened. */
 async function kitchenReturnBuckets(from: Date, to: Date): Promise<Buckets> {
   const rows = await db.ingredientReturnLine.findMany({
-    where: { return: { returnedAt: { lte: to } } },
+    where: {
+      return: { returnedAt: { lte: to }, status: IngredientReturnStatus.CONFIRMED },
+    },
     select: {
       quantity: true,
       issue: { select: { ingredientId: true } },

@@ -61,6 +61,19 @@ export interface StorePO {
   vendor: string;
   total: string;
 }
+/** A kitchen return the chef has declared and the store hasn't counted in
+ *  yet. Real work on this bench: someone is walking stock to the counter,
+ *  and neither the stock nor the order's cost moves until it's confirmed. */
+export interface StoreReturnDeclaration {
+  id: string;
+  /** ISO — the date the chef says it's coming back. */
+  declaredAt: string;
+  declaredBy: string;
+  orderCode: string | null;
+  lines: number;
+  /** "2 kg Paneer · 5 kg Onion" — enough to recognise the trolley. */
+  summary: string;
+}
 
 // What the store should DO next for each PO status.
 const PO_LABEL: Partial<Record<VendorPOStatus, string>> = {
@@ -92,12 +105,15 @@ export function StoreBoard({
   fnbReqs,
   pos,
   revised,
+  returnDeclarations,
 }: {
   chefReqs: StoreReq[];
   fnbReqs: StoreFnbReq[];
   pos: StorePO[];
   /** Orders a manager changed that the store hasn't re-checked yet. */
   revised: RevisedOrderCard[];
+  /** Kitchen returns the chef has declared, waiting to be counted in. */
+  returnDeclarations: StoreReturnDeclaration[];
 }) {
   // A changed order outranks every other job on this bench — issuing to a
   // stale requisition is the expensive mistake — so it opens first.
@@ -105,6 +121,12 @@ export function StoreBoard({
     { key: "revised", label: "Revised orders", hint: "Changed — re-check", count: revised.length },
     { key: "fulfil", label: "Chef requests", hint: "Issue from stock", count: chefReqs.length },
     { key: "fnb", label: "F&B requests", hint: "Cutlery & disposables", count: fnbReqs.length },
+    {
+      key: "returns",
+      label: "Kitchen returns",
+      hint: "Count in & confirm",
+      count: returnDeclarations.length,
+    },
     { key: "stock", label: "My purchase orders", hint: "Buy & receive", count: pos.length },
   ];
 
@@ -141,7 +163,7 @@ export function StoreBoard({
       Number(PO_NEEDS_ACTION.has(b.status)) - Number(PO_NEEDS_ACTION.has(a.status)),
   );
 
-  const total = chefReqs.length + fnbReqs.length + pos.length;
+  const total = chefReqs.length + fnbReqs.length + pos.length + returnDeclarations.length;
 
   return (
     <div>
@@ -153,6 +175,7 @@ export function StoreBoard({
         segments={[
           { label: "Chef requests", value: chefReqs.length, tone: "approval" },
           { label: "F&B requests", value: fnbReqs.length, tone: "production" },
+          { label: "Kitchen returns", value: returnDeclarations.length, tone: "low" },
           { label: "Purchase orders", value: pos.length, tone: "done" },
         ]}
       />
@@ -194,6 +217,44 @@ export function StoreBoard({
                   createdAt={r.createdAt}
                   revisedBand={bandFor(r.id, r.orderCode)}
                 />
+              )}
+            </CappedList>
+          ) : active === "returns" ? (
+            <CappedList
+              items={returnDeclarations}
+              className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+              keyOf={(d) => d.id}
+            >
+              {(d) => (
+                <li
+                  key={d.id}
+                  className={
+                    "relative flex flex-col overflow-hidden rounded-lg border border-amber/45 bg-ik-card transition " +
+                    "hover:shadow-[0_3px_18px_rgba(20,25,20,0.07)]"
+                  }
+                >
+                  <span className="absolute inset-y-0 left-0 w-1 bg-amber" aria-hidden />
+                  <div className="flex h-full flex-col gap-2 p-4 pl-5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="font-mono text-[12px] text-ik-ink-3">
+                        {d.orderCode ?? "no order"}
+                      </span>
+                      <span className="rounded-full bg-amber-wash px-2 py-0.5 text-[10px] font-bold tracking-wide text-amber-700">
+                        WAITING
+                      </span>
+                    </div>
+                    <div className="text-[20px] font-bold leading-none tracking-tight text-ik-ink">
+                      {formatIST(new Date(d.declaredAt), "EEE d MMM")}
+                    </div>
+                    <div className="truncate text-[13px] font-medium text-ik-ink">
+                      {d.declaredBy} is sending {d.lines} {d.lines === 1 ? "item" : "items"} back
+                    </div>
+                    <div className="text-[12px] text-ik-ink-3">{d.summary}</div>
+                    <Link href={`/inventory/returns/${d.id}`} className="mt-auto pt-1">
+                      <Button className="h-10 w-full">Count in & confirm →</Button>
+                    </Link>
+                  </div>
+                </li>
               )}
             </CappedList>
           ) : (

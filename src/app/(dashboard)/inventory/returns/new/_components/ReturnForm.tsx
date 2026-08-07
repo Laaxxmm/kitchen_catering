@@ -27,13 +27,31 @@ export interface ReturnableIssue {
 interface Props {
   issues: ReturnableIssue[];
   onSubmit: (input: IngredientReturnInputT) => Promise<ActionResultWith<{ id: string }>>;
+  /** Copy + destination are all that differ between the store booking stock
+   *  in at the counter and the chef declaring what they're sending back —
+   *  the table, the per-issue cap and the payload are identical, so this is
+   *  one component with the wording passed in. */
+  submitLabel?: string;
+  successMessage?: string;
+  redirectTo?: string;
+  /** Heading over the per-issue cap column. */
+  capLabel?: string;
+  emptyMessage?: string;
 }
 
 // Offered, not enforced — the store can type anything, but the three common
 // answers shouldn't need typing.
 const REASONS = ["Unused", "Excess", "Wrong item"];
 
-export function ReturnForm({ issues, onSubmit }: Props) {
+export function ReturnForm({
+  issues,
+  onSubmit,
+  submitLabel = "Record return",
+  successMessage = "Return recorded — stock is back on hand and the order has been credited",
+  redirectTo = "/inventory/returns",
+  capLabel = "Still returnable",
+  emptyMessage = "Nothing is returnable — every recent issue has already come back in full.",
+}: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [returnedAt, setReturnedAt] = useState(() => new Date().toISOString().slice(0, 10));
@@ -76,8 +94,8 @@ export function ReturnForm({ issues, onSubmit }: Props) {
           toast.error(res.error);
           return;
         }
-        toast.success("Return recorded — stock is back on hand and the order has been credited");
-        router.push("/inventory/returns");
+        toast.success(successMessage);
+        router.push(redirectTo);
         router.refresh();
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
@@ -88,9 +106,7 @@ export function ReturnForm({ issues, onSubmit }: Props) {
 
   if (issues.length === 0) {
     return (
-      <p className="text-[13px] text-ik-ink-3">
-        Nothing is returnable — every recent issue has already come back in full.
-      </p>
+      <p className="text-[13px] text-ik-ink-3">{emptyMessage}</p>
     );
   }
 
@@ -119,7 +135,7 @@ export function ReturnForm({ issues, onSubmit }: Props) {
             <TableHead>Ingredient</TableHead>
             <TableHead>Order</TableHead>
             <TableHead className="text-right">Issued</TableHead>
-            <TableHead className="text-right">Still returnable</TableHead>
+            <TableHead className="text-right">{capLabel}</TableHead>
             <TableHead className="text-right">Cost at issue</TableHead>
             <TableHead className="w-32">Return qty</TableHead>
             <TableHead className="w-56">Reason</TableHead>
@@ -177,7 +193,7 @@ export function ReturnForm({ issues, onSubmit }: Props) {
 
       <div className="flex gap-2">
         <Button type="submit" disabled={pending}>
-          {pending ? "Saving…" : "Record return"}
+          {pending ? "Saving…" : submitLabel}
         </Button>
         <Button type="button" variant="outline" onClick={() => router.back()}>
           Cancel
