@@ -25,7 +25,7 @@ import {
 import { sha256Json } from "@/lib/audit";
 import { toDecimal } from "@/lib/money";
 import { overpayRefusal, payRefusal } from "@/lib/vendor-bill-gates";
-import { settledStatus } from "@/lib/customer-invoice-gates";
+import { paymentRefusal, settledStatus } from "@/lib/customer-invoice-gates";
 import type { Prisma } from "@prisma/client";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
@@ -80,11 +80,15 @@ async function recordCustomerInvoicePaymentInner(raw: unknown): Promise<{ ok: tr
     const invoice = await tx.customerInvoice.findUnique({
       where: { id: input.invoiceId },
       select: {
-        id: true, status: true, grandTotal: true, orderId: true,
+        id: true, invoiceNo: true, kind: true, status: true, grandTotal: true, orderId: true,
         onHoldAt: true, onHoldReason: true,
       },
     });
     if (!invoice) throw new ActionError("Invoice not found");
+    // A proforma is an estimate, not a receivable — settling one used to
+    // close the order as paid before anyone had cooked it.
+    const kindRefusal = paymentRefusal({ invoiceNo: invoice.invoiceNo, kind: invoice.kind });
+    if (kindRefusal) throw new ActionError(kindRefusal);
     // Billing hold — wrong address / wrong client / wrong items / payment
     // dispute. No payments can land until accounts releases the hold.
     if (invoice.onHoldAt) {

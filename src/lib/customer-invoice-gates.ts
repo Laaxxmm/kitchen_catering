@@ -1,4 +1,4 @@
-import { CustomerInvoiceStatus } from "@prisma/client";
+import { CustomerInvoiceKind, CustomerInvoiceStatus } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { humanizeStatus } from "@/lib/order-status";
 
@@ -45,6 +45,32 @@ export const ORDER_INVOICE_INITIAL = {
  */
 export function mayReachCustomer(status: CustomerInvoiceStatus): boolean {
   return status !== CustomerInvoiceStatus.DRAFT;
+}
+
+/**
+ * Why money must not be recorded against this document.
+ *
+ * A PROFORMA is born ISSUED, carries the full order value and names the
+ * order — which made it look, to every payment path, exactly like a bill
+ * waiting to be settled. It is not one: `EXCLUDE_PROFORMA` keeps it out of
+ * receivables, the GST export and the P&L, so a payment landing here is cash
+ * that exists nowhere the business can see it. Worse, settling it in full
+ * flipped the ORDER to COMPLETED — an event closed and paid before anyone
+ * had cooked it.
+ *
+ * The one predicate behind every customer-side payment route, so no caller
+ * can be the one that forgets.
+ */
+export function paymentRefusal(input: {
+  invoiceNo: string;
+  kind: CustomerInvoiceKind;
+}): string | null {
+  if (input.kind !== CustomerInvoiceKind.PROFORMA) return null;
+  return (
+    `${input.invoiceNo} is a proforma — an estimate of what the event will cost, not a bill. ` +
+    `Money recorded here would sit outside receivables and would close the order as paid. ` +
+    `Raise the tax invoice from the order once it has been delivered, and record the payment against that.`
+  );
 }
 
 /**

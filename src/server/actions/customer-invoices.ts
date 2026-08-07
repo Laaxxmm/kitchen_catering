@@ -34,6 +34,7 @@ import {
   approveRefusal,
   issueRefusal,
   mayReachCustomer,
+  paymentRefusal,
   settledStatus,
 } from "@/lib/customer-invoice-gates";
 import { indefineGstin, indefineCompanyName, indefineStateCode } from "@/lib/org";
@@ -760,11 +761,16 @@ async function markCustomerInvoicePaidInner(input: MarkPaidInput): Promise<{ ok:
     const invoice = await tx.customerInvoice.findUnique({
       where: { id: invoiceId },
       select: {
-        id: true, status: true, grandTotal: true, amountPaid: true, orderId: true,
+        id: true, invoiceNo: true, kind: true, status: true, grandTotal: true,
+        amountPaid: true, orderId: true,
         onHoldAt: true, onHoldReason: true,
       },
     });
     if (!invoice) throw new ActionError("Invoice not found");
+    // A proforma is an estimate, not a receivable. It is born ISSUED, so it
+    // sailed past the status checks below and closed the order as paid.
+    const kindRefusal = paymentRefusal({ invoiceNo: invoice.invoiceNo, kind: invoice.kind });
+    if (kindRefusal) throw new ActionError(kindRefusal);
     // Billing hold blocks every payment path, one-click included —
     // otherwise "Mark paid" would be a hold bypass.
     if (invoice.onHoldAt) {

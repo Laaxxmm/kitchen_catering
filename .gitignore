@@ -58,6 +58,9 @@ prisma/*.db-journal
 # runtime uploads
 public/uploads/
 
+# e2e supplier-invoice attachments (UPLOAD_ROOT in vitest.e2e.config.ts)
+tests/e2e/.uploads/
+
 # local DB dumps (contain real data, never commit)
 backups/
 
