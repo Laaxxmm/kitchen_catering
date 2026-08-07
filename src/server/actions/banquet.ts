@@ -70,8 +70,12 @@ const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY];
 // Stock movements (issue out / return in) include the store keeper — in
 // this operation they physically run the store counter alongside F&B.
 const ISSUE_ROLES = [...WRITE_ROLES, Role.STORE_KEEPER];
-// The store keeper also records receipts (stock IN). Catalogue management
-// (add/edit/delete items) stays with WRITE_ROLES; setting a figure by hand
+// Catalogue management — add, edit, deactivate, delete — is management-only,
+// the same gate as the kitchen catalogue. Deactivating takes an item out of
+// every picker and deleting removes it outright, so they belong with the
+// upsert below rather than with the movements.
+const CATALOG_ROLES = [Role.ADMIN, Role.MANAGER];
+// The store keeper also records receipts (stock IN). Setting a figure by hand
 // (adjustStoreStock / the bulk count below) is admin/manager only.
 const RECEIPT_ROLES = [...WRITE_ROLES, Role.STORE_KEEPER];
 const READ_ROLES: Role[] = [...WRITE_ROLES, Role.STORE_KEEPER];
@@ -96,7 +100,7 @@ async function upsertBanquetItemInner(
   // Catalogue is management-only, create AND edit. Letting the store / F&B
   // add or re-unit items produced duplicates and mixed units, which is what
   // stranded GRNs and corrupted stock. Everyone else picks from the list.
-  const session = await requireRole([Role.ADMIN, Role.MANAGER]);
+  const session = await requireRole(CATALOG_ROLES);
   const input = BanquetItemInput.parse(raw);
 
   const row = await db.$transaction(async (tx) => {
@@ -192,7 +196,7 @@ export async function deactivateBanquetItem(id: string): Promise<ActionResult> {
 }
 
 async function deactivateBanquetItemInner(id: string): Promise<{ ok: true }> {
-  const session = await requireRole(WRITE_ROLES);
+  const session = await requireRole(CATALOG_ROLES);
   await db.$transaction(async (tx) => {
     await tx.banquetItem.update({ where: { id }, data: { active: false } });
     await tx.auditLog.create({
@@ -217,7 +221,7 @@ export async function deleteBanquetItem(id: string): Promise<ActionResult> {
 }
 
 async function deleteBanquetItemInner(id: string): Promise<{ ok: true }> {
-  const session = await requireRole(WRITE_ROLES);
+  const session = await requireRole(CATALOG_ROLES);
   await db.$transaction(async (tx) => {
     // History guard runs INSIDE the tx so the counts and the delete see one
     // consistent snapshot — a concurrent receipt / issue / requisition / PO

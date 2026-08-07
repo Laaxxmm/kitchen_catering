@@ -32,7 +32,11 @@ export default async function IngredientDetailPage({ params }: { params: Promise
 
   const session = await auth();
   const role = session?.user?.role as Role | undefined;
-  const canMerge = role === Role.ADMIN || role === Role.MANAGER;
+  // Editing, hiding and merging the catalogue entry are all management-only
+  // (see CATALOG_ROLES in actions/inventory.ts). The store and the chef reach
+  // this page to read the item and its movement history.
+  const canManage = role === Role.ADMIN || role === Role.MANAGER;
+  const canMerge = canManage;
   // Target picker: active ingredients only, minus this one.
   const mergeTargets = canMerge
     ? (await listIngredients({ active: true }))
@@ -64,33 +68,36 @@ export default async function IngredientDetailPage({ params }: { params: Promise
         actions={
           <div className="flex gap-2">
             <Link href="/inventory/ingredients"><Button variant="outline">Back</Button></Link>
-            {ingredient.active ? (
-              <ActionResultButton action={deactivate} variant="outline" successMessage="Ingredient hidden — reactivate any time">
-                Hide (deactivate)
-              </ActionResultButton>
-            ) : (
-              <ActionResultButton action={reactivate} successMessage="Ingredient visible again">
-                Unhide (reactivate)
-              </ActionResultButton>
-            )}
+            {canManage &&
+              (ingredient.active ? (
+                <ActionResultButton action={deactivate} variant="outline" successMessage="Ingredient hidden — reactivate any time">
+                  Hide (deactivate)
+                </ActionResultButton>
+              ) : (
+                <ActionResultButton action={reactivate} successMessage="Ingredient visible again">
+                  Unhide (reactivate)
+                </ActionResultButton>
+              ))}
           </div>
         }
       />
-      <IngredientForm
-        code={ingredient.sku}
-        defaults={{
-          name: ingredient.name,
-          category: ingredient.category,
-          subStore: ingredient.subStore,
-          unit: ingredient.unit,
-          reorderLevel: ingredient.reorderLevel.toString(),
-          hsnSac: ingredient.hsnSac,
-          gstRatePct: ingredient.gstRatePct.toString(),
-        }}
-        hideOpeningFields
-        onSubmit={update}
-        submitLabel="Save changes"
-      />
+      {canManage && (
+        <IngredientForm
+          code={ingredient.sku}
+          defaults={{
+            name: ingredient.name,
+            category: ingredient.category,
+            subStore: ingredient.subStore,
+            unit: ingredient.unit,
+            reorderLevel: ingredient.reorderLevel.toString(),
+            hsnSac: ingredient.hsnSac,
+            gstRatePct: ingredient.gstRatePct.toString(),
+          }}
+          hideOpeningFields
+          onSubmit={update}
+          submitLabel="Save changes"
+        />
+      )}
       {canMerge && (
         <MergeIngredient sourceId={id} sourceName={ingredient.name} targets={mergeTargets} />
       )}

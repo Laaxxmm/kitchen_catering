@@ -54,6 +54,13 @@ export async function createPettyCashFloat(raw: unknown): Promise<ActionResultWi
 async function createPettyCashFloatInner(raw: unknown): Promise<{ ok: true; id: string }> {
   const session = await requireRole(PETTY_MANAGE);
   const input = PettyCashFloatInput.parse(raw);
+  // decimalString lets "" through as "not provided", and an empty opening
+  // balance then reached Prisma as `openingBalance: ""` — a raw
+  // PrismaClientValidationError and a "Something went wrong" toast. Blank is
+  // not zero: say so. (Same guard shape as the vendor-bill line amounts.)
+  if (!input.openingBalance.trim()) {
+    throw new ActionError("Enter the opening balance the tin starts with (0 is fine).");
+  }
   const f = await db.$transaction(async (tx) => {
     const created = await tx.pettyCashFloat.create({
       data: {

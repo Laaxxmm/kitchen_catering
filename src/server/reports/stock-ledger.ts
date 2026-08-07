@@ -101,7 +101,14 @@ async function kitchenLedger(from: Date, to: Date): Promise<LedgerRow[]> {
     await Promise.all([
     db.ingredient.findMany({
       where: { active: true },
-      select: { id: true, sku: true, name: true, unit: true, category: true, avgUnitCost: true },
+      select: {
+        id: true, sku: true, name: true, unit: true, category: true, avgUnitCost: true,
+        // Stock the item started life with. It has no movement document
+        // behind it — the catalogue import and the new-ingredient form both
+        // write it straight onto the row — so it has to be added in here or
+        // every balance below it is short by the opening figure.
+        openingQty: true,
+      },
     }),
     db.ingredientReceipt.groupBy({ by: ["ingredientId"], _sum: { qty: true }, where: { receivedAt: { lt: from } } }),
     db.ingredientIssue.groupBy({ by: ["ingredientId"], _sum: { qty: true }, where: { issuedAt: { lt: from } } }),
@@ -122,11 +129,13 @@ async function kitchenLedger(from: Date, to: Date): Promise<LedgerRow[]> {
   const rI = sum(recIn, "qty"), iI = sum(issIn, "qty"), aI = sum(adjIn, "delta");
 
   return ingredients.map((g) => {
-    // Returns and transfers-in are stock coming back on hand; transfers-out
-    // leave like an issue. Every movement that touches onHandQty has to be
-    // here or the closing balance stops matching the item's actual stock.
+    // Opening stock plus everything before the window. Returns and
+    // transfers-in are stock coming back on hand; transfers-out leave like an
+    // issue. Every movement that touches onHandQty has to be here or the
+    // closing balance stops matching the item's actual stock.
     const opening =
-      (rB.get(g.id) ?? 0) - (iB.get(g.id) ?? 0) + (aB.get(g.id) ?? 0)
+      n(g.openingQty)
+      + (rB.get(g.id) ?? 0) - (iB.get(g.id) ?? 0) + (aB.get(g.id) ?? 0)
       + (returns.before.get(g.id) ?? 0)
       + (transfers.into.before.get(g.id) ?? 0)
       - (transfers.outOf.before.get(g.id) ?? 0);

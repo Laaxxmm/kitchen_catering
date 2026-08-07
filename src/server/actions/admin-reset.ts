@@ -69,6 +69,13 @@ async function resetTransactionalDataInner(
       //    easy-to-miss one (labour logged against an order).
       await tx.timeEntry.deleteMany();
 
+      // Advances paid to a supplier ahead of their bill. These MUST go before
+      // the bills and POs they point at: both FKs are optional, so deleting
+      // the bills alone would only null `appliedToBillId` — an advance that
+      // had already been spent survived the wipe looking unspent, ready to be
+      // applied to a brand-new bill for the same rupees all over again.
+      await tx.vendorAdvance.deleteMany();
+
       // Vendor bills
       await tx.vendorBillPayment.deleteMany();
       await tx.vendorBillLine.deleteMany();
@@ -87,9 +94,18 @@ async function resetTransactionalDataInner(
       await tx.purchaseRequisitionLine.deleteMany();
       await tx.purchaseRequisition.deleteMany();
 
-      // Ingredient movements (issues reference Order)
+      // Ingredient movements (issues reference Order). Kitchen returns hang
+      // off the ISSUE they reverse, not off the order, so nothing cascades
+      // them — and their FK blocks the issue delete outright, which took the
+      // whole clean slate down the moment one return existed.
+      await tx.ingredientReturnLine.deleteMany();
+      await tx.ingredientReturn.deleteMany();
       await tx.ingredientIssue.deleteMany();
       await tx.ingredientAdjustment.deleteMany();
+      // Inter-store transfers are movement documents like any other: stock
+      // is rewound to opening below, so leaving them behind would leave the
+      // stock ledger reporting movements with nothing behind them.
+      await tx.stockTransfer.deleteMany();
 
       // Production (references Order)
       await tx.productionJobItem.deleteMany();
@@ -107,6 +123,11 @@ async function resetTransactionalDataInner(
       // Chef requisitions (reference Order)
       await tx.chefRequisitionLine.deleteMany();
       await tx.chefRequisition.deleteMany();
+
+      // Hired casual labour (references Order — optional FK, so the order
+      // delete below would silently detach these rather than remove them,
+      // leaving settled and paid labour debts standing after a clean slate).
+      await tx.manpowerRequest.deleteMany();
 
       // Quotes (a converted quote references its Order)
       await tx.quoteLine.deleteMany();
@@ -241,6 +262,11 @@ async function clearOrdersKeepFinanceInner(
     async (tx) => {
       // Labour logged against orders (RESTRICT FK — must go before orders).
       await tx.timeEntry.deleteMany();
+
+      // Kitchen returns point at the issue they reverse (RESTRICT FK), so
+      // they go first — same order as resetTransactionalData above.
+      await tx.ingredientReturnLine.deleteMany();
+      await tx.ingredientReturn.deleteMany();
 
       // Order-tied stock issues (reference order + prLine + chefReqLine +
       // production job — so they must be deleted before all of those).

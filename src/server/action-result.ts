@@ -31,6 +31,19 @@ function isNextControlFlowError(err: unknown): boolean {
 
 export function actionFailure(err: unknown): { ok: false; error: string } {
   if (isNextControlFlowError(err)) throw err;
+  // decimal.js signals a blank/garbage string reaching the money math by
+  // throwing a PLAIN `Error` whose MESSAGE carries the marker — it does not
+  // set `err.name` and it is not a subclass. That makes it indistinguishable
+  // by shape from the deliberate `new Error("…")` messages below, so this has
+  // to run FIRST: the passthrough would otherwise claim it and leak
+  // "[DecimalError] Invalid argument: " to the user, which is exactly what
+  // shipped (blank petty-cash voucher / top-up amounts, among others).
+  if (err instanceof Error && (err.name === "DecimalError" || err.message.startsWith("[DecimalError]"))) {
+    return {
+      ok: false,
+      error: "One of the number fields isn't a valid number — check quantities, prices and GST %.",
+    };
+  }
   if (
     err instanceof ActionError ||
     err instanceof AuthorizationError ||
@@ -40,15 +53,6 @@ export function actionFailure(err: unknown): { ok: false; error: string } {
     (err instanceof Error && err.constructor === Error)
   ) {
     return { ok: false, error: err.message };
-  }
-  // decimal.js throws DecimalError (name only — not an Error subclass we
-  // control) when a blank/garbage string reaches the money math. Translate
-  // instead of leaking "[DecimalError] Invalid argument".
-  if (err instanceof Error && err.name === "DecimalError") {
-    return {
-      ok: false,
-      error: "One of the number fields isn't a valid number — check quantities, prices and GST %.",
-    };
   }
   if (err instanceof ZodError) {
     const first = err.issues[0];

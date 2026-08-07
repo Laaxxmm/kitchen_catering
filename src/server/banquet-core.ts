@@ -26,17 +26,25 @@ export async function lockBanquetItemRows(tx: Prisma.TransactionClient, ids: str
   }
 }
 
+// A line is DONE only when it was issued or cancelled. Awaiting-procurement
+// is NOT done: the goods are on order and the store still owes them. Counting
+// it as done closed the requisition (FULLY_ISSUED + closedAt) the moment the
+// last open line was flagged short — and every downstream gate keys off that
+// status, so the GRN's re-open query (procurement.ts, live requisitions only)
+// skipped the line and issueBanquetRequisitionLine then refused "cannot issue
+// against a fully_issued requisition". The goods landed on the shelf and the
+// line was stranded for good. Kitchen parity: recomputeReqAndAdvance in
+// chef-requisitions.ts counts ISSUED / CANCELLED and nothing else.
 const REQ_LINE_CLOSED: BanquetRequisitionLineStatus[] = [
   BanquetRequisitionLineStatus.ISSUED,
-  BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
   BanquetRequisitionLineStatus.CANCELLED,
 ];
 
 /**
  * Recompute a requisition's rolled-up status from its lines and stamp who
- * last touched it. All lines closed (issued / awaiting-PO / cancelled) →
- * FULLY_ISSUED + closedAt; any progress (issued / part / awaiting) but work
- * still open → PARTIALLY_ISSUED; otherwise SUBMITTED.
+ * last touched it. Every line issued or cancelled → FULLY_ISSUED + closedAt;
+ * any progress (issued / part / awaiting a purchase) but work still open →
+ * PARTIALLY_ISSUED; otherwise SUBMITTED.
  */
 export async function recomputeBanquetReqStatus(
   tx: Prisma.TransactionClient,

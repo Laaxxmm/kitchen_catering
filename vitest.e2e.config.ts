@@ -29,7 +29,11 @@ export default defineConfig({
     testTimeout: 120_000,
     hookTimeout: 300_000,
     env: {
-      DATABASE_URL: "postgresql://postgres:e2e@127.0.0.1:5540/kc_e2e",
+      // Vitest writes test.env OVER the shell env inside the worker, so a
+      // hard-coded value here silently beats `DATABASE_URL=… npx vitest` and
+      // every parallel run lands on one database. Default only.
+      DATABASE_URL:
+        process.env.DATABASE_URL ?? "postgresql://postgres:e2e@127.0.0.1:5540/kc_e2e",
       // Deterministic GST maths: supplier state fixed, so intra-state
       // (CGST+SGST) vs inter-state (IGST) is a choice the test makes.
       INDEFINE_STATE_CODE: "29",

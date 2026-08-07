@@ -53,14 +53,17 @@ const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER];
 // Declaring a kitchen return — the chef says what they're sending back.
 // Moves nothing, so it is deliberately NOT the stock-write set.
 const DECLARE_ROLES = [Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD];
-// Maintaining EXISTING catalogue entries (edit / deactivate / reorder level)
-// stays broad — the store and the chef curate the items they work with daily.
-const CATALOG_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD];
-// CREATING a new ingredient is management-only. Letting the store and chef
-// add items produced duplicates of the same ingredient under different names
-// and units, which then stranded GRNs and corrupted stock — so a new item is
-// now a deliberate management decision.
-const CATALOG_CREATE_ROLES = [Role.ADMIN, Role.MANAGER];
+// The reorder level is a stocking threshold, not the item and not its stock,
+// so the store and the chef keep it current for what they work with daily.
+const REORDER_LEVEL_ROLES = [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.KITCHEN_HEAD];
+// The catalogue itself — add, edit, hide, unhide — is management-only.
+// Letting the store and chef ADD items produced duplicates of the same
+// ingredient under different names and units, which then stranded GRNs and
+// corrupted stock. Editing is the same hole one step later: renaming an item
+// or moving it from kg to g leaves the on-hand figure behind, now meaning
+// something other than what was counted. Hiding one takes it out of every
+// picker. All three are one management decision.
+const CATALOG_ROLES = [Role.ADMIN, Role.MANAGER];
 // Manual stock corrections (write-offs, opening fixes, post-count tweaks)
 // are admin/manager only — see STOCK_EDIT_ROLES. The storekeeper records new
 // stock through receipts: that path has a unit cost + supplier behind it,
@@ -85,7 +88,7 @@ export async function setReorderLevel(id: string, value: string): Promise<Action
 }
 
 async function setReorderLevelInner(id: string, value: string): Promise<{ ok: true }> {
-  const session = await requireRole(CATALOG_ROLES);
+  const session = await requireRole(REORDER_LEVEL_ROLES);
   const qty = toDecimal(value || "0");
   if (qty.lt(0)) throw new ActionError("Reorder level can't be negative");
   await db.$transaction(async (tx) => {
@@ -116,7 +119,7 @@ export async function createIngredient(raw: unknown): Promise<ActionResultWith<{
 }
 
 async function createIngredientInner(raw: unknown): Promise<{ ok: true; id: string }> {
-  const session = await requireRole(CATALOG_CREATE_ROLES);
+  const session = await requireRole(CATALOG_ROLES);
   const input = IngredientInput.parse(raw);
 
   // Block duplicate NAMES (case-insensitive). Two ingredients with the
@@ -1427,7 +1430,11 @@ export async function listIngredientMovements(
       },
     }),
     db.ingredientReturnLine.findMany({
-      where: { issue: { ingredientId } },
+      // CONFIRMED only. A DECLARED line is a promise the store hasn't met and
+      // a REJECTED one is a promise that died — neither has touched
+      // onHandQty, so listing either puts a movement in the ledger that never
+      // happened and the entries stop adding up to the stock figure above.
+      where: { issue: { ingredientId }, return: { status: IngredientReturnStatus.CONFIRMED } },
       orderBy: { return: { returnedAt: "desc" } },
       take: MOVEMENT_CAP,
       include: {

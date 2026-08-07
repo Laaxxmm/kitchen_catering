@@ -17,6 +17,8 @@ import {
   ensureSeeded,
   expectRefused,
   seeded,
+  DESK_EMAILS,
+  DESK_ROLES,
 } from "./harness";
 
 /**
@@ -59,16 +61,25 @@ describe("clean slate then import", () => {
 
   it("kept the six desks and the master data the seed put back", async () => {
     const fixtures = seeded();
-    const [customer, vendor, dishes, users] = await Promise.all([
+    const [customer, vendor, dishes, desks] = await Promise.all([
       db.customer.findUnique({ where: { id: fixtures.customerId } }),
       db.vendor.findUnique({ where: { id: fixtures.vendorId } }),
       db.dish.count(),
-      db.user.count(),
+      db.user.findMany({
+        where: { email: { in: Object.values(DESK_EMAILS) } },
+        select: { email: true, role: true },
+      }),
     ]);
     expect(customer?.name).toBe("E2E Catering Client");
     expect(vendor?.approvalStatus).toBe("APPROVED");
     expect(dishes).toBe(2);
-    expect(users).toBe(6);
+    // The six desks, by identity rather than by a global count: users are on
+    // the reset's keep-list on purpose, so a user another test file created
+    // survives into this one and a total would be run-order dependent.
+    expect(desks).toHaveLength(6);
+    expect(new Set(desks.map((u) => u.role))).toEqual(
+      new Set(Object.values(DESK_ROLES)),
+    );
   });
 
   it("gave every desk a distinct real user row", async () => {
