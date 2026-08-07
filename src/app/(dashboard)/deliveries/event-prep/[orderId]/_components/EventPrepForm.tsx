@@ -13,8 +13,9 @@ import { isNextNavigationError } from "@/lib/next-error";
 import { recordBanquetIssue } from "@/server/actions/banquet";
 import { markEventPrepReady } from "@/server/actions/deliveries";
 import { BanquetReturnPanel, type BanquetLedgerRow } from "@/components/ik/BanquetReturnPanel";
+import { BanquetItemPicker, type BanquetPickerItem } from "@/components/ik/BanquetItemPicker";
 
-interface Item { id: string; name: string; unit: string; currentStock: string }
+type Item = BanquetPickerItem & { currentStock: string };
 interface Order {
   id: string; code: string; customerName: string; channel: OrderChannel;
   headcount: number; eventDate: string; deliveryAddress: string;
@@ -141,14 +142,13 @@ export function EventPrepForm({ order, items, ledger }: { order: Order; items: I
             const it = items.find((x) => x.id === line.itemId);
             const overdraw = it && line.quantity.trim() !== "" && Number(line.quantity) > Number(it.currentStock);
             return (
-              <div key={i} className="grid items-end gap-2 sm:grid-cols-[1fr,140px,80px]">
-                <div className="grid gap-1.5">
-                  <Label htmlFor={`item-${i}`}>Item</Label>
-                  <select id={`item-${i}`} value={line.itemId} onChange={(e) => setLine(i, { itemId: e.target.value })} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
-                    <option value="">— Pick item —</option>
-                    {items.map((x) => <option key={x.id} value={x.id}>{x.name} (have {x.currentStock} {x.unit})</option>)}
-                  </select>
-                </div>
+              <div key={i} className="grid items-end gap-2 sm:grid-cols-[minmax(0,1fr),140px,80px]">
+                <BanquetItemPicker
+                  id={`item-${i}`}
+                  items={items}
+                  value={line.itemId}
+                  onChange={(itemId) => setLine(i, { itemId })}
+                />
                 <div className="grid gap-1.5">
                   <Label htmlFor={`qty-${i}`}>Qty {it ? `(${it.unit})` : ""}</Label>
                   <Input id={`qty-${i}`} type="number" inputMode="decimal" value={line.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} className={overdraw ? "border-alert" : ""} />

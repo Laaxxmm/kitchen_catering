@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   ApprovalDecision,
+  BanquetItemSource,
   ChefRequisitionLineStatus,
   ChefRequisitionStatus,
   CustomerInvoiceKind,
@@ -1014,8 +1015,15 @@ export const MaintenanceActivityInput = z.object({
 // No `sku` — same as IngredientInput, the GP code is assigned, not typed.
 export const BanquetItemInput = z.object({
   name: z.string().min(2).max(160),
+  // In-house stock vs cutlery/crockery hired in from outside. Honoured on
+  // create only: the GP code prefix encodes it and (name, source, category)
+  // is the item's identity — flipping it on an existing row would silently
+  // re-point every issue and PO line that already cites the item.
+  source: z.nativeEnum(BanquetItemSource).default(BanquetItemSource.IN_HOUSE),
   category: z.string().max(60).nullable().optional(),
   unit: z.string().min(1).max(20).default("piece"),
+  // Hire charge per unit per event; purchase rate on in-house disposables.
+  rate: decimalString.nullable().optional(),
   minStock: decimalString.nullable().optional(),
   openingStock: decimalString.nullable().optional(),
   notes: z.string().max(500).nullable().optional(),

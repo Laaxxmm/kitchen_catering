@@ -4,17 +4,30 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Decimal } from "decimal.js";
+import type { BanquetItemSource } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Combobox, type ComboOption } from "@/components/ui/combobox";
+import { BANQUET_SOURCE_LABELS } from "@/lib/stock-movement";
 import { isNextNavigationError } from "@/lib/next-error";
 import type { ActionResultWith } from "@/lib/action-result";
 
 interface Vendor { id: string; name: string; code: string; stateCode: string }
 interface Ingredient { id: string; sku: string; name: string; unit: string; gstRatePct: string }
-interface BanquetItem { id: string; sku: string; name: string; unit: string; gstRatePct?: string }
+interface BanquetItem {
+  id: string;
+  sku: string;
+  name: string;
+  unit: string;
+  gstRatePct?: string;
+  source: BanquetItemSource;
+  /** In-house: Disposables / Crockery. Hired: Regulars / Melamine / Bonechina. */
+  category: string | null;
+  /** Hire charge / purchase rate per unit — two same-named grades differ only here. */
+  rate: string | null;
+}
 interface OrderOption { id: string; code: string; customerName: string }
 
 interface DraftLine {
@@ -171,11 +184,27 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
   }
 
   // Combobox has no optgroups, so the Kitchen/Banquet split is carried as a
-  // label prefix. Value encoding is unchanged: "ing:<id>" / "bq:<id>" / "".
+  // label prefix — and it filters on the label, so "hired" or "bonechina"
+  // narrows the list the same way the source dropdown does on the F&B forms.
+  // Value encoding is unchanged: "ing:<id>" / "bq:<id>" / "".
+  //
+  // F&B labels carry source, grade and rate because the name does not
+  // identify the item: "soup bowl" is in-house, hired-Melamine and
+  // hired-Bonechina at three different rates, and a PO must buy the one the
+  // requisition was short of.
   const itemOptions: ComboOption[] = useMemo(() => [
     ...(canFreeText ? [{ value: "", label: "— free text —" }] : []),
     ...ingredients.map((i) => ({ value: `ing:${i.id}`, label: `Kitchen · ${i.sku} · ${i.name}` })),
-    ...banquetItems.map((b) => ({ value: `bq:${b.id}`, label: `Banquet · ${b.sku} · ${b.name}` })),
+    ...banquetItems.map((b) => ({
+      value: `bq:${b.id}`,
+      label: [
+        `F&B · ${BANQUET_SOURCE_LABELS[b.source]}`,
+        b.sku,
+        b.name,
+        b.category,
+        b.rate ? `₹${b.rate}` : null,
+      ].filter(Boolean).join(" · "),
+    })),
   ], [ingredients, banquetItems, canFreeText]);
 
   const vendorComboOptions: ComboOption[] = useMemo(

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import {
+  BanquetItemSource,
   BanquetRequisitionLineStatus,
   BanquetRequisitionStatus,
   Prisma,
@@ -15,10 +16,14 @@ import { istToUtc } from "@/lib/time";
 import { sha256Json } from "@/lib/audit";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import { EVENT_DELIVERY_CHANNEL_LIST } from "@/lib/order-channels";
-import { itemsStillOutByOrder } from "@/lib/stock-movement";
+import { STOCK_EDIT_ROLES, itemsStillOutByOrder } from "@/lib/stock-movement";
 import { createNotification, notifyRoles } from "@/server/notification-core";
 import { deferAfterResponse } from "@/server/defer";
-import { nextBanquetRequisitionNumber, nextGPItemCode } from "@/lib/sequences";
+import {
+  nextBanquetRequisitionNumber,
+  nextGPHiredItemCode,
+  nextGPInhouseItemCode,
+} from "@/lib/sequences";
 import {
   cancelBanquetRequisitionsWithPOs,
   lockBanquetItemRows,
@@ -66,8 +71,8 @@ const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY];
 // this operation they physically run the store counter alongside F&B.
 const ISSUE_ROLES = [...WRITE_ROLES, Role.STORE_KEEPER];
 // The store keeper also records receipts (stock IN). Catalogue management
-// (add/edit/delete items) stays with WRITE_ROLES; direct stock-set goes
-// through adjustStoreStock, which enforces the stock.storeDirectEdit toggle.
+// (add/edit/delete items) stays with WRITE_ROLES; setting a figure by hand
+// (adjustStoreStock / the bulk count below) is admin/manager only.
 const RECEIPT_ROLES = [...WRITE_ROLES, Role.STORE_KEEPER];
 const READ_ROLES: Role[] = [...WRITE_ROLES, Role.STORE_KEEPER];
 
@@ -100,9 +105,13 @@ async function upsertBanquetItemInner(
         where: { id },
         data: {
           name: input.name,
-          // No sku: a GP code is permanent once assigned.
+          // No sku and no source: a GP code is permanent once assigned, and
+          // its prefix encodes the source — see BanquetItemInput.
           category: input.category ?? null,
           unit: input.unit,
+          // "" is a real input here (cleared field) and new Decimal("")
+          // throws, so the falsy branch has to cover it.
+          rate: input.rate ? new Prisma.Decimal(input.rate) : null,
           minStock: input.minStock ? new Prisma.Decimal(input.minStock) : null,
           notes: input.notes ?? null,
           active: input.active ?? true,
@@ -122,10 +131,17 @@ async function upsertBanquetItemInner(
     const created = await tx.banquetItem.create({
       data: {
         name: input.name,
-        // Same counter as the kitchen catalogue — one code, one item.
-        sku: await nextGPItemCode(tx),
+        // One counter per catalogue — the prefix carries the source, so
+        // GP-IN-042 and GP-HR-042 are different items, both distinct from
+        // the kitchen's GP-042. See src/lib/sequences.ts.
+        sku:
+          input.source === BanquetItemSource.HIRED
+            ? await nextGPHiredItemCode(tx)
+            : await nextGPInhouseItemCode(tx),
+        source: input.source,
         category: input.category ?? null,
         unit: input.unit,
+        rate: input.rate ? new Prisma.Decimal(input.rate) : null,
         minStock: input.minStock ? new Prisma.Decimal(input.minStock) : null,
         notes: input.notes ?? null,
         active: input.active ?? true,
@@ -262,6 +278,26 @@ export async function listBanquetItems(opts: { activeOnly?: boolean } = {}) {
     // categories interleaved, not the alphabet). Inactive items still sink.
     orderBy: [{ active: "desc" }, { name: "asc" }],
   });
+}
+
+/**
+ * Active catalogue shaped for <BanquetItemPicker>. Every form that picks an
+ * F&B item needs the same extra fields (code, source, grade, rate, on-hand)
+ * serialised the same way, so the Decimals are stringified once here rather
+ * than in each page that renders a picker.
+ */
+export async function listBanquetPickerItems() {
+  const items = await listBanquetItems({ activeOnly: true });
+  return items.map((i) => ({
+    id: i.id,
+    sku: i.sku,
+    name: i.name,
+    unit: i.unit,
+    source: i.source,
+    category: i.category,
+    rate: i.rate?.toString() ?? null,
+    currentStock: i.currentStock.toString(),
+  }));
 }
 
 // ─── Receipts ─────────────────────────────────────────────────────────
@@ -552,11 +588,12 @@ async function recordBanquetReturnInner(raw: unknown): Promise<{ ok: true; id: s
 // Row-wise physical count for the whole store, mirroring the kitchen's
 // monthly audit (inventory-audit.ts): every counted line sets the item's
 // on-hand to the physical quantity, only changed lines post, and each
-// change lands in the audit log. Like the kitchen bulk count, this is the
-// formal fully-audited flow, so it includes the STORE_KEEPER regardless of
-// the stock.storeDirectEdit toggle (which keeps gating the single-item
-// adjustStoreStock path).
-const STOCK_COUNT_ROLES = [...WRITE_ROLES, Role.STORE_KEEPER];
+// change lands in the audit log. Setting a figure by hand is direct stock
+// editing however good the audit trail behind it, so this takes the same
+// gate as the kitchen count and both adjust screens — admin/manager only.
+// The F&B team and the store keeper still walk the store and count; a
+// manager posts the result.
+const STOCK_COUNT_ROLES = STOCK_EDIT_ROLES;
 
 export interface BanquetStockCountChange {
   name: string;
@@ -674,7 +711,10 @@ export async function getOrderBanquetLedger(orderId: string) {
   if (itemIds.length === 0) return [];
   const items = await db.banquetItem.findMany({
     where: { id: { in: itemIds } },
-    select: { id: true, name: true, unit: true },
+    // Code + source + grade travel with the row: an in-house "soup bowl" and
+    // a hired Bonechina one are both out with the same client, and the name
+    // alone would show two identical lines to charge against.
+    select: { id: true, sku: true, name: true, unit: true, source: true, category: true },
   });
   const returnedBy = new Map(returned.map((r) => [r.itemId, r._sum.quantity?.toString() ?? "0"]));
   return issued.map((r) => {
@@ -683,8 +723,11 @@ export async function getOrderBanquetLedger(orderId: string) {
     const back = new Decimal(returnedBy.get(r.itemId) ?? "0");
     return {
       itemId: r.itemId,
+      sku: item?.sku ?? null,
       name: item?.name ?? "?",
       unit: item?.unit ?? "piece",
+      source: item?.source ?? BanquetItemSource.IN_HOUSE,
+      category: item?.category ?? null,
       issued: iss.toString(),
       returned: back.toString(),
       outstanding: iss.minus(back).toString(),

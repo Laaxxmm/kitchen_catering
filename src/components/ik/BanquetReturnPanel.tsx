@@ -3,15 +3,20 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { BanquetItemSource } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { isNextNavigationError } from "@/lib/next-error";
 import { recordBanquetReturn } from "@/server/actions/banquet";
+import { BANQUET_SOURCE_LABELS } from "@/lib/stock-movement";
 
 export interface BanquetLedgerRow {
   itemId: string;
+  sku: string | null;
   name: string;
   unit: string;
+  source: BanquetItemSource;
+  category: string | null;
   issued: string;
   returned: string;
   outstanding: string;
@@ -94,6 +99,7 @@ export function BanquetReturnPanel({
       <table className="w-full text-[12.5px]">
         <thead className="border-b border-ik-rule text-left text-ik-ink-3">
           <tr>
+            <th className="w-24 py-1 pr-2">Code</th>
             <th className="py-1 pr-2">Item</th>
             <th className="w-20 py-1 pr-2 text-right">Went out</th>
             <th className="w-20 py-1 pr-2 text-right">Came back</th>
@@ -104,7 +110,18 @@ export function BanquetReturnPanel({
         <tbody>
           {ledger.map((r) => (
             <tr key={r.itemId} className="border-b border-ik-rule/60">
-              <td className="py-1.5 pr-2">{r.name}</td>
+              <td className="whitespace-nowrap py-1.5 pr-2 font-mono text-[11.5px] text-ik-ink-2">
+                {r.sku ?? "—"}
+              </td>
+              {/* Source + grade, not just the name: a hired Bonechina bowl
+                  and an in-house one can both be out with the same client. */}
+              <td className="py-1.5 pr-2">
+                {r.name}
+                <span className="ml-1.5 text-[11px] text-ik-ink-3">
+                  {BANQUET_SOURCE_LABELS[r.source]}
+                  {r.category ? ` · ${r.category}` : ""}
+                </span>
+              </td>
               <td className="py-1.5 pr-2 text-right font-mono">{r.issued}</td>
               <td className="py-1.5 pr-2 text-right font-mono">{r.returned}</td>
               <td

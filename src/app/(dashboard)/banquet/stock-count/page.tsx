@@ -1,18 +1,17 @@
 import Link from "next/link";
-import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { gateRolePage } from "@/server/rbac";
 import { listBanquetItems, postBanquetStockCount } from "@/server/actions/banquet";
+import { STOCK_EDIT_ROLES } from "@/lib/stock-movement";
 import { StockCountForm } from "./_components/StockCountForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function BanquetStockCountPage() {
-  // Formal, fully-audited bulk count — the whole banquet team incl. the
-  // store keeper (mirrors the kitchen bulk count; the stock.storeDirectEdit
-  // toggle only gates the single-item Adjust flow).
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
+  // A posted count sets on-hand by hand, audit trail or not — same gate as
+  // the kitchen count and both adjust screens. The team counts; a manager posts.
+  await gateRolePage(STOCK_EDIT_ROLES);
   const items = await listBanquetItems({ activeOnly: true });
 
   async function post(input: {

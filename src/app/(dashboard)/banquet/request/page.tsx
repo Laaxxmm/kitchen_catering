@@ -3,7 +3,11 @@ import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { gateRolePage } from "@/server/rbac";
-import { listBanquetItems, listBanquetEvents, getBanquetEvent } from "@/server/actions/banquet";
+import {
+  listBanquetPickerItems,
+  listBanquetEvents,
+  getBanquetEvent,
+} from "@/server/actions/banquet";
 import { RequestForm } from "./_components/RequestForm";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +23,7 @@ export default async function BanquetRequestPage({
   // instead of asking someone to re-pick it from a list they can forget.
   const { orderId } = await searchParams;
   const [items, events, lockedOrder] = await Promise.all([
-    listBanquetItems({ activeOnly: true }),
+    listBanquetPickerItems(),
     listBanquetEvents(),
     orderId ? getBanquetEvent(orderId) : Promise.resolve(null),
   ]);
@@ -37,7 +41,7 @@ export default async function BanquetRequestPage({
         }
       />
       <RequestForm
-        items={items.map((i) => ({ id: i.id, sku: i.sku, name: i.name, unit: i.unit, currentStock: i.currentStock.toString() }))}
+        items={items}
         events={events.map((e) => ({ id: e.id, code: e.code, customerName: e.customerName }))}
         lockedOrder={lockedOrder}
       />

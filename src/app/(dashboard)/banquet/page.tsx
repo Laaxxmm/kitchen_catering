@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { gateRolePage } from "@/server/rbac";
 import { getStoreStock } from "@/server/actions/store-stock";
 import { StoreLanding } from "@/components/ik/StoreLanding";
+import { canEditStockDirectly } from "@/lib/stock-movement";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,9 @@ export default async function BanquetLandingPage() {
   // store keeper IS the store, so they fulfil requests (Requisitions) rather
   // than raise them against themselves. Hide it for the store keeper.
   const canRaiseRequisition = session.user.role !== Role.STORE_KEEPER;
+  // Direct stock editing is ADMIN/MANAGER only. Showing the tabs to anyone
+  // else just walks them into /forbidden.
+  const canEditStock = canEditStockDirectly(session.user.role);
 
   return (
     <StoreLanding
@@ -43,8 +47,12 @@ export default async function BanquetLandingPage() {
         { label: "Receipts", href: "/banquet/receipts" },
         { label: "Issues", href: "/banquet/issues" },
         { label: "Returns", href: "/banquet/returns" },
-        { label: "Adjust stock", href: "/banquet/adjust" },
-        { label: "Stock count (bulk)", href: "/banquet/stock-count" },
+        ...(canEditStock
+          ? [
+              { label: "Adjust stock", href: "/banquet/adjust" },
+              { label: "Stock count (bulk)", href: "/banquet/stock-count" },
+            ]
+          : []),
         { label: "Reports", href: "/banquet/reports" },
       ]}
       stock={stock}

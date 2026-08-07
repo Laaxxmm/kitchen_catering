@@ -272,6 +272,12 @@ async function recordStockTransferInner(raw: unknown): Promise<{ ok: true; id: s
 export interface TransferItemOption {
   id: string;
   store: StockStore;
+  /**
+   * GP code, F&B only. The other two catalogues have unique names; the F&B
+   * one does not (in-house vs hired soup bowls), and the code prefix
+   * GP-IN- / GP-HR- is what tells the two apart in the dropdown.
+   */
+  sku: string | null;
   name: string;
   unit: string;
   stock: string;
@@ -292,7 +298,7 @@ export async function listTransferItems(): Promise<TransferItemOption[]> {
     }),
     db.banquetItem.findMany({
       where: { active: true },
-      select: { id: true, name: true, unit: true, currentStock: true },
+      select: { id: true, sku: true, name: true, unit: true, currentStock: true, category: true },
       orderBy: { name: "asc" },
     }),
     db.housekeepingItem.findMany({
@@ -303,13 +309,20 @@ export async function listTransferItems(): Promise<TransferItemOption[]> {
   ]);
   return [
     ...ingredients.map((i) => ({
-      id: i.id, store: StockStore.KITCHEN, name: i.name, unit: i.unit, stock: i.onHandQty.toString(),
+      id: i.id, store: StockStore.KITCHEN, sku: null, name: i.name, unit: i.unit, stock: i.onHandQty.toString(),
     })),
     ...banquet.map((i) => ({
-      id: i.id, store: StockStore.FNB, name: i.name, unit: i.unit, stock: i.currentStock.toString(),
+      id: i.id,
+      store: StockStore.FNB,
+      sku: i.sku,
+      // Grade appended to the name so Melamine and Bonechina rows of the same
+      // item are not two identical options.
+      name: i.category ? `${i.name} (${i.category})` : i.name,
+      unit: i.unit,
+      stock: i.currentStock.toString(),
     })),
     ...housekeeping.map((i) => ({
-      id: i.id, store: StockStore.HOUSEKEEPING, name: i.name, unit: i.unit, stock: i.currentStock.toString(),
+      id: i.id, store: StockStore.HOUSEKEEPING, sku: null, name: i.name, unit: i.unit, stock: i.currentStock.toString(),
     })),
   ];
 }

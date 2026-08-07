@@ -3,14 +3,14 @@ import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { gateRolePage } from "@/server/rbac";
-import { listBanquetItems } from "@/server/actions/banquet";
+import { listBanquetPickerItems } from "@/server/actions/banquet";
 import { ReceiptForm } from "./_components/ReceiptForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewBanquetReceiptPage() {
   await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
-  const items = await listBanquetItems({ activeOnly: true });
+  const items = await listBanquetPickerItems();
 
   return (
     <>
@@ -26,9 +26,7 @@ export default async function NewBanquetReceiptPage() {
           <Link href="/banquet/items" className="text-brand hover:underline">Add some first</Link>.
         </p>
       ) : (
-        <ReceiptForm
-          items={items.map((i) => ({ id: i.id, name: i.name, unit: i.unit, category: i.category }))}
-        />
+        <ReceiptForm items={items} />
       )}
     </>
   );

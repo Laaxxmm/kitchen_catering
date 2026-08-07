@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { gateRolePage } from "@/server/rbac";
 import { getEventPrepOrder } from "@/server/actions/deliveries";
-import { getOrderBanquetLedger, listBanquetItems } from "@/server/actions/banquet";
+import { getOrderBanquetLedger, listBanquetPickerItems } from "@/server/actions/banquet";
 import { EventPrepForm } from "./_components/EventPrepForm";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +15,7 @@ export default async function EventPrepPage({ params }: { params: Promise<{ orde
   const { orderId } = await params;
   const [order, items, ledger] = await Promise.all([
     getEventPrepOrder(orderId),
-    listBanquetItems({ activeOnly: true }),
+    listBanquetPickerItems(),
     getOrderBanquetLedger(orderId),
   ]);
   if (!order) notFound();
@@ -30,7 +30,7 @@ export default async function EventPrepPage({ params }: { params: Promise<{ orde
       />
       <EventPrepForm
         order={order}
-        items={items.map((i) => ({ id: i.id, name: i.name, unit: i.unit, currentStock: i.currentStock.toString() }))}
+        items={items}
         ledger={ledger}
       />
     </>

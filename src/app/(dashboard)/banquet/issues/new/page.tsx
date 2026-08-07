@@ -3,7 +3,7 @@ import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { gateRolePage } from "@/server/rbac";
-import { listBanquetItems, listBanquetEvents } from "@/server/actions/banquet";
+import { listBanquetPickerItems, listBanquetEvents } from "@/server/actions/banquet";
 import { IssueForm } from "./_components/IssueForm";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function NewBanquetIssuePage() {
   await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
   const [items, events] = await Promise.all([
-    listBanquetItems({ activeOnly: true }),
+    listBanquetPickerItems(),
     listBanquetEvents(),
   ]);
 
@@ -29,16 +29,7 @@ export default async function NewBanquetIssuePage() {
           <Link href="/banquet/items" className="text-brand hover:underline">Add some first</Link>.
         </p>
       ) : (
-        <IssueForm
-          items={items.map((i) => ({
-            id: i.id,
-            name: i.name,
-            unit: i.unit,
-            category: i.category,
-            currentStock: i.currentStock.toString(),
-          }))}
-          events={events}
-        />
+        <IssueForm items={items} events={events} />
       )}
     </>
   );

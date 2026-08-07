@@ -9,8 +9,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { isNextNavigationError } from "@/lib/next-error";
 import { createBanquetRequisition } from "@/server/actions/banquet";
+import { BanquetItemPicker, type BanquetPickerItem } from "@/components/ik/BanquetItemPicker";
 
-interface Item { id: string; sku: string | null; name: string; unit: string; currentStock: string }
+type Item = BanquetPickerItem & { currentStock: string };
 interface Event { id: string; code: string; customerName: string }
 interface Line { itemId: string; qty: string }
 
@@ -77,24 +78,13 @@ export function RequestForm({
           {lines.map((line, i) => {
             const it = items.find((x) => x.id === line.itemId);
             return (
-              <div key={i} className="grid items-end gap-2 sm:grid-cols-[1fr,140px,80px]">
-                <div className="grid gap-1.5">
-                  <Label htmlFor={`item-${i}`}>Item</Label>
-                  <select
-                    id={`item-${i}`}
-                    value={line.itemId}
-                    onChange={(e) => setLine(i, { itemId: e.target.value })}
-                    className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
-                  >
-                    <option value="">— Pick item —</option>
-                    {/* Code first so the browser's type-ahead finds "GP-045". */}
-                    {items.map((x) => (
-                      <option key={x.id} value={x.id}>
-                        {x.sku ? `${x.sku} · ` : ""}{x.name} (have {x.currentStock} {x.unit})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div key={i} className="grid items-end gap-2 sm:grid-cols-[minmax(0,1fr),140px,80px]">
+                <BanquetItemPicker
+                  id={`item-${i}`}
+                  items={items}
+                  value={line.itemId}
+                  onChange={(itemId) => setLine(i, { itemId })}
+                />
                 <div className="grid gap-1.5">
                   <Label htmlFor={`qty-${i}`}>Qty {it ? `(${it.unit})` : ""}</Label>
                   <Input id={`qty-${i}`} type="number" inputMode="decimal" value={line.qty} onChange={(e) => setLine(i, { qty: e.target.value })} />

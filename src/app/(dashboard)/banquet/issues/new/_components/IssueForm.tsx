@@ -9,16 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { recordBanquetIssue } from "@/server/actions/banquet";
+import { BanquetItemPicker, type BanquetPickerItem } from "@/components/ik/BanquetItemPicker";
 import { isNextNavigationError } from "@/lib/next-error";
 import { formatIST } from "@/lib/time";
 
-interface Item {
-  id: string;
-  name: string;
-  unit: string;
-  category: string | null;
-  currentStock: string;
-}
+type Item = BanquetPickerItem & { currentStock: string };
 interface EventOption {
   id: string;
   code: string;
@@ -151,18 +146,13 @@ export function IssueForm({ items, events }: { items: Item[]; events: EventOptio
             const it = items.find((x) => x.id === line.itemId);
             const overdraw = it && line.quantity.trim() !== "" && Number(line.quantity) > Number(it.currentStock);
             return (
-              <div key={i} className="grid items-end gap-2 sm:grid-cols-[1fr,160px,80px]">
-                <div className="grid gap-1.5">
-                  <Label htmlFor={`item-${i}`}>Item</Label>
-                  <select id={`item-${i}`} value={line.itemId} onChange={(e) => updateLine(i, { itemId: e.target.value })} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
-                    <option value="">— Pick item —</option>
-                    {items.map((it) => (
-                      <option key={it.id} value={it.id}>
-                        {it.name} (have {it.currentStock} {it.unit})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div key={i} className="grid items-end gap-2 sm:grid-cols-[minmax(0,1fr),160px,80px]">
+                <BanquetItemPicker
+                  id={`item-${i}`}
+                  items={items}
+                  value={line.itemId}
+                  onChange={(itemId) => updateLine(i, { itemId })}
+                />
                 <div className="grid gap-1.5">
                   <Label htmlFor={`qty-${i}`}>Qty {it ? `(${it.unit})` : ""}</Label>
                   <Input

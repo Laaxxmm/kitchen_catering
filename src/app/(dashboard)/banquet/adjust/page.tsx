@@ -1,15 +1,17 @@
 import Link from "next/link";
-import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { gateRolePage } from "@/server/rbac";
 import { listStoreItems } from "@/server/actions/store-stock";
+import { STOCK_EDIT_ROLES } from "@/lib/stock-movement";
 import { StoreAdjustForm } from "@/components/ik/StoreAdjustForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function BanquetAdjustPage() {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.FNB_SERVICE, Role.DELIVERY, Role.STORE_KEEPER]);
+  // Setting an F&B figure by hand is admin/manager only — the team records
+  // receipts, issues and returns, which move the same stock off a document.
+  await gateRolePage(STOCK_EDIT_ROLES);
   const items = await listStoreItems("banquet");
 
   return (

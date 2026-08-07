@@ -286,7 +286,15 @@ export default async function NewVendorPOPage({
       <VendorPOForm
         vendors={vendors.map((v) => ({ id: v.id, name: v.name, code: v.code, stateCode: v.stateCode }))}
         ingredients={ingredients.map((i) => ({ id: i.id, sku: i.sku, name: i.name, unit: i.unit, gstRatePct: i.gstRatePct.toString() }))}
-        banquetItems={banquetItems.map((b) => ({ id: b.id, sku: b.sku ?? "", name: b.name, unit: b.unit }))}
+        banquetItems={banquetItems.map((b) => ({
+          id: b.id,
+          sku: b.sku ?? "",
+          name: b.name,
+          unit: b.unit,
+          source: b.source,
+          category: b.category,
+          rate: b.rate?.toString() ?? null,
+        }))}
         orders={[
           // The requisition's own order first (even if it moved past the
           // "active" window) so the prefill's default selection resolves.

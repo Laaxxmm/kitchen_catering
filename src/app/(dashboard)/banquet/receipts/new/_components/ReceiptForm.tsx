@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { recordBanquetReceipt } from "@/server/actions/banquet";
+import { BanquetItemPicker, type BanquetPickerItem } from "@/components/ik/BanquetItemPicker";
 import { isNextNavigationError } from "@/lib/next-error";
 
-interface Item { id: string; name: string; unit: string; category: string | null; }
+type Item = BanquetPickerItem;
 interface Line { itemId: string; quantity: string; costPerUnit: string; }
 
 function nowLocal(): string {
@@ -94,18 +95,13 @@ export function ReceiptForm({ items }: { items: Item[] }) {
           {lines.map((line, i) => {
             const it = items.find((x) => x.id === line.itemId);
             return (
-              <div key={i} className="grid items-end gap-2 sm:grid-cols-[1fr,140px,140px,80px]">
-                <div className="grid gap-1.5">
-                  <Label htmlFor={`item-${i}`}>Item</Label>
-                  <select id={`item-${i}`} value={line.itemId} onChange={(e) => updateLine(i, { itemId: e.target.value })} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
-                    <option value="">— Pick item —</option>
-                    {items.map((it) => (
-                      <option key={it.id} value={it.id}>
-                        {it.name} ({it.unit}){it.category ? ` · ${it.category}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div key={i} className="grid items-end gap-2 sm:grid-cols-[minmax(0,1fr),140px,140px,80px]">
+                <BanquetItemPicker
+                  id={`item-${i}`}
+                  items={items}
+                  value={line.itemId}
+                  onChange={(itemId) => updateLine(i, { itemId })}
+                />
                 <div className="grid gap-1.5">
                   <Label htmlFor={`qty-${i}`}>Quantity {it ? `(${it.unit})` : ""}</Label>
                   <Input id={`qty-${i}`} type="number" inputMode="decimal" value={line.quantity} onChange={(e) => updateLine(i, { quantity: e.target.value })} />

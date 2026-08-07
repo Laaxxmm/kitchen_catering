@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { BanquetItemSource } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,18 +20,30 @@ import {
   deleteBanquetItem,
   upsertBanquetItem,
 } from "@/server/actions/banquet";
+import { BANQUET_SOURCE_LABELS } from "@/lib/stock-movement";
 import { isNextNavigationError } from "@/lib/next-error";
 
 interface Item {
   id: string;
   name: string;
   sku: string | null;
+  source: BanquetItemSource;
   category: string | null;
   unit: string;
+  rate: string | null;
   currentStock: string;
   minStock: string | null;
   active: boolean;
 }
+
+const SOURCES = [BanquetItemSource.IN_HOUSE, BanquetItemSource.HIRED] as const;
+
+// The grades the client actually uses, offered as datalist suggestions —
+// category stays free text so a new grade doesn't need a deploy.
+const CATEGORY_HINTS: Record<BanquetItemSource, string[]> = {
+  [BanquetItemSource.IN_HOUSE]: ["Disposables", "Crockery"],
+  [BanquetItemSource.HIRED]: ["Regulars", "Melamine", "Bonechina"],
+};
 
 export function ItemsTable({
   items,
@@ -51,21 +64,28 @@ export function ItemsTable({
     startOpen ? { id: undefined } : null,
   );
   const [name, setName] = useState("");
+  const [source, setSource] = useState<BanquetItemSource>(BanquetItemSource.IN_HOUSE);
   const [category, setCategory] = useState("");
   const [unit, setUnit] = useState("piece");
+  const [rate, setRate] = useState("");
   const [minStock, setMinStock] = useState("");
   const [openingStock, setOpeningStock] = useState("");
+  // Catalogue filter — 154 in-house + 42 hired is too many to scan as one list.
+  const [filterSource, setFilterSource] = useState<BanquetItemSource | "">("");
+  const shown = filterSource ? items.filter((i) => i.source === filterSource) : items;
 
   function startCreate() {
     setEditing({ id: undefined });
-    setName(""); setCategory("");
-    setUnit("piece"); setMinStock(""); setOpeningStock("");
+    setName(""); setSource(BanquetItemSource.IN_HOUSE); setCategory("");
+    setUnit("piece"); setRate(""); setMinStock(""); setOpeningStock("");
   }
   function startEdit(it: Item) {
     setEditing(it);
     setName(it.name);
+    setSource(it.source);
     setCategory(it.category ?? "");
     setUnit(it.unit);
+    setRate(it.rate ?? "");
     setMinStock(it.minStock ?? "");
     setOpeningStock("");
   }
@@ -81,8 +101,10 @@ export function ItemsTable({
         const res = await upsertBanquetItem(
           {
             name: name.trim(),
+            source,
             category: category.trim() || null,
             unit: unit.trim() || "piece",
+            rate: rate.trim() || null,
             minStock: minStock.trim() || null,
             openingStock: isCreate && openingStock.trim() ? openingStock.trim() : null,
             active: true,
@@ -149,8 +171,11 @@ export function ItemsTable({
         const res = await upsertBanquetItem(
           {
             name: it.name,
+            // Re-send rate: the update writes it unconditionally, so omitting
+            // it here would clear the item's rate on reactivation.
             category: it.category,
             unit: it.unit,
+            rate: it.rate,
             minStock: it.minStock,
             active: true,
           },
@@ -176,10 +201,34 @@ export function ItemsTable({
           <div className="text-[12px] font-medium text-ik-ink-2">
             {editing.id ? "Edit item" : "Add item"}
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="grid gap-1.5">
               <Label htmlFor="name">Name</Label>
               <Input id="name" placeholder="e.g. Ripple Tea Cups 100ml" value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="source">Source</Label>
+              {/* Create-only: the GP prefix encodes it and (name, source,
+                  category) is the item's identity. */}
+              {editing.id ? (
+                <div id="source" className="flex h-9 items-center text-[13px] text-ik-ink-2">
+                  {BANQUET_SOURCE_LABELS[source]}
+                </div>
+              ) : (
+                <select
+                  id="source"
+                  value={source}
+                  onChange={(e) => setSource(e.target.value as BanquetItemSource)}
+                  className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
+                >
+                  {SOURCES.map((s) => (
+                    <option key={s} value={s}>{BANQUET_SOURCE_LABELS[s]}</option>
+                  ))}
+                </select>
+              )}
+              <p className="text-[10.5px] text-ik-ink-3">
+                {editing.id ? "Permanent — cannot be changed." : "Owned stock, or hired in per event."}
+              </p>
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="code">Item code</Label>
@@ -192,11 +241,27 @@ export function ItemsTable({
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="category">Category</Label>
-              <Input id="category" placeholder="Packaging / Tissue / Cutlery" value={category} onChange={(e) => setCategory(e.target.value)} />
+              <Input
+                id="category"
+                list="banquet-category-hints"
+                placeholder={CATEGORY_HINTS[source].join(" / ")}
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+              />
+              <datalist id="banquet-category-hints">
+                {CATEGORY_HINTS[source].map((c) => <option key={c} value={c} />)}
+              </datalist>
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="unit">Unit</Label>
               <Input id="unit" value={unit} onChange={(e) => setUnit(e.target.value)} />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="rate">Rate / unit (₹)</Label>
+              <Input id="rate" type="number" inputMode="decimal" placeholder="optional" value={rate} onChange={(e) => setRate(e.target.value)} />
+              <p className="text-[10.5px] text-ik-ink-3">
+                Hire charge per event, or the purchase rate on disposables.
+              </p>
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="minStock">Low-stock at</Label>
@@ -224,16 +289,37 @@ export function ItemsTable({
         <div><Button onClick={startCreate}>+ Add item</Button></div>
       )}
 
-      {items.length === 0 ? (
-        <p className="text-[13px] text-ik-ink-3">No items yet. Add the first one above.</p>
+      <div className="flex items-center gap-2">
+        <Label htmlFor="filterSource" className="text-[12px] text-ik-ink-2">Show</Label>
+        <select
+          id="filterSource"
+          value={filterSource}
+          onChange={(e) => setFilterSource(e.target.value as BanquetItemSource | "")}
+          className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
+        >
+          <option value="">All sources ({items.length})</option>
+          {SOURCES.map((s) => (
+            <option key={s} value={s}>
+              {BANQUET_SOURCE_LABELS[s]} ({items.filter((i) => i.source === s).length})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {shown.length === 0 ? (
+        <p className="text-[13px] text-ik-ink-3">
+          {items.length === 0 ? "No items yet. Add the first one above." : "No items for that source."}
+        </p>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Code</TableHead>
               <TableHead>Item</TableHead>
+              <TableHead>Source</TableHead>
               <TableHead>Category</TableHead>
               <TableHead>Unit</TableHead>
+              <TableHead className="text-right">Rate</TableHead>
               <TableHead className="text-right">In stock</TableHead>
               <TableHead className="text-right">Min</TableHead>
               <TableHead>Status</TableHead>
@@ -241,16 +327,22 @@ export function ItemsTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {items.map((it) => {
+            {shown.map((it) => {
               const low = it.minStock !== null && Number(it.currentStock) <= Number(it.minStock);
               return (
                 <TableRow key={it.id}>
                   <TableCell className="whitespace-nowrap font-mono text-[12px] text-ik-ink-2">{it.sku ?? "—"}</TableCell>
                   <TableCell className="font-medium">{it.name}</TableCell>
+                  <TableCell className="whitespace-nowrap text-[12px] text-ik-ink-2">
+                    {BANQUET_SOURCE_LABELS[it.source]}
+                  </TableCell>
                   <TableCell className="text-[11.5px] uppercase tracking-wide text-ik-ink-2">
                     {it.category ?? "—"}
                   </TableCell>
                   <TableCell className="text-[12.5px]">{it.unit}</TableCell>
+                  <TableCell className="text-right font-mono text-[12px] text-ik-ink-2">
+                    {it.rate ? `₹${it.rate}` : "—"}
+                  </TableCell>
                   <TableCell className="text-right">
                     <span className={"font-mono " + (low ? "text-alert" : "text-ik-ink")}>{it.currentStock}</span>
                   </TableCell>
