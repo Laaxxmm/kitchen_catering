@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { DocumentEntityType, DocumentKind, Role } from "@prisma/client";
 import { db } from "@/server/db";
-import { requireRole } from "@/server/rbac";
+import { AuthorizationError, requireRole } from "@/server/rbac";
 import {
   buildStoragePath,
   saveDocument as writeToStorage,
@@ -32,6 +32,63 @@ const WRITE_ROLES = [
 ];
 
 const READ_ROLES: Role[] = [...WRITE_ROLES, Role.KITCHEN_HEAD];
+
+/**
+ * What an upload may be attached to. `entityId` comes from the client, and
+ * WRITE_ROLES above is the whole field staff — so without this a driver
+ * could staple a file to a supplier bill, or to no record at all (an orphan
+ * row plus a file on disk nothing ever reads).
+ *
+ * The roles mirror the middleware gate on the module each record lives in
+ * (src/middleware.ts). That is as close to "has business with this record"
+ * as the schema can answer: nothing records WHICH bill a given store keeper
+ * filed, only that filing supplier paper is their desk's job.
+ */
+const UPLOAD_TARGETS: Record<
+  DocumentEntityType,
+  { label: string; roles: Role[]; exists: (id: string) => Promise<number> }
+> = {
+  ORDER: {
+    label: "order",
+    roles: [Role.ADMIN, Role.MANAGER, Role.SALES, Role.STORE_KEEPER, Role.KITCHEN_HEAD, Role.ACCOUNTS, Role.DELIVERY, Role.FNB_SERVICE],
+    exists: (id) => db.order.count({ where: { id } }),
+  },
+  QUOTE: {
+    label: "quote",
+    roles: [Role.ADMIN, Role.MANAGER, Role.SALES],
+    exists: (id) => db.quote.count({ where: { id } }),
+  },
+  CUSTOMER_INVOICE: {
+    label: "customer invoice",
+    roles: [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.SALES, Role.DELIVERY, Role.FNB_SERVICE],
+    exists: (id) => db.customerInvoice.count({ where: { id } }),
+  },
+  VENDOR_PO: {
+    label: "purchase order",
+    roles: [Role.ADMIN, Role.MANAGER, Role.STORE_KEEPER, Role.ACCOUNTS],
+    exists: (id) => db.vendorPO.count({ where: { id } }),
+  },
+  VENDOR_BILL: {
+    label: "vendor bill",
+    roles: [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS, Role.STORE_KEEPER],
+    exists: (id) => db.vendorBill.count({ where: { id } }),
+  },
+  DELIVERY: {
+    label: "delivery",
+    roles: [Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD, Role.DELIVERY, Role.FNB_SERVICE],
+    exists: (id) => db.delivery.count({ where: { id } }),
+  },
+  PETTY_CASH_VOUCHER: {
+    label: "petty cash voucher",
+    roles: [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS],
+    exists: (id) => db.pettyCashVoucher.count({ where: { id } }),
+  },
+  PURCHASE_REQUISITION: {
+    label: "purchase requisition",
+    roles: [Role.ADMIN, Role.MANAGER, Role.KITCHEN_HEAD, Role.STORE_KEEPER],
+    exists: (id) => db.purchaseRequisition.count({ where: { id } }),
+  },
+};
 
 interface UploadInput {
   entityType: DocumentEntityType;
@@ -62,6 +119,17 @@ export async function uploadDocument(input: UploadInput) {
     throw new Error("Unsupported file format. Only PDF, JPEG, PNG accepted.");
   }
   const meta = fileMetaForDocumentKind(sniff);
+
+  // Target checks after the file checks: those are local, this one is a
+  // round trip. Both refuse with AuthorizationError — the same shape the
+  // role gate above throws, so a caller has one failure mode to handle.
+  const target = UPLOAD_TARGETS[input.entityType];
+  if ((await target.exists(input.entityId)) === 0) {
+    throw new AuthorizationError(`No ${target.label} with that id — nothing to attach this file to.`);
+  }
+  if (!target.roles.includes(session.user.role)) {
+    throw new AuthorizationError(`Your role cannot attach files to a ${target.label}.`);
+  }
 
   const storagePath = buildStoragePath({
     category: input.entityType.toLowerCase().replace(/_/g, "-"),

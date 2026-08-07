@@ -39,9 +39,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       throw new MobileAuthError(409, `Already ${delivery.status}`);
     }
 
-    // Legacy OTP path: if the delivery has a stored hash AND the
-    // caller actually sent an OTP, verify it. Otherwise skip.
-    if (delivery.otpHash && otp) {
+    // Legacy OTP path: a delivery that carries a hash must answer for it.
+    // Verifying only when the caller sent an OTP made omitting it the way
+    // to skip the check (same hole as the web action's confirmDeliveryOTP).
+    if (delivery.otpHash) {
+      if (!otp) {
+        throw new MobileAuthError(400, "This delivery still needs its OTP");
+      }
       if (!/^[0-9]{4}$/.test(otp)) {
         throw new MobileAuthError(400, "OTP must be 4 digits");
       }

@@ -8,6 +8,7 @@ import {
   BanquetRequisitionStatus,
   ChefRequisitionLineStatus,
   ChefRequisitionStatus,
+  CustomerInvoiceStatus,
   DeliveryStatus,
   MealType,
   OrderChannel,
@@ -28,7 +29,6 @@ import {
   ORDER_SALES_ROLES,
   ORDER_STORE_ROLES,
   requireRole,
-  requireSession,
 } from "@/server/rbac";
 import {
   OrderCreateInput,
@@ -61,7 +61,8 @@ import {
 } from "@/server/action-result";
 import { nextOrderCode } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
-import { toDecimal } from "@/lib/money";
+import { formatINR, toDecimal } from "@/lib/money";
+import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
 import { indefineStateCode } from "@/lib/org";
 import { isImmediateChannel, channelWantsFeedback, isEventDeliveryChannel, isPackagePricedChannel } from "@/lib/order-channels";
 import { getOrCreateHouseCustomerId } from "@/lib/house-customer";
@@ -1766,6 +1767,34 @@ async function cancelOrderInner(id: string, reason: string): Promise<{ ok: true 
       }
       throw new ActionError(`Order is already ${STATUS_LABEL[order.status].toLowerCase()}`);
     }
+
+    // A live customer invoice is the customer's own copy of this event.
+    // Cancel the order out from under one and the books carry a bill for
+    // something that never happened — so the invoice goes first.
+    // cancelCustomerInvoice is the way out: it hands the order back at
+    // DELIVERED, and it is the only path that also settles a live IRN with
+    // the GSP. Proformas are excluded — an estimate auto-raised on chef
+    // approval, which every accepted order carries (lib/invoice-kinds.ts).
+    const billed = await tx.customerInvoice.findFirst({
+      where: {
+        ...EXCLUDE_PROFORMA,
+        status: { not: CustomerInvoiceStatus.CANCELLED },
+        // Directly billed, or a member of a consolidated in-house folio.
+        OR: [{ orderId: id }, { consolidatedOrders: { some: { id } } }],
+      },
+      select: { invoiceNo: true, amountPaid: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (billed) {
+      // amountPaid, not the status: cash taken at the door is credited onto
+      // the DRAFT invoice, which no status check would catch.
+      throw new ActionError(
+        toDecimal(billed.amountPaid).gt(0)
+          ? `${formatINR(billed.amountPaid)} has been collected against invoice ${billed.invoiceNo} — reverse the payments and cancel that invoice first, then cancel the order.`
+          : `Invoice ${billed.invoiceNo} is still live against this order — cancel it first (that returns the order to Delivered), then cancel the order.`,
+      );
+    }
+
     const { code: orderCode } = (await tx.order.findUnique({
       where: { id },
       select: { code: true },
@@ -2419,8 +2448,21 @@ export async function listUpcomingOrdersForStore(window?: DateWindow) {
   }));
 }
 
+/**
+ * One order, in full. Gated on the same READ_ROLES as {@link listOrders} —
+ * signed-in was not enough: the housekeeping and maintenance managers are
+ * kept off every /orders route by the middleware, yet could read any order
+ * by id straight through this action.
+ *
+ * Not scoped by channel the way listOrders is, deliberately. That scope
+ * hides non-in-house orders from F&B/delivery, but their own board is fed by
+ * listEventPrepQueue + listUpcomingEventOrders (both DELIVERY-gated, both
+ * event-channel only) and every card there links here — and the two channel
+ * sets in lib/order-channels.ts together cover the whole enum, so the rule
+ * would blank a working screen and scope out nothing.
+ */
 export async function getOrder(id: string) {
-  await requireSession();
+  await requireRole(READ_ROLES);
   return db.order.findUnique({
     where: { id },
     include: {

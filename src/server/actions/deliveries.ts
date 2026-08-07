@@ -809,10 +809,16 @@ async function confirmDeliveryOTPInner(id: string, raw: unknown): Promise<{ ok: 
       throw new ActionError("Drivers can only confirm their own deliveries");
     }
 
-    // Legacy OTP support: if the delivery row has an otpHash AND the
-    // caller supplied an OTP, verify it for backwards compatibility.
-    // Otherwise (new flow, or no OTP supplied) skip the check entirely.
-    if (delivery.otpHash && input.otp) {
+    // Legacy OTP support: a row that carries a hash must still answer for
+    // it. New rows never do (scheduleDelivery leaves otpHash null), so this
+    // only fires on pre-retirement deliveries — but "verify only if the
+    // caller sent one" made omitting the OTP the way to skip the check.
+    if (delivery.otpHash) {
+      if (!input.otp) {
+        throw new ActionError(
+          "This delivery still needs its OTP — ask the customer for the code and enter it.",
+        );
+      }
       const ok = await bcrypt.compare(input.otp, delivery.otpHash);
       if (!ok) {
         const attempts = delivery.otpAttempts + 1;

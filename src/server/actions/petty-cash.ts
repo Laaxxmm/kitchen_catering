@@ -27,7 +27,9 @@ import {
 // middleware.ts (ADMIN/MANAGER/ACCOUNTS) — field roles could previously
 // reach balances/vouchers by direct action invocation (AUDIT_REPORT M3).
 const PETTY_MANAGE = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
-const TOPUP_APPROVAL_THRESHOLD = new Decimal(10000); // ₹10k — requires manager+ approval
+// ₹10k — above this a top-up is audit-logged under its own action name. It
+// is not an approval gate; see topUpPettyCashInner.
+const TOPUP_APPROVAL_THRESHOLD = new Decimal(10000);
 
 /**
  * Row-lock a float for the rest of the transaction. Every balance movement
@@ -478,10 +480,13 @@ async function topUpPettyCashInner(raw: unknown): Promise<{ ok: true }> {
   const amount = toDecimal(input.amount);
   if (amount.lte(0)) throw new ActionError("Top-up amount must be positive");
 
-  // Anything over the threshold needs MANAGER+ approval; we already gate
-  // entry to this action behind MANAGER/ADMIN, so the threshold is more
-  // about an audit-trail breadcrumb than a hard guard.
-  const needsApproval = amount.gt(TOPUP_APPROVAL_THRESHOLD);
+  // The threshold is a BREADCRUMB, not a gate: an over-limit top-up is
+  // posted like any other and only reads differently in the audit trail.
+  // Nobody countersigns it — PETTY_MANAGE admits ACCOUNTS, and the row below
+  // records the poster as its own approver, so the finance desk refilling
+  // the tin from the bank signs for itself. That is the client's call to
+  // change; if a second signature is ever wanted it belongs here, gated.
+  const overThreshold = amount.gt(TOPUP_APPROVAL_THRESHOLD);
 
   await db.$transaction(async (tx) => {
     await lockFloatRow(tx, input.floatId);
@@ -509,7 +514,7 @@ async function topUpPettyCashInner(raw: unknown): Promise<{ ok: true }> {
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
-        action: needsApproval ? "PETTY_CASH_TOP_UP_OVER_THRESHOLD" : "PETTY_CASH_TOP_UP",
+        action: overThreshold ? "PETTY_CASH_TOP_UP_OVER_THRESHOLD" : "PETTY_CASH_TOP_UP",
         entity: "PettyCashFloat",
         entityId: float.id,
         payloadHash: sha256Json({ amount: input.amount, source: input.source }),

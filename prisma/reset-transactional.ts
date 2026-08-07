@@ -14,7 +14,7 @@
  *   - All customer invoices + lines + payments
  *   - All purchase requisitions + lines
  *   - All vendor POs + lines, GRNs + lines, vendor bills + lines + payments
- *   - All ingredient receipts, issues, adjustments
+ *   - All ingredient receipts, issues, returns, adjustments, stock transfers
  *   - All petty cash floats, vouchers, top-ups
  *   - All salary runs + lines
  *   - All e-invoice logs
@@ -65,9 +65,18 @@ async function main() {
       const prLineDel = await tx.purchaseRequisitionLine.deleteMany();
       const prDel = await tx.purchaseRequisition.deleteMany();
 
-      // Ingredient movements (non-receipt)
+      // Ingredient movements (non-receipt). Kitchen returns hang off the
+      // ISSUE they reverse, not off the order, so nothing cascades them —
+      // and their RESTRICT FK blocks the issue delete outright, which took
+      // this whole script down the moment one return existed.
+      const irlDel = await tx.ingredientReturnLine.deleteMany();
+      const iretDel = await tx.ingredientReturn.deleteMany();
       const iiDel = await tx.ingredientIssue.deleteMany();
       const iaDel = await tx.ingredientAdjustment.deleteMany();
+      // Inter-store transfers are movement documents like any other: stock
+      // is rewound to opening below, so leaving them would leave the stock
+      // ledger reporting movements with nothing behind them.
+      const stDel = await tx.stockTransfer.deleteMany();
 
       // ── Sales / kitchen side ─────────────────────────────────────────
 
@@ -203,7 +212,9 @@ async function main() {
       console.log(`  Vendor bill payments:    ${vbpDel.count}`);
       console.log(`  Ingredient receipts:     ${irDel.count}`);
       console.log(`  Ingredient issues:       ${iiDel.count}`);
+      console.log(`  Ingredient returns:      ${iretDel.count}  (lines ${irlDel.count})`);
       console.log(`  Ingredient adjustments:  ${iaDel.count}`);
+      console.log(`  Stock transfers:         ${stDel.count}`);
       console.log(`  Petty cash vouchers:     ${pcvDel.count}`);
       console.log(`  Petty cash top-ups:      ${pctDel.count}`);
       console.log(`  Petty cash floats:       ${pcfDel.count}`);
