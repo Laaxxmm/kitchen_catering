@@ -56,6 +56,10 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { key: "kitchen", label: "Kitchen", icon: "briefcase", href: "/kitchen" },
       { key: "requisitions", label: "Requisitions", icon: "report", href: "/requisitions" },
+      // Hired casual labour: chef / F&B raise it, the manager approves it.
+      // Sits with the other "what this event needs" requests, not under
+      // Money — accounts reach the payable ones from the list itself.
+      { key: "manpower", label: "Manpower", icon: "user", href: "/manpower" },
       { key: "deliveries", label: "Deliveries", icon: "truck", href: "/deliveries" },
     ],
   },

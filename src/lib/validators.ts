@@ -1142,3 +1142,60 @@ export const VendorAdvanceInput = z.object({
   paidAt: z.string().min(1),
 });
 export type VendorAdvanceInputT = z.infer<typeof VendorAdvanceInput>;
+
+// =====================================================================
+// MANPOWER (hired casual labour — request → approve → done → settle → pay)
+// =====================================================================
+
+/** A money box that must actually contain a number. `decimalString` lets ""
+ *  through for "not provided"; a rate or a settled cost is never that. */
+const requiredAmount = decimalString.refine(
+  (v) => v !== "" && Number(v) >= 0,
+  "Enter an amount",
+);
+
+export const ManpowerRequestInput = z.object({
+  // Null / absent = raised standalone from the home screen, no order behind it.
+  orderId: z.string().min(1).nullable().optional(),
+  workDescription: z.string().trim().min(3).max(200),
+  people: z.coerce.number().int().min(1).max(1000),
+  days: z.coerce.number().int().min(1).max(365),
+  /** Approximate cost per person, per day. An estimate at this point —
+   *  accounts settle the real figure after the job. */
+  ratePerPersonPerDay: requiredAmount.refine(
+    (v) => Number(v) > 0,
+    "Rate must be greater than zero",
+  ),
+  notes: z.string().max(1000).nullable().optional(),
+});
+export type ManpowerRequestInputT = z.infer<typeof ManpowerRequestInput>;
+
+/** The manager approves as asked, or edits the count / days / rate down
+ *  first. Every field is optional: absent means "as requested". */
+export const ManpowerApprovalInput = z.object({
+  id: z.string().min(1),
+  people: z.coerce.number().int().min(1).max(1000).optional(),
+  days: z.coerce.number().int().min(1).max(365).optional(),
+  ratePerPersonPerDay: requiredAmount.refine(
+    (v) => Number(v) > 0,
+    "Rate must be greater than zero",
+  ).optional(),
+  note: z.string().max(1000).nullable().optional(),
+});
+export type ManpowerApprovalInputT = z.infer<typeof ManpowerApprovalInput>;
+
+/** Accounts recording what the labour actually invoiced, after the job. */
+export const ManpowerSettlementInput = z.object({
+  id: z.string().min(1),
+  actualCost: requiredAmount,
+  note: z.string().max(1000).nullable().optional(),
+});
+export type ManpowerSettlementInputT = z.infer<typeof ManpowerSettlementInput>;
+
+export const ManpowerPaymentInput = z.object({
+  id: z.string().min(1),
+  method: z.nativeEnum(PaymentMethod),
+  reference: z.string().max(120).nullable().optional(),
+  paidAt: isoDate.nullable().optional(),
+});
+export type ManpowerPaymentInputT = z.infer<typeof ManpowerPaymentInput>;

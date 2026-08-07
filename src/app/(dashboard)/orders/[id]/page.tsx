@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ChefRequisitionStatus, OrderChannel, OrderStatus, ProductionJobItemStatus, Role } from "@prisma/client";
+import { ChefRequisitionStatus, ManpowerRequestStatus, OrderChannel, OrderStatus, ProductionJobItemStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -21,7 +21,9 @@ import {
 import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoices";
 import { listDishes } from "@/server/actions/dishes";
 import { listAssignableUsers } from "@/server/actions/users";
+import { listManpowerRequests } from "@/server/actions/manpower";
 import { isEventDeliveryChannel, isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
+import { effectiveFigures, estimatedCost } from "@/lib/manpower";
 import { computeRevisionBand, type RevisionBand } from "@/lib/order-revision";
 import {
   FORCE_DELIVERABLE_ORDER_STATUSES,
@@ -44,6 +46,8 @@ import { ChefApprovalBlock } from "./_components/ChefApprovalBlock";
 import { ManagerChangeBlock } from "./_components/ManagerChangeBlock";
 import { OrderCostSummary } from "./_components/OrderCostSummary";
 import { FeedbackAllocation } from "./_components/FeedbackAllocation";
+import { RAISE_ROLES as MANPOWER_RAISE_ROLES, can } from "../../manpower/_components/gates";
+import { STATUS_META as MANPOWER_STATUS_META } from "../../manpower/_components/display";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +61,13 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     order.status === "PENDING_CHEF_APPROVAL"
       ? await listDishes({ active: true })
       : [];
+  // Hired labour tagged to this order. Read-only background information —
+  // this page never reads a manpower status into any order decision, and
+  // nothing below can change the order's own status.
+  const manpowerRequests = await listManpowerRequests({
+    orderId: order.id,
+    statuses: Object.values(ManpowerRequestStatus),
+  });
   const role = session?.user?.role;
   // In-house immediate channels skip admin sign-off and go straight to the
   // chef — the UI (button label, stepper, next-step hint) reflects that.
@@ -144,6 +155,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // same set may log leftover returns.
   const canAllocateStaff =
     isManager || role === Role.FNB_SERVICE || role === Role.DELIVERY;
+  // Raising a manpower request — a different thing from allocating our own
+  // serving staff above, and a different role set (the chef raises these).
+  const canRequestManpower = can(role, MANPOWER_RAISE_ROLES);
   // Leftover returns only apply to walk-up counter sales and outdoor catering.
   const showLeftovers =
     order.channel === OrderChannel.COUNTER_SALE || order.channel === OrderChannel.ODC;
@@ -625,9 +639,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
 
           {/* Serving staff — the named F&B crew allocated to run the event.
               Visible to every role that can open the page; editable by
-              admin / manager / F&B service / delivery. */}
+              admin / manager / F&B service / delivery. Our own people, no
+              money: hired-in labour is the separate panel below. */}
           <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
-            <h3 className="mb-2 font-medium text-[14px] text-ik-ink">Serving staff</h3>
+            <h3 className="mb-1 font-medium text-[14px] text-ik-ink">Serving staff</h3>
+            <p className="mb-2 text-[12px] text-ik-ink-3">Our own crew, named for this event. No cost attached.</p>
             {order.staffAllocations.length === 0 && !canAllocateStaff && (
               <p className="text-[12.5px] text-ik-ink-3">No staff allocated yet.</p>
             )}
@@ -636,6 +652,45 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               staff={order.staffAllocations}
               canEdit={canAllocateStaff}
             />
+          </section>
+
+          {/* Hired manpower — casual labour brought in for this event, with a
+              cost, a manager's approval and a payment. Deliberately alongside
+              rather than in the order's flow: the request runs in the
+              background and never holds the order up. */}
+          <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
+            <h3 className="mb-1 font-medium text-[14px] text-ik-ink">Hired manpower</h3>
+            <p className="mb-2 text-[12px] text-ik-ink-3">
+              Casual labour hired in, at a cost, approved by a manager. Runs alongside this order — nothing here holds it up.
+            </p>
+            {manpowerRequests.length === 0 ? (
+              <p className="text-[12.5px] text-ik-ink-3">None requested for this order.</p>
+            ) : (
+              <ul className="grid gap-2">
+                {manpowerRequests.map((m) => {
+                  const figures = effectiveFigures(m);
+                  const meta = MANPOWER_STATUS_META[m.status];
+                  return (
+                    <li key={m.id} className="grid gap-0.5">
+                      <Link href={`/manpower/${m.id}`} className="text-brand hover:underline">
+                        {m.workDescription}
+                      </Link>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusPill tone={meta.tone}>{meta.label}</StatusPill>
+                        <span className="font-mono text-[12px] text-ik-ink-2">
+                          {figures.people} × {figures.days}d · {formatINR(estimatedCost(m))}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {canRequestManpower && (
+              <Link href={`/manpower/new?orderId=${order.id}`} className="mt-3 inline-block">
+                <Button size="sm" variant="outline">Request manpower</Button>
+              </Link>
+            )}
           </section>
 
           {/* Leftovers returned — counter-sale / ODC only. A traceability log

@@ -71,6 +71,11 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   { pattern: /^\/kitchen(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD"] },
   // Requisitions: chef raises, store fulfils.
   { pattern: /^\/requisitions(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "STORE_KEEPER"] },
+  // Manpower — hired casual labour. Chef / F&B raise it, the manager approves
+  // (or edits the figures first), accounts settle the real cost and pay. One
+  // rule for the whole module: every screen is safe to reach for all of them,
+  // and the actions enforce who may approve vs. who may move money.
+  { pattern: /^\/manpower(\/|$)/, allow: ["ADMIN", "MANAGER", "KITCHEN_HEAD", "FNB_SERVICE", "DELIVERY", "ACCOUNTS"] },
   // Manual stock adjustments are admin/manager only (write-offs, opening fixes).
   // STORE_KEEPER allowed through statically; the adjust actions enforce the
   // stock.storeDirectEdit admin toggle server-side (middleware has no DB).

@@ -466,6 +466,14 @@ model User {
   vendorAdvancesRecorded       VendorAdvance[]        @relation("VendorAdvanceRecordedBy")
   leftoverReturnsRecorded      OrderLeftoverReturn[]  @relation("LeftoverReturnBy")
 
+  // Hired casual labour — see model ManpowerRequest.
+  manpowerRequested ManpowerRequest[] @relation("ManpowerRequestedBy")
+  manpowerApproved  ManpowerRequest[] @relation("ManpowerApprovedBy")
+  manpowerRejected  ManpowerRequest[] @relation("ManpowerRejectedBy")
+  manpowerCompleted ManpowerRequest[] @relation("ManpowerCompletedBy")
+  manpowerSettled   ManpowerRequest[] @relation("ManpowerSettledBy")
+  manpowerPaid      ManpowerRequest[] @relation("ManpowerPaidBy")
+
   productionItemsHandedOver ProductionJobItem[] @relation("ProductionItemHandedOverBy")
   // Notifications (Phase 5)
   notifications             Notification[]      @relation("NotificationToUser")
@@ -1132,6 +1140,9 @@ model Order {
   staffAllocations      OrderStaffAllocation[]
   leftoverReturns       OrderLeftoverReturn[]
   orderRevisions        OrderRevision[]
+  // Hired casual labour raised against this order. Purely informational
+  // for the order — nothing here ever moves Order.status.
+  manpowerRequests      ManpowerRequest[]         @relation("ManpowerRequestOrder")
 
   @@index([status])
   @@index([customerId])
@@ -1614,38 +1625,38 @@ model GRNLine {
 }
 
 model VendorBill {
-  id              String           @id @default(cuid())
-  billNo          String           @unique // internal: VB-26-27-0001
-  vendorBillNo    String? // vendor's printed invoice number
-  vendorId        String
-  vendor          Vendor           @relation(fields: [vendorId], references: [id])
-  poId            String?
-  po              VendorPO?        @relation(fields: [poId], references: [id])
-  status          VendorBillStatus @default(DRAFT)
-  issueDate       DateTime         @default(now())
-  dueDate         DateTime?
-  subtotal        Decimal          @default(0) @db.Decimal(14, 2)
-  taxTotal        Decimal          @default(0) @db.Decimal(14, 2)
-  grandTotal      Decimal          @default(0) @db.Decimal(14, 2)
-  amountPaid      Decimal          @default(0) @db.Decimal(14, 2)
-  paidAt          DateTime?
-  matchedByUserId String?
-  matchedBy       User?            @relation("VendorBillMatchedBy", fields: [matchedByUserId], references: [id])
-  matchedAt       DateTime?
-  discrepancyNote String?
-  notes           String?
+  id                    String           @id @default(cuid())
+  billNo                String           @unique // internal: VB-26-27-0001
+  vendorBillNo          String? // vendor's printed invoice number
+  vendorId              String
+  vendor                Vendor           @relation(fields: [vendorId], references: [id])
+  poId                  String?
+  po                    VendorPO?        @relation(fields: [poId], references: [id])
+  status                VendorBillStatus @default(DRAFT)
+  issueDate             DateTime         @default(now())
+  dueDate               DateTime?
+  subtotal              Decimal          @default(0) @db.Decimal(14, 2)
+  taxTotal              Decimal          @default(0) @db.Decimal(14, 2)
+  grandTotal            Decimal          @default(0) @db.Decimal(14, 2)
+  amountPaid            Decimal          @default(0) @db.Decimal(14, 2)
+  paidAt                DateTime?
+  matchedByUserId       String?
+  matchedBy             User?            @relation("VendorBillMatchedBy", fields: [matchedByUserId], references: [id])
+  matchedAt             DateTime?
+  discrepancyNote       String?
+  notes                 String?
   // Who signed off on paying this supplier, and on what terms. The audit log
   // keeps only a payload hash, so anything a human has to read back later
   // (why a mismatched bill was still approved / still edited) lives here.
-  approvedByUserId String?
-  approvedBy       User?           @relation("VendorBillApprovedBy", fields: [approvedByUserId], references: [id])
-  approvedAt       DateTime?
+  approvedByUserId      String?
+  approvedBy            User?            @relation("VendorBillApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedAt            DateTime?
   /// Why a bill that failed the 3-way match was approved anyway.
-  approvalNote     String?
+  approvalNote          String?
   /// Why accounts changed a mismatched bill's amounts.
   discrepancyEditReason String?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
 
   lines           VendorBillLine[]
   payments        VendorBillPayment[]
@@ -2860,4 +2871,90 @@ model VendorAdvance {
   createdAt       DateTime      @default(now())
 
   @@index([vendorId, appliedToBillId])
+}
+
+// =====================================================================
+// MANPOWER (hired casual labour)
+// =====================================================================
+
+// The chef / F&B team hire casual labour in for a job — "6 people, 2 days,
+// about ₹500 a head a day, for the Reddy wedding". The manager approves
+// (possibly editing the count or the rate down first), the job gets done,
+// accounts settle what the labour actually invoiced, and the money goes out.
+//
+// NOT OrderStaffAllocation: that names OUR OWN serving crew on an order and
+// carries no money, no approval and no payment. This one is outside hire
+// with a rupee figure attached, so it lives in its own table.
+//
+// orderId is nullable on purpose — a request can be raised standalone from
+// the home screen as well as from inside an order.
+enum ManpowerRequestStatus {
+  REQUESTED
+  APPROVED
+  COMPLETED // the job was done; only now can money move
+  PAID
+  REJECTED // terminal exit
+  CANCELLED // terminal exit
+}
+
+model ManpowerRequest {
+  id      String  @id @default(cuid())
+  orderId String?
+  order   Order?  @relation("ManpowerRequestOrder", fields: [orderId], references: [id])
+
+  status          ManpowerRequestStatus @default(REQUESTED)
+  workDescription String
+  notes           String?
+
+  // What was ASKED FOR. Never overwritten — the monthly report has to be
+  // able to say "asked for 6 at ₹500, approved 4 at ₹450".
+  requestedPeople Int
+  requestedDays   Int
+  requestedRate   Decimal @db.Decimal(12, 2) // per person, per day
+
+  requestedById String
+  requestedBy   User   @relation("ManpowerRequestedBy", fields: [requestedById], references: [id])
+
+  // What was APPROVED. Stamped on every approval — equal to the requested
+  // figures when the manager changed nothing, so the estimate always reads
+  // off one place without a "did they edit it?" branch.
+  approvedPeople Int?
+  approvedDays   Int?
+  approvedRate   Decimal?  @db.Decimal(12, 2)
+  approvedById   String?
+  approvedBy     User?     @relation("ManpowerApprovedBy", fields: [approvedById], references: [id])
+  approvedAt     DateTime?
+  approvalNote   String?
+
+  rejectedById    String?
+  rejectedBy      User?     @relation("ManpowerRejectedBy", fields: [rejectedById], references: [id])
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  // The job was done. The payment gate keys off this, not off the UI.
+  completedById String?
+  completedBy   User?     @relation("ManpowerCompletedBy", fields: [completedById], references: [id])
+  completedAt   DateTime?
+
+  // What accounts actually settled on once the labour invoiced. Null until
+  // then; the estimate above is what everyone works to in the meantime.
+  actualCost  Decimal?  @db.Decimal(14, 2)
+  settledById String?
+  settledBy   User?     @relation("ManpowerSettledBy", fields: [settledById], references: [id])
+  settledAt   DateTime?
+
+  paidById         String?
+  paidBy           User?          @relation("ManpowerPaidBy", fields: [paidById], references: [id])
+  paidAt           DateTime?
+  paymentMethod    PaymentMethod?
+  paymentReference String?
+
+  cancelledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([orderId])
+  @@index([createdAt])
 }
