@@ -41,6 +41,7 @@ import {
   payRefusal,
   PAYABLE_STATUSES,
 } from "@/lib/vendor-bill-gates";
+import { closeRefusal, CLOSEABLE_PO_STATUSES } from "@/lib/vendor-po-gates";
 import { indefineStateCode } from "@/lib/org";
 import { nextGRNNumber, nextVendorBillNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
@@ -582,6 +583,103 @@ export async function sendVendorPO(id: string): Promise<ActionResult> {
   }
 }
 
+/**
+ * Requisition lines this PO was buying for that are still waiting on goods
+ * it is never going to deliver: flip them back to PENDING (dropping the
+ * dangling PO-line link) and roll their parent requisition status back, so
+ * the store can raise a fresh PO. Shared by cancel and close — a retired PO
+ * strands the same lines whichever verb retired it.
+ */
+async function unstrandRequisitionLines(
+  tx: Prisma.TransactionClient,
+  lineIds: string[],
+  userId: string,
+): Promise<{
+  banquetReqIds: string[];
+  chefReqs: Array<{ reqId: string; requisitionNo: string }>;
+}> {
+  if (lineIds.length === 0) return { banquetReqIds: [], chefReqs: [] };
+
+  const reqLines = await tx.banquetRequisitionLine.findMany({
+    where: {
+      vendorPOLineId: { in: lineIds },
+      status: BanquetRequisitionLineStatus.AWAITING_PROCUREMENT,
+    },
+    select: { id: true, requisitionId: true },
+  });
+  if (reqLines.length) {
+    await tx.banquetRequisitionLine.updateMany({
+      where: { id: { in: reqLines.map((l) => l.id) } },
+      data: { status: BanquetRequisitionLineStatus.PENDING, vendorPOLineId: null },
+    });
+    for (const reqId of new Set(reqLines.map((l) => l.requisitionId))) {
+      await recomputeBanquetReqStatus(tx, reqId, userId);
+    }
+  }
+
+  // Same treatment for chef requisition lines (M16 link).
+  const chefReqLines = await tx.chefRequisitionLine.findMany({
+    where: {
+      vendorPOLineId: { in: lineIds },
+      status: ChefRequisitionLineStatus.AWAITING_PROCUREMENT,
+    },
+    select: {
+      id: true,
+      requisitionId: true,
+      requisition: { select: { requisitionNo: true } },
+    },
+  });
+  if (chefReqLines.length) {
+    await tx.chefRequisitionLine.updateMany({
+      where: { id: { in: chefReqLines.map((l) => l.id) } },
+      data: { status: ChefRequisitionLineStatus.PENDING, vendorPOLineId: null },
+    });
+    for (const reqId of new Set(chefReqLines.map((l) => l.requisitionId))) {
+      await recomputeChefReqStatusTx(tx, reqId, userId);
+    }
+  }
+
+  return {
+    banquetReqIds: [...new Set(reqLines.map((l) => l.requisitionId))],
+    chefReqs: [
+      ...new Map(
+        chefReqLines.map((l) => [l.requisitionId, l.requisition.requisitionNo]),
+      ).entries(),
+    ].map(([reqId, requisitionNo]) => ({ reqId, requisitionNo })),
+  };
+}
+
+/**
+ * Post-commit half of the un-strand: refresh the requisition screens and
+ * tell the store which requisitions dropped back to pending. The banquet
+ * un-strand is silent (no cancellation notification existed to fold into),
+ * the chef one isn't.
+ */
+function announceUnstrand(
+  poId: string,
+  affected: Awaited<ReturnType<typeof unstrandRequisitionLines>>,
+  why: string,
+) {
+  for (const reqId of affected.banquetReqIds) {
+    revalidatePath(`/banquet/requisitions/${reqId}`);
+  }
+  if (!affected.chefReqs.length) return;
+  for (const { reqId } of affected.chefReqs) revalidatePath(`/requisitions/${reqId}`);
+  revalidatePath("/requisitions");
+  revalidatePath("/queue/issuing");
+  const crNumbers = affected.chefReqs.map((r) => r.requisitionNo);
+  const many = crNumbers.length > 1;
+  deferAfterResponse("po-unstrand-chefreq:notify", () =>
+    notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
+      kind: "GENERIC",
+      title: `Re-raise procurement for ${crNumbers.join(", ")}`,
+      body: `${why} — ${many ? "requisitions" : "requisition"} ${crNumbers.join(", ")} ${many ? "are" : "is"} back to pending and ${many ? "need" : "needs"} a fresh PO.`,
+      link: "/requisitions",
+      dedupeKey: `po-unstrand-chefreq:${poId}`,
+    }),
+  );
+}
+
 export async function cancelVendorPO(id: string, reason: string): Promise<ActionResult> {
   try {
     // The store keeper (who raises POs) may cancel one that hasn't left the
@@ -615,52 +713,14 @@ export async function cancelVendorPO(id: string, reason: string): Promise<Action
         data: { status: VendorPOStatus.CANCELLED, closedAt: new Date(), notes: reason },
       });
 
-      // Un-strand any banquet requisition lines this PO was buying: flip them
-      // back to PENDING so the store can raise a fresh PO (else they'd sit
-      // AWAITING_PROCUREMENT pointing at a dead PO line).
-      const lineIds = po.lines.map((l) => l.id);
-      const reqLines = lineIds.length
-        ? await tx.banquetRequisitionLine.findMany({
-            where: { vendorPOLineId: { in: lineIds }, status: BanquetRequisitionLineStatus.AWAITING_PROCUREMENT },
-            select: { id: true, requisitionId: true },
-          })
-        : [];
-      if (reqLines.length) {
-        await tx.banquetRequisitionLine.updateMany({
-          where: { id: { in: reqLines.map((l) => l.id) } },
-          data: { status: BanquetRequisitionLineStatus.PENDING, vendorPOLineId: null },
-        });
-        for (const reqId of new Set(reqLines.map((l) => l.requisitionId))) {
-          await recomputeBanquetReqStatus(tx, reqId, session.user.id);
-        }
-      }
-
-      // Mirror the banquet un-strand for chef requisition lines (M16 link):
-      // flip the AWAITING_PROCUREMENT lines this dead PO was buying for back
-      // to PENDING (dropping the dangling PO-line link) and roll their parent
-      // requisition status back, so the store can re-raise procurement.
-      const chefReqLines = lineIds.length
-        ? await tx.chefRequisitionLine.findMany({
-            where: {
-              vendorPOLineId: { in: lineIds },
-              status: ChefRequisitionLineStatus.AWAITING_PROCUREMENT,
-            },
-            select: {
-              id: true,
-              requisitionId: true,
-              requisition: { select: { requisitionNo: true } },
-            },
-          })
-        : [];
-      if (chefReqLines.length) {
-        await tx.chefRequisitionLine.updateMany({
-          where: { id: { in: chefReqLines.map((l) => l.id) } },
-          data: { status: ChefRequisitionLineStatus.PENDING, vendorPOLineId: null },
-        });
-        for (const reqId of new Set(chefReqLines.map((l) => l.requisitionId))) {
-          await recomputeChefReqStatusTx(tx, reqId, session.user.id);
-        }
-      }
+      // Un-strand the requisition lines this dead PO was buying for — else
+      // they sit AWAITING_PROCUREMENT pointing at a PO line nothing will
+      // ever arrive against.
+      const unstranded = await unstrandRequisitionLines(
+        tx,
+        po.lines.map((l) => l.id),
+        session.user.id,
+      );
 
       await tx.auditLog.create({
         data: {
@@ -671,41 +731,90 @@ export async function cancelVendorPO(id: string, reason: string): Promise<Action
           payloadHash: sha256Json({ reason }),
         },
       });
-      const chefReqs = [
-        ...new Map(
-          chefReqLines.map((l) => [l.requisitionId, l.requisition.requisitionNo]),
-        ).entries(),
-      ].map(([reqId, requisitionNo]) => ({ reqId, requisitionNo }));
-      return {
-        banquetReqIds: [...new Set(reqLines.map((l) => l.requisitionId))],
-        chefReqs,
-      };
+      return unstranded;
     });
     revalidatePath(`/procurement/purchase-orders/${id}`);
     revalidatePath("/procurement/purchase-orders");
     revalidatePath("/dashboard");
-    for (const reqId of affectedReqs.banquetReqIds) {
-      revalidatePath(`/banquet/requisitions/${reqId}`);
-    }
-    if (affectedReqs.chefReqs.length) {
-      for (const { reqId } of affectedReqs.chefReqs) revalidatePath(`/requisitions/${reqId}`);
-      revalidatePath("/requisitions");
-      revalidatePath("/queue/issuing");
-      // No cancellation notification existed to fold into (the banquet
-      // un-strand above is silent), so tell the store which requisitions
-      // dropped back to pending and need a fresh PO.
-      const crNumbers = affectedReqs.chefReqs.map((r) => r.requisitionNo);
-      const many = crNumbers.length > 1;
-      deferAfterResponse("po-cancel-chefreq:notify", () =>
-        notifyRoles([Role.STORE_KEEPER, Role.ADMIN, Role.MANAGER], {
-          kind: "GENERIC",
-          title: `Re-raise procurement for ${crNumbers.join(", ")}`,
-          body: `PO cancelled — ${many ? "requisitions" : "requisition"} ${crNumbers.join(", ")} ${many ? "are" : "is"} back to pending and ${many ? "need" : "needs"} a fresh PO.`,
-          link: "/requisitions",
-          dedupeKey: `po-cancel-chefreq:${id}`,
-        }),
+    announceUnstrand(id, affectedReqs, "PO cancelled");
+    return { ok: true };
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+/**
+ * Retire a purchase order. CLOSED existed in the enum and in half a dozen
+ * "still open" queries, but nothing ever set it — so POs accumulated with no
+ * way to finish one, including the ordinary case of a supplier who simply
+ * cannot deliver the rest.
+ *
+ * ADMIN/MANAGER only. Closing writes off whatever the supplier still owes
+ * us — the same weight as approving or cancelling the PO, which is why it
+ * shares APPROVE_ROLES. Accounts are deliberately not on this list: their
+ * authority is over the bill, not over declaring the order finished, and the
+ * gates below already protect the payables desk by refusing to close over
+ * money that hasn't been billed or settled.
+ *
+ * A reason is required and lands on the PO (readably — AuditLog only keeps a
+ * hash), because on a PARTIALLY_RECEIVED PO this is a write-off decision.
+ */
+export async function closeVendorPO(id: string, reason: string): Promise<ActionResult> {
+  try {
+    const session = await requireRole(APPROVE_ROLES);
+    if (!reason.trim()) throw new ActionError("Say why this PO is being closed.");
+    const affectedReqs = await db.$transaction(async (tx) => {
+      const po = await tx.vendorPO.findUnique({
+        where: { id },
+        select: {
+          poNo: true,
+          status: true,
+          lines: { select: { id: true, receivedQty: true } },
+          bills: { select: { billNo: true, status: true } },
+        },
+      });
+      if (!po) throw new ActionError("Purchase order not found");
+      const refusal = closeRefusal({
+        poNo: po.poNo,
+        status: po.status,
+        anythingReceived: po.lines.some((l) => toDecimal(l.receivedQty).gt(0)),
+        bills: po.bills,
+      });
+      if (refusal) throw new ActionError(refusal);
+
+      // Status guard: a receipt or a cancellation racing this close loses
+      // cleanly rather than closing a PO that just moved on.
+      const updated = await tx.vendorPO.updateMany({
+        where: { id, status: { in: CLOSEABLE_PO_STATUSES } },
+        data: { status: VendorPOStatus.CLOSED, closedAt: new Date(), notes: reason },
+      });
+      if (updated.count === 0) {
+        throw new ActionError("This PO just changed status — refresh the page.");
+      }
+
+      // The undelivered balance is never coming, so anything still waiting
+      // on it goes back to the store to source another way.
+      const unstranded = await unstrandRequisitionLines(
+        tx,
+        po.lines.map((l) => l.id),
+        session.user.id,
       );
-    }
+
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "VENDOR_PO_CLOSED",
+          entity: "VendorPO",
+          entityId: id,
+          payloadHash: sha256Json({ reason }),
+        },
+      });
+      return unstranded;
+    });
+    revalidatePath(`/procurement/purchase-orders/${id}`);
+    revalidatePath("/procurement/purchase-orders");
+    revalidatePath("/dashboard");
+    announceUnstrand(id, affectedReqs, "PO closed");
     return { ok: true };
   } catch (err) {
     return actionFailure(err);
@@ -1496,6 +1605,30 @@ async function createVendorBillInner(raw: unknown): Promise<{ ok: true; id: stri
     return bill;
   });
 
+  // Until now recording a bill told nobody: it landed in DRAFT and sat there
+  // unless someone happened to browse to it. The desk that has to match,
+  // approve and pay it hears about it the moment it exists.
+  deferAfterResponse("vendor-bill-recorded:notify", async () => {
+    const after = await db.vendorBill.findUnique({
+      where: { id: result.id },
+      select: {
+        billNo: true,
+        vendor: { select: { name: true } },
+        po: { select: { poNo: true } },
+      },
+    });
+    if (!after) return;
+    await notifyRoles(BILL_APPROVE_ROLES, {
+      kind: "GENERIC",
+      title: `Supplier bill ${after.billNo} recorded — ${after.vendor.name}`,
+      body: after.po
+        ? `Against ${after.po.poNo}. Run the 3-way match, then approve it. Nothing is paid until you do.`
+        : "No linked PO. Approve it before it can be paid.",
+      link: `/procurement/vendor-bills/${result.id}`,
+      dedupeKey: `bill-recorded:${result.id}`,
+    });
+  });
+
   revalidatePath("/procurement/vendor-bills");
   return { ok: true, id: result.id, billNo: result.billNo };
 }
@@ -1641,7 +1774,7 @@ async function matchVendorBillInner(
   id: string,
 ): Promise<{ ok: true; matched: boolean; discrepancies: Discrepancy[] }> {
   const session = await requireRole(BILL_WRITE_ROLES);
-  return db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     const bill = await tx.vendorBill.findUnique({
       where: { id },
       include: {
@@ -1743,8 +1876,31 @@ async function matchVendorBillInner(
     });
 
     revalidatePath(`/procurement/vendor-bills/${id}`);
-    return { ok: true as const, matched, discrepancies };
+    return { ok: true as const, matched, discrepancies, billNo: bill.billNo, poNo: bill.po.poNo };
   });
+
+  // The match verdict is the moment a bill starts waiting on a human. A
+  // failure names the PO and says so plainly — a DISCREPANCY that nobody is
+  // told about is the bill that sits unpayable for a fortnight.
+  //
+  // Deliberately no dedupeKey: an edited bill can be re-matched and fail
+  // again, and that second failure has to be heard, not swallowed as a
+  // duplicate.
+  const { matched, discrepancies, billNo, poNo } = result;
+  deferAfterResponse("vendor-bill-match:notify", () =>
+    notifyRoles(BILL_APPROVE_ROLES, {
+      kind: "GENERIC",
+      title: matched
+        ? `Bill ${billNo} matched ${poNo} — needs your approval`
+        : `Bill ${billNo} FAILED the 3-way match against ${poNo}`,
+      body: matched
+        ? "It agrees with the PO and the delivery. Approve it and it becomes payable."
+        : `${discrepancies.length} discrepancy(ies) — the supplier is billing something other than what was ordered and received. Correct the amounts or approve it with a written reason. It cannot be paid as it stands.`,
+      link: `/procurement/vendor-bills/${id}`,
+    }),
+  );
+
+  return { ok: true as const, matched, discrepancies };
 }
 
 /**

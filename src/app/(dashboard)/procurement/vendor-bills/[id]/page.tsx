@@ -143,6 +143,18 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
         </div>
       )}
 
+      {/* A store keeper who records the bill and runs the match lands here
+          with no Edit and no Approve, on a document the page is shouting
+          about. Say who owns it from here — no controls they can't use. */}
+      {!canEdit && !canApprove &&
+        (bill.status === VendorBillStatus.DISCREPANCY || bill.status === VendorBillStatus.MATCHED) && (
+        <div className="mb-4 rounded-md border border-ik-rule bg-ik-paper-alt p-3 text-[12.5px] text-ik-ink-2">
+          {bill.status === VendorBillStatus.DISCREPANCY
+            ? "This bill doesn't agree with the PO and the delivery. Changing what a supplier gets paid is the accounts desk's call, which is why there's no Edit button here — accounts (or a manager/admin) will correct the amounts or approve it with a written reason. Nothing is paid until they do."
+            : "This bill agrees with the PO and the delivery. Accounts take it from here — they approve it, then pay it."}
+        </div>
+      )}
+
       {(bill.discrepancyEditReason || bill.approvalNote) && (
         <div className="mb-4 grid gap-1 rounded-md border border-ik-rule bg-ik-card p-3 text-[12.5px] text-ik-ink-2">
           {bill.discrepancyEditReason && (

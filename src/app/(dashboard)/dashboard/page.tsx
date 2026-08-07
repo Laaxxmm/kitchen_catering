@@ -402,6 +402,7 @@ export default async function DashboardPage({
         billNo: b.billNo,
         vendorName: b.vendor.name,
         outstanding: toDecimal(b.grandTotal).minus(toDecimal(b.amountPaid)),
+        status: b.status,
         // Unapproved bills stay on the board (they're still money owed) but
         // offer approval, not payment — the actions refuse the rest.
         payable: isPayable(b.status),

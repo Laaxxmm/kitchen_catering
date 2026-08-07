@@ -9,6 +9,7 @@ import { auth } from "@/server/auth";
 import {
   approveVendorPO,
   cancelVendorPO,
+  closeVendorPO,
   recallVendorPOToDraft,
   getVendorPO,
   sendVendorPO,
@@ -18,6 +19,7 @@ import {
 import { acknowledgeRevisedDocument } from "@/server/actions/orders";
 import { db } from "@/server/db";
 import { ORDER_STORE_ROLES } from "@/server/rbac";
+import { billProgress, CLOSEABLE_PO_STATUSES, type BillProgress } from "@/lib/vendor-po-gates";
 import { formatINR } from "@/lib/money";
 import { Decimal } from "decimal.js";
 import { formatIST } from "@/lib/time";
@@ -72,8 +74,13 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
       (role === Role.STORE_KEEPER &&
         (po.status === VendorPOStatus.DRAFT || po.status === VendorPOStatus.PENDING_APPROVAL)));
   const canReceive = (po.status === VendorPOStatus.APPROVED || po.status === VendorPOStatus.SENT || po.status === VendorPOStatus.PARTIALLY_RECEIVED) && (role === Role.ADMIN || role === Role.MANAGER || role === Role.STORE_KEEPER);
-  // Supplier bills are finance-only — store keepers never record them.
+  // Mirrors BILL_WRITE_ROLES: the store keeper holds the physical bill at
+  // goods-in, so they record it too. Approving and paying stay finance-only.
   const canRecordBill = role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS || role === Role.STORE_KEEPER;
+  // Retiring a PO writes off whatever the supplier never delivered — same
+  // weight as approving it, so admin/manager only (APPROVE_ROLES in the
+  // action). The action refuses over unbilled or unpaid money regardless.
+  const canClose = CLOSEABLE_PO_STATUSES.includes(po.status) && (role === Role.ADMIN || role === Role.MANAGER);
 
   // getVendorPO carries only the order's id and code, so read the revision
   // stamps here. Skipped on a cancelled PO — nothing left to chase.
@@ -103,6 +110,10 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
   async function doCancel(reason: string) {
     "use server";
     return await cancelVendorPO(id, reason);
+  }
+  async function doClose(reason: string) {
+    "use server";
+    return await closeVendorPO(id, reason);
   }
   async function doRecall() {
     "use server";
@@ -230,6 +241,8 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
       ) : (
         <NextStep
           status={po.status}
+          notes={po.notes}
+          bills={billProgress(po.bills)}
           vendorPending={po.vendor.approvalStatus !== "APPROVED"}
           vendorName={po.vendor.name}
           approveVendorSlot={
@@ -376,6 +389,16 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
               successMessage="PO cancelled"
             />
           )}
+          {canClose && (
+            <ActionReasonForm
+              action={doClose}
+              tone="warning"
+              heading="Close PO"
+              description="Retires this PO — for when the supplier isn't going to deliver the rest. Anything still waiting on it goes back to the store to source another way. Refused while a bill on it is unpaid, or while received goods have no bill recorded."
+              submitLabel="Close PO"
+              successMessage="PO closed"
+            />
+          )}
         </aside>
       </div>
     </>
@@ -384,6 +407,10 @@ export default async function VendorPODetailPage({ params }: { params: Promise<{
 
 interface NextStepProps {
   status: VendorPOStatus;
+  /** Cancellation / closure reason — the only place it's readable. */
+  notes: string | null;
+  /** Where the supplier bill(s) actually got to; null when none exists yet. */
+  bills: BillProgress | null;
   /** Vendor still awaiting manager sign-off — submit will refuse. */
   vendorPending: boolean;
   vendorName: string;
@@ -400,8 +427,17 @@ interface NextStepProps {
  * gets the richer NotifyVendorBlock with WhatsApp/email/mark-sent actions;
  * everything else just needs a one-liner pointing at the next button.
  */
-function NextStep({ status, vendorPending, vendorName, approveVendorSlot, canReceive, canRecordBill, receiveHref, recordBillHref }: NextStepProps) {
-  if (status === VendorPOStatus.CANCELLED || status === VendorPOStatus.CLOSED) return null;
+function NextStep({ status, notes, bills, vendorPending, vendorName, approveVendorSlot, canReceive, canRecordBill, receiveHref, recordBillHref }: NextStepProps) {
+  // Retired POs: no next step, but say why — the reason lives on the PO and
+  // this is the only place it's readable (the audit log keeps a hash).
+  if (status === VendorPOStatus.CANCELLED || status === VendorPOStatus.CLOSED) {
+    if (!notes) return null;
+    return (
+      <div className="mb-4 rounded-md border border-ik-rule bg-ik-paper-alt p-3 text-[13px] text-ik-ink-2">
+        <strong>{status === VendorPOStatus.CLOSED ? "Closed:" : "Cancelled:"}</strong> {notes}
+      </div>
+    );
+  }
 
   let body: React.ReactNode = null;
 
@@ -450,22 +486,55 @@ function NextStep({ status, vendorPending, vendorName, approveVendorSlot, canRec
         </div>
       </>
     );
-  } else if (status === VendorPOStatus.PARTIALLY_RECEIVED) {
+  }
+
+  // Buttons that go with a bill that already exists. `billId` is set only
+  // when there's exactly one — with several, the Vendor bills panel further
+  // down is the honest list.
+  const billLinks = bills && (
+    <>
+      {bills.billId && (
+        <Link href={`/procurement/vendor-bills/${bills.billId}`}>
+          <Button size="sm" variant={bills.attention ? "default" : "outline"}>Open the bill</Button>
+        </Link>
+      )}
+      {canRecordBill && (
+        <Link href={recordBillHref}>
+          <Button size="sm" variant="outline">Record another bill</Button>
+        </Link>
+      )}
+    </>
+  );
+
+  if (status === VendorPOStatus.PARTIALLY_RECEIVED) {
     body = (
       <>
-        <strong>Next:</strong> Some items have arrived. Log another delivery when the rest comes in. The
-        supplier&apos;s bill can wait until everything is in.
-        <div className="mt-2">
+        <strong>{bills?.attention ? "Needs attention:" : "Next:"}</strong> Some items have arrived.
+        Log another delivery when the rest comes in.{" "}
+        {bills
+          ? `${bills.headline}.${bills.next ? ` ${bills.next}` : ""}`
+          : "The supplier's bill can wait until everything is in."}
+        <div className="mt-2 flex flex-wrap gap-2">
           {canReceive && (
             <Link href={receiveHref}>
               <Button size="sm">Log another delivery</Button>
             </Link>
           )}
+          {billLinks}
         </div>
       </>
     );
   } else if (status === VendorPOStatus.RECEIVED) {
-    body = canRecordBill ? (
+    // The banner used to prompt "record the supplier bill" off role alone, so
+    // a fully billed — even fully paid — PO still asked for a bill. Report
+    // where the bill actually got to instead.
+    body = bills ? (
+      <>
+        <strong>{bills.attention ? "Needs attention:" : "Next:"}</strong> All goods received.{" "}
+        {bills.headline}.{bills.next ? ` ${bills.next}` : ""}
+        <div className="mt-2 flex flex-wrap gap-2">{billLinks}</div>
+      </>
+    ) : canRecordBill ? (
       <>
         <strong>Next:</strong> All goods received. When the supplier sends the bill, record it — the
         system checks it against this PO + the delivery notes before letting accounts pay.
@@ -489,7 +558,14 @@ function NextStep({ status, vendorPending, vendorName, approveVendorSlot, canRec
   if (!body) return null;
 
   return (
-    <div className="mb-4 rounded-md border border-brand-200 bg-brand-50 p-3 text-[13px] text-ik-ink-2">
+    <div
+      className={
+        "mb-4 rounded-md border p-3 text-[13px] " +
+        (bills?.attention
+          ? "border-amber bg-amber-wash text-amber-700"
+          : "border-brand-200 bg-brand-50 text-ik-ink-2")
+      }
+    >
       {body}
     </div>
   );
