@@ -42,6 +42,7 @@ export default async function BanquetLandingPage() {
         { label: "Requisitions", href: "/banquet/requisitions" },
         { label: "Receipts", href: "/banquet/receipts" },
         { label: "Issues", href: "/banquet/issues" },
+        { label: "Returns", href: "/banquet/returns" },
         { label: "Adjust stock", href: "/banquet/adjust" },
         { label: "Stock count (bulk)", href: "/banquet/stock-count" },
         { label: "Reports", href: "/banquet/reports" },

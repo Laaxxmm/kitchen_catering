@@ -18,6 +18,9 @@ export default async function NewReturnPage({
 
   const { orderId } = await searchParams;
   const issues = await listReturnableIssues({ orderId });
+  // Arrived from an order? Say so in the heading — every row is already
+  // scoped to it, and the code comes free with the issues (no extra query).
+  const scopedCode = orderId ? issues[0]?.orderCode ?? null : null;
 
   async function submit(input: IngredientReturnInputT) {
     "use server";
@@ -27,9 +30,16 @@ export default async function NewReturnPage({
   return (
     <>
       <PageHeader
-        eyebrow="Inventory"
-        title="Record stock returned from the kitchen"
-        description="Each line comes back against the issue it went out on, at the price that issue charged — so the stock goes on hand and the event's food cost reverses by exactly what it was charged. You can't send back more than that issue still has outstanding."
+        eyebrow={orderId ? `Inventory · ${scopedCode ?? "Order"}` : "Inventory"}
+        title={
+          orderId
+            ? "Record stock returned from this order"
+            : "Record stock returned from the kitchen"
+        }
+        description={
+          (orderId ? "Only what went out on this order is listed. " : "") +
+          "Each line comes back against the issue it went out on, at the price that issue charged — so the stock goes on hand and the event's food cost reverses by exactly what it was charged. You can't send back more than that issue still has outstanding."
+        }
       />
       <ReturnForm
         issues={issues.map((i) => ({ ...i, issuedAt: formatIST(i.issuedAt) }))}

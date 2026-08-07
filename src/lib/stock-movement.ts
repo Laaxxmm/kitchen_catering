@@ -53,6 +53,45 @@ export function checkReturnQty(input: {
   return null;
 }
 
+/** One movement of one item against one order — issued or returned. */
+export interface OrderItemQty {
+  orderId: string;
+  itemId: string;
+  qty: Decimal | string;
+}
+
+/**
+ * Per order, how many distinct items still have stock out with the client:
+ * issued − returned, netted per (order, item), counting the items that come
+ * out positive. Items rather than quantities, because "12 pieces + 3 kg" is
+ * not a number anyone can act on.
+ *
+ * Pure, so the netting behind the F&B store's return worklist is testable
+ * without a database: a key or sign slip here either hides an order that
+ * still owes stock, or parks one that owes nothing on the list forever.
+ */
+export function itemsStillOutByOrder(
+  issued: readonly OrderItemQty[],
+  returned: readonly OrderItemQty[],
+): Map<string, number> {
+  // Separator that cannot occur inside a cuid, so the composite key can
+  // never collide and splitting it back apart is exact.
+  const key = (l: OrderItemQty) => `${l.orderId}\u0000${l.itemId}`;
+  const net = new Map<string, Decimal>();
+  for (const l of issued) {
+    net.set(key(l), (net.get(key(l)) ?? new Decimal(0)).plus(toDecimal(l.qty)));
+  }
+  for (const l of returned) {
+    net.set(key(l), (net.get(key(l)) ?? new Decimal(0)).minus(toDecimal(l.qty)));
+  }
+  const counts = new Map<string, number>();
+  for (const [k, qty] of net) {
+    const orderId = k.slice(0, k.indexOf("\u0000"));
+    counts.set(orderId, (counts.get(orderId) ?? 0) + (qty.gt(0) ? 1 : 0));
+  }
+  return counts;
+}
+
 /**
  * Refusal message for the source side of a transfer, or null when it's
  * allowed. A transfer that takes a store below zero is never a transfer —

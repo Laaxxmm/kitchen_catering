@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { Decimal } from "decimal.js";
-import { checkReturnQty, checkTransferQty, remainingReturnable } from "@/lib/stock-movement";
+import {
+  checkReturnQty,
+  checkTransferQty,
+  itemsStillOutByOrder,
+  remainingReturnable,
+} from "@/lib/stock-movement";
 import { newMovingAverage } from "@/lib/inventory-cost";
 
 // These guards are the whole reason the two new movements are safe to give
@@ -55,6 +60,69 @@ describe("checkReturnQty", () => {
   it("refuses a zero or negative quantity", () => {
     expect(checkReturnQty({ ...base, want: "0", alreadyReturned: "0" })).toContain("greater than 0");
     expect(checkReturnQty({ ...base, want: "-1", alreadyReturned: "0" })).toContain("greater than 0");
+  });
+});
+
+describe("itemsStillOutByOrder", () => {
+  // Drives the F&B store's return worklist: an order is on the list only
+  // while something it was issued has not come back.
+  it("counts items, not quantities, and nets per order+item", () => {
+    const out = itemsStillOutByOrder(
+      [
+        { orderId: "o1", itemId: "plate", qty: "100" },
+        { orderId: "o1", itemId: "tray", qty: "10" },
+        { orderId: "o2", itemId: "plate", qty: "50" },
+      ],
+      [
+        { orderId: "o1", itemId: "plate", qty: "100" }, // fully back
+        { orderId: "o1", itemId: "tray", qty: "4" }, // 6 still out
+      ],
+    );
+    expect(out.get("o1")).toBe(1);
+    expect(out.get("o2")).toBe(1);
+  });
+
+  it("adds up several issues of the same item before netting", () => {
+    const out = itemsStillOutByOrder(
+      [
+        { orderId: "o1", itemId: "cup", qty: "30" },
+        { orderId: "o1", itemId: "cup", qty: "20" },
+      ],
+      [{ orderId: "o1", itemId: "cup", qty: "50" }],
+    );
+    expect(out.get("o1")).toBe(0);
+  });
+
+  it("keeps one order's returns off another order's balance", () => {
+    const out = itemsStillOutByOrder(
+      [{ orderId: "o1", itemId: "plate", qty: "10" }],
+      [{ orderId: "o2", itemId: "plate", qty: "10" }],
+    );
+    expect(out.get("o1")).toBe(1);
+    expect(out.get("o2")).toBe(0);
+  });
+
+  it("holds exact decimals — a 0.1 + 0.2 drift would strand an order on the list", () => {
+    const out = itemsStillOutByOrder(
+      [
+        { orderId: "o1", itemId: "foil", qty: "0.1" },
+        { orderId: "o1", itemId: "foil", qty: "0.2" },
+      ],
+      [{ orderId: "o1", itemId: "foil", qty: "0.3" }],
+    );
+    expect(out.get("o1")).toBe(0);
+  });
+
+  it("never counts an over-return as stock still out", () => {
+    const out = itemsStillOutByOrder(
+      [{ orderId: "o1", itemId: "plate", qty: "5" }],
+      [{ orderId: "o1", itemId: "plate", qty: "7" }],
+    );
+    expect(out.get("o1")).toBe(0);
+  });
+
+  it("is empty when nothing ever went out", () => {
+    expect(itemsStillOutByOrder([], []).size).toBe(0);
   });
 });
 

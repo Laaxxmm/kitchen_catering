@@ -19,6 +19,7 @@ import {
   swapOrderItemDish,
 } from "@/server/actions/orders";
 import { createCustomerInvoiceFromOrder } from "@/server/actions/customer-invoices";
+import { getOrderBanquetLedger } from "@/server/actions/banquet";
 import { listDishes } from "@/server/actions/dishes";
 import { listAssignableUsers } from "@/server/actions/users";
 import { listManpowerRequests } from "@/server/actions/manpower";
@@ -121,6 +122,35 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     where: { orderId: id, kind: "PROFORMA", status: { not: "CANCELLED" } },
     select: { id: true, invoiceNo: true, shareToken: true, emailedAt: true, emailedTo: true, grandTotal: true },
   });
+
+  // ─── What came back from the event ───────────────────────────────────
+  // Chef and manager read the kitchen side here without store access; the
+  // record links mirror each action's own gate (recordIngredientReturn:
+  // admin/manager/store keeper — recordBanquetReturn: those plus F&B).
+  // Visibility is not permission: nothing on this panel records anything,
+  // and none of it touches the order's status.
+  const canRecordKitchenReturn = isManager || role === Role.STORE_KEEPER;
+  const canRecordFnbReturn = isManager || isFnb || role === Role.STORE_KEEPER;
+  // getOrderBanquetLedger has its own read gate — only call it for the roles
+  // it admits, or the page throws for sales.
+  const canSeeFnbLedger = canRecordFnbReturn || role === Role.ACCOUNTS;
+  const [kitchenIssueCount, kitchenReturnLines, fnbLedger] = await Promise.all([
+    db.ingredientIssue.count({ where: { orderId: id } }),
+    db.ingredientReturnLine.findMany({
+      where: { issue: { orderId: id } },
+      orderBy: { return: { returnedAt: "desc" } },
+      select: {
+        id: true,
+        quantity: true,
+        reason: true,
+        return: { select: { returnedAt: true } },
+        issue: { select: { ingredient: { select: { name: true, unit: true } } } },
+      },
+    }),
+    canSeeFnbLedger ? getOrderBanquetLedger(id) : Promise.resolve([]),
+  ]);
+  // Nothing ever left the store for this order → nothing can come back.
+  const showReturnsPanel = kitchenIssueCount > 0 || fnbLedger.length > 0;
 
   // ─── Kitchen → delivery handover (per dish) ──────────────────────────
   // Each dish is ticked the moment it's physically given to the delivery
@@ -714,6 +744,82 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                 }))}
                 canEdit={canAllocateStaff}
               />
+            </section>
+          )}
+
+          {/* Returned to store — what physically came back from this event.
+              ONE panel covering both stores rather than two more boxes: the
+              chef hands surplus ingredients back and the F&B crew hands
+              cutlery back in the same conversation with the store, and this
+              column already carries four operational panels. It sits next to
+              "Leftovers returned" so everything that comes back off an event
+              reads together — leftovers being the food-traceability log, this
+              being the stock that goes back on the shelf. */}
+          {showReturnsPanel && (
+            <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 text-[13px]">
+              <h3 className="mb-1 font-medium text-[14px] text-ik-ink">Returned to store</h3>
+              <p className="mb-3 text-[12px] text-ik-ink-3">
+                Stock handed back after the event. The store books it in against this order — it goes
+                back on the shelf as sellable stock.
+              </p>
+
+              {kitchenIssueCount > 0 && (
+                <div className="grid gap-1">
+                  <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">
+                    Kitchen ingredients
+                  </div>
+                  {kitchenReturnLines.length === 0 ? (
+                    <p className="text-[12.5px] text-ik-ink-3">Nothing returned yet.</p>
+                  ) : (
+                    <ul className="grid gap-1">
+                      {kitchenReturnLines.map((l) => (
+                        <li key={l.id} className="flex items-baseline justify-between gap-2">
+                          <span>
+                            {l.issue.ingredient.name}
+                            <span className="ml-1 text-[11.5px] text-ik-ink-3">
+                              {l.reason} · {formatIST(l.return.returnedAt, "d MMM")}
+                            </span>
+                          </span>
+                          <span className="shrink-0 font-mono text-[12px]">
+                            {l.quantity.toString()} {l.issue.ingredient.unit}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {canRecordKitchenReturn && (
+                    <Link href={`/inventory/returns/new?orderId=${order.id}`} className="mt-1 inline-block">
+                      <Button size="sm" variant="outline">Record kitchen return</Button>
+                    </Link>
+                  )}
+                </div>
+              )}
+
+              {fnbLedger.length > 0 && (
+                <div className={"grid gap-1" + (kitchenIssueCount > 0 ? " mt-4" : "")}>
+                  <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">
+                    F&amp;B store items
+                  </div>
+                  <ul className="grid gap-1">
+                    {fnbLedger.map((r) => (
+                      <li key={r.itemId} className="flex items-baseline justify-between gap-2">
+                        <span>{r.name}</span>
+                        <span className="shrink-0 font-mono text-[12px]">
+                          {r.returned}/{r.issued} back
+                          {Number(r.outstanding) > 0 && (
+                            <span className="ml-1 text-amber-700">· {r.outstanding} out</span>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {canRecordFnbReturn && (
+                    <Link href={`/banquet/returns/${order.id}`} className="mt-1 inline-block">
+                      <Button size="sm" variant="outline">Record F&amp;B return</Button>
+                    </Link>
+                  )}
+                </div>
+              )}
             </section>
           )}
 

@@ -15,6 +15,7 @@ import { istToUtc } from "@/lib/time";
 import { sha256Json } from "@/lib/audit";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import { EVENT_DELIVERY_CHANNEL_LIST } from "@/lib/order-channels";
+import { itemsStillOutByOrder } from "@/lib/stock-movement";
 import { createNotification, notifyRoles } from "@/server/notification-core";
 import { deferAfterResponse } from "@/server/defer";
 import { nextBanquetRequisitionNumber, nextGPItemCode } from "@/lib/sequences";
@@ -352,9 +353,11 @@ async function recordBanquetIssueInner(raw: unknown): Promise<{ ok: true; id: st
   const session = await requireRole(ISSUE_ROLES);
   const input = BanquetIssueInput.parse(raw);
 
+  // `|| "0"` because decimalString admits "" — a blank box would otherwise
+  // throw a raw DecimalError instead of the plain refusal below.
   const lines = input.lines.map((l) => ({
     itemId: l.itemId,
-    qty: new Prisma.Decimal(l.quantity),
+    qty: new Prisma.Decimal(l.quantity || "0"),
   }));
   for (const l of lines) {
     if (l.qty.lessThanOrEqualTo(0)) throw new ActionError("Quantity must be > 0");
@@ -461,9 +464,10 @@ async function recordBanquetReturnInner(raw: unknown): Promise<{ ok: true; id: s
   const session = await requireRole(ISSUE_ROLES);
   const input = BanquetReturnInput.parse(raw);
 
+  // Blank-guard: decimalString lets "" through, and new Decimal("") throws.
   const lines = input.lines.map((l) => ({
     itemId: l.itemId,
-    qty: new Prisma.Decimal(l.quantity),
+    qty: new Prisma.Decimal(l.quantity || "0"),
   }));
   for (const l of lines) {
     if (l.qty.lessThanOrEqualTo(0)) throw new ActionError("Quantity must be > 0");
@@ -536,7 +540,10 @@ async function recordBanquetReturnInner(raw: unknown): Promise<{ ok: true; id: s
 
   revalidatePath("/banquet/items");
   revalidatePath("/banquet");
+  revalidatePath("/banquet/returns");
+  revalidatePath(`/banquet/returns/${input.orderId}`);
   revalidatePath(`/deliveries/event-prep/${input.orderId}`);
+  revalidatePath(`/orders/${input.orderId}`);
   return { ok: true, id: ret.id };
 }
 
@@ -639,11 +646,18 @@ async function postBanquetStockCountInner(
 }
 
 /**
- * Per-order cutlery ledger: what was issued to the event, what came
- * back, what's still out — per item.
+ * Per-order banquet ledger: what was issued to the event, what came back,
+ * what's still out — per item. Not cutlery-specific: it covers every banquet
+ * item that left the store against this order.
+ *
+ * Read gate includes the store keeper because ISSUE_ROLES lets them record
+ * the return — a role that can write the movement has to be able to read the
+ * ledger it writes against.
  */
-export async function getOrderCutleryLedger(orderId: string) {
-  await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY, Role.FNB_SERVICE, Role.ACCOUNTS]);
+export async function getOrderBanquetLedger(orderId: string) {
+  await requireRole([
+    Role.ADMIN, Role.MANAGER, Role.DELIVERY, Role.FNB_SERVICE, Role.ACCOUNTS, Role.STORE_KEEPER,
+  ]);
   const [issued, returned] = await Promise.all([
     db.banquetIssueLine.groupBy({
       by: ["itemId"],
@@ -676,6 +690,75 @@ export async function getOrderCutleryLedger(orderId: string) {
       outstanding: iss.minus(back).toString(),
     };
   });
+}
+
+/**
+ * The F&B store's return worklist: orders that still have banquet stock out,
+ * newest issue first. Counts ITEMS still out rather than summing quantities —
+ * "12 pieces + 3 kg" is not a number anyone can act on.
+ */
+export async function listOrdersWithBanquetStockOut(limit = 500) {
+  await requireRole(ISSUE_ROLES);
+  // ponytail: recent-issue-line window netted in JS, not a SQL "still out"
+  // predicate — returns land within days of the event. Returns are read
+  // unbounded for the orders in the window, so the count can only ever
+  // under-report (a very old order drops off this list; it is still on the
+  // order page and its ceiling is unaffected). Push the netting into SQL if
+  // the store starts taking stock back from months ago.
+  const issueLines = await db.banquetIssueLine.findMany({
+    where: { issue: { orderId: { not: null } } },
+    orderBy: { issue: { issuedAt: "desc" } },
+    take: limit,
+    select: {
+      itemId: true,
+      quantity: true,
+      issue: {
+        select: {
+          orderId: true,
+          issuedAt: true,
+          order: { select: { code: true, customer: { select: { name: true } } } },
+        },
+      },
+    },
+  });
+  const orderIds = [...new Set(issueLines.map((l) => l.issue.orderId!))];
+  if (orderIds.length === 0) return [];
+
+  const returnLines = await db.banquetReturnLine.findMany({
+    where: { return: { orderId: { in: orderIds } } },
+    select: { itemId: true, quantity: true, return: { select: { orderId: true } } },
+  });
+
+  const stillOut = itemsStillOutByOrder(
+    issueLines.map((l) => ({
+      orderId: l.issue.orderId!,
+      itemId: l.itemId,
+      qty: l.quantity.toString(),
+    })),
+    returnLines.map((l) => ({
+      orderId: l.return.orderId,
+      itemId: l.itemId,
+      qty: l.quantity.toString(),
+    })),
+  );
+
+  // Lines arrive newest-first, so the first row seen for an order carries its
+  // most recent issue date.
+  const meta = new Map<string, { code: string; customer: string; lastIssuedAt: Date }>();
+  for (const l of issueLines) {
+    const orderId = l.issue.orderId!;
+    if (meta.has(orderId)) continue;
+    meta.set(orderId, {
+      code: l.issue.order?.code ?? "—",
+      customer: l.issue.order?.customer.name ?? "—",
+      lastIssuedAt: l.issue.issuedAt,
+    });
+  }
+
+  return [...meta.entries()]
+    .map(([orderId, m]) => ({ orderId, ...m, itemsOut: stillOut.get(orderId) ?? 0 }))
+    .filter((o) => o.itemsOut > 0)
+    .sort((a, b) => b.lastIssuedAt.getTime() - a.lastIssuedAt.getTime());
 }
 
 export interface ListBanquetIssuesOpts {

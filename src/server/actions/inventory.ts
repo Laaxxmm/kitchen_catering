@@ -427,6 +427,7 @@ async function recordIngredientReturnInner(raw: unknown): Promise<{ ok: true; id
         qty: true,
         unitCostAtIssue: true,
         ingredientId: true,
+        orderId: true,
         ingredient: { select: { name: true, unit: true } },
       },
     });
@@ -528,13 +529,16 @@ async function recordIngredientReturnInner(raw: unknown): Promise<{ ok: true; id
         }),
       },
     });
-    return created;
+    return { created, orderIds: [...new Set(issues.map((i) => i.orderId).filter((o): o is string => o != null))] };
   });
 
   revalidatePath("/inventory/ingredients");
   revalidatePath("/inventory/issues");
   revalidatePath("/inventory/returns");
-  return { ok: true, id: result.id };
+  // The order pages show what came back for the event — refresh each one the
+  // document touched.
+  for (const orderId of result.orderIds) revalidatePath(`/orders/${orderId}`);
+  return { ok: true, id: result.created.id };
 }
 
 /**
