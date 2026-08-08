@@ -68,6 +68,35 @@ async function main() {
     });
   }
 
+  // ─── Everything below here is bootstrap sample data ─────────────
+  //
+  // The entrypoint runs this seed on EVERY container boot while SEED_DB is
+  // still "true", and every deploy is a boot. That is fine on day one and
+  // actively harmful afterwards: the client erased both catalogues, imported
+  // their own 405 kitchen items as GP-nnn, and the next deploy quietly
+  // upserted all 136 demo STR-nnnn ingredients back in beside them. Two
+  // catalogues on one screen, and no clue where the second came from.
+  //
+  // So: if the client's own catalogue is already in, seed the users (the one
+  // thing an operator may legitimately need to re-run) and stop. Unsetting
+  // SEED_DB is still the right thing to do — this just means forgetting it
+  // can no longer poison a live catalogue.
+  //
+  // The marker is `legacySku IS NULL` on a GP row, not the GP code itself:
+  // 20260806090000_gp_item_codes renumbered the migration-seeded catalogue to
+  // GP-nnn too, and parked each old code in legacySku. Only rows the client's
+  // import created have no legacy code behind them.
+  const imported = await db.ingredient.count({
+    where: { sku: { startsWith: "GP-" }, legacySku: null },
+  });
+  if (imported > 0) {
+    console.log(
+      `[seed] ${imported} imported catalogue items present — this database is live. ` +
+        "Users are up to date; skipping all sample data.",
+    );
+    return;
+  }
+
   // ─── Customers ──────────────────────────────────────────────────
   // No natural unique key on Customer; use findFirst-then-create.
   const customers = [
