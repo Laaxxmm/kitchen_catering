@@ -445,7 +445,11 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
           have no estimate.
         </p>
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px]">
+          {/* min-w so the wrapper above actually scrolls. Without it the
+              table squeezes to the viewport and the three numeric columns —
+              the only ones being typed into — collapse to a few pixels,
+              because the item picker and description soak up the width. */}
+          <table className="w-full min-w-[1080px] text-[12.5px]">
             <thead className="border-b border-ik-rule text-left text-ik-ink-3">
               <tr>
                 {prefilledCount > 0 && (
@@ -455,9 +459,9 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
                 <th className="py-1 pr-2">SKU</th>
                 <th className="py-1 pr-2">Description</th>
                 <th className="py-1 pr-2">Unit</th>
-                <th className="w-20 py-1 pr-2 text-right">Qty</th>
-                <th className="w-24 py-1 pr-2 text-right" title="Estimated supplier rate — used to compute approval tier. Actual rate comes from the bill at delivery.">Est. unit ₹</th>
-                <th className="w-16 py-1 pr-2 text-right">GST %</th>
+                <th className="w-24 min-w-[88px] py-1 pr-2 text-right">Qty</th>
+                <th className="w-28 min-w-[104px] py-1 pr-2 text-right" title="Estimated supplier rate — used to compute approval tier. Actual rate comes from the bill at delivery.">Est. unit ₹</th>
+                <th className="w-20 min-w-[76px] py-1 pr-2 text-right">GST %</th>
                 <th className="w-28 py-1 pr-2 text-right">Est. total ₹</th>
                 <th></th>
               </tr>
@@ -516,9 +520,9 @@ export function VendorPOForm({ vendors, ingredients, banquetItems = [], orders =
                         </>
                       );
                     })()}
-                    <td className="py-1 pr-2"><input type="number" step="any" min="0.001" value={l.quantity} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, quantity: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
-                    <td className="py-1 pr-2"><input type="number" step="0.01" min="0" value={l.unitPrice} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, unitPrice: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
-                    <td className="py-1 pr-2"><input type="number" step="0.01" min="0" value={l.gstRatePct} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, gstRatePct: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
+                    <td className="w-24 min-w-[88px] py-1 pr-2"><input type="number" step="any" min="0.001" value={l.quantity} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, quantity: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1.5 text-right font-mono" /></td>
+                    <td className="w-28 min-w-[104px] py-1 pr-2"><input type="number" step="0.01" min="0" value={l.unitPrice} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, unitPrice: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1.5 text-right font-mono" /></td>
+                    <td className="w-20 min-w-[76px] py-1 pr-2"><input type="number" step="0.01" min="0" value={l.gstRatePct} onChange={(e) => setLines((p) => p.map((x, i) => i === idx ? { ...x, gstRatePct: e.target.value } : x))} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1.5 text-right font-mono" /></td>
                     <td className="py-1 pr-2 text-right font-mono">{sub.plus(tax).toDecimalPlaces(2).toString()}</td>
                     {/* Prefilled rows are un-ticked, not deleted — the item
                         has to stay visible so it can go on the next PO. */}
