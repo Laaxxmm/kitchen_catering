@@ -11,6 +11,10 @@ import {
   resetTransactionalData,
 } from "@/server/actions/admin-reset";
 import { importCatalogueFromFiles } from "@/server/actions/catalogue-import";
+import {
+  removeSampleCatalogueItems,
+  type SampleCleanupSummary,
+} from "@/server/actions/catalogue-cleanup";
 import { isNextNavigationError } from "@/lib/next-error";
 
 /**
@@ -28,11 +32,99 @@ import { isNextNavigationError } from "@/lib/next-error";
 export function CleanSlate() {
   return (
     <div className="mt-8 grid gap-4">
+      <RemoveSampleItems />
       <ImportCatalogue />
       <ClearOrders />
       <FullReset />
       <EraseEverything />
     </div>
+  );
+}
+
+/**
+ * Repair tool, not a reset: takes the seeded sample items back out of a
+ * catalogue that is already live. Check first, then remove — nobody should
+ * have to guess how many rows a button on this page is about to touch.
+ */
+function RemoveSampleItems() {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [found, setFound] = useState<SampleCleanupSummary | null>(null);
+
+  function run(preview: boolean) {
+    startTransition(async () => {
+      try {
+        const res = await removeSampleCatalogueItems(preview);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+        if (preview) {
+          setFound(res);
+          const n = res.kitchen.deleted + res.kitchen.deactivated + res.fnb.deleted + res.fnb.deactivated;
+          if (n === 0) toast.success("No sample items left — the catalogue is clean.");
+          return;
+        }
+        toast.success(
+          `Removed ${res.kitchen.deleted} kitchen and ${res.fnb.deleted} F&B sample items. ` +
+            `${res.kitchen.deactivated + res.fnb.deactivated} in use were hidden instead.`,
+        );
+        setFound(null);
+        router.refresh();
+      } catch (err) {
+        if (isNextNavigationError(err)) throw err;
+        toast.error(err instanceof Error ? err.message : "Cleanup failed");
+      }
+    });
+  }
+
+  const totalFound = found
+    ? found.kitchen.deleted + found.kitchen.deactivated + found.fnb.deleted + found.fnb.deactivated
+    : 0;
+  const kept = found ? [...found.kitchen.keptNames, ...found.fnb.keptNames] : [];
+
+  return (
+    <section className="rounded-[14px] border border-amber/40 bg-amber-wash p-4 sm:p-5">
+      <h3 className="font-serif text-[15px] font-medium text-amber">Remove sample items</h3>
+      <p className="mt-1 max-w-2xl text-[12.5px] text-ik-ink-2">
+        Takes the demo catalogue (the <span className="font-mono">STR-</span> kitchen items and the
+        sample F&amp;B packaging list) back out, leaving your imported{" "}
+        <span className="font-mono">GP-</span> items and everything else — orders, stock, invoices —
+        untouched. Use this instead of a reset when the day&apos;s orders are already in.
+      </p>
+      <p className="mt-2 max-w-2xl text-[12.5px] text-ik-ink-2">
+        An item nothing points at is deleted. One that is already on a receipt, issue, recipe or
+        purchase order is <strong>hidden instead of deleted</strong>, so those documents keep
+        reading correctly — it disappears from the pickers and nothing else changes.
+      </p>
+
+      {found && totalFound > 0 && (
+        <div className="mt-3 rounded-md border border-ik-rule bg-ik-card p-3 text-[12.5px]">
+          <div className="font-medium text-ik-ink">Found {totalFound} sample item{totalFound === 1 ? "" : "s"}</div>
+          <ul className="mt-1 grid gap-0.5 text-ik-ink-2">
+            <li>Kitchen: {found.kitchen.deleted} to delete, {found.kitchen.deactivated} in use (will be hidden)</li>
+            <li>F&amp;B: {found.fnb.deleted} to delete, {found.fnb.deactivated} in use (will be hidden)</li>
+          </ul>
+          {kept.length > 0 && (
+            <div className="mt-1.5 text-[11.5px] text-ik-ink-3">
+              In use, so kept: {kept.slice(0, 12).join(", ")}
+              {kept.length > 12 ? ` and ${kept.length - 12} more` : ""}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button type="button" variant="outline" disabled={pending} onClick={() => run(true)}>
+          {pending ? "Checking…" : "Check what would be removed"}
+        </Button>
+        {found && totalFound > 0 && (
+          <Button type="button" disabled={pending} onClick={() => run(false)}>
+            {pending ? "Removing…" : `Remove these ${totalFound}`}
+          </Button>
+        )}
+      </div>
+    </section>
   );
 }
 
