@@ -1,9 +1,9 @@
 import "../harness/database-url";
 
 import { execFileSync } from "node:child_process";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/server/db";
-import { ensureSeeded } from "../harness";
+import { DESK_EMAILS, ensureSeeded } from "../harness";
 
 /**
  * The bootstrap seed must never re-plant its sample catalogue into a live
@@ -33,6 +33,20 @@ function runSeed(): string {
 beforeAll(async () => {
   // Leaves the database in the state go-live produces: erased, then imported.
   await ensureSeeded();
+});
+
+/**
+ * The seed's own users are the one thing it still writes here, and users
+ * survive the reset by design — so without this they leak into every file
+ * that runs after this one. A notification fan-out addressed to "every
+ * manager" then reaches four people instead of two, and the failure lands
+ * in an unrelated test with no clue where the extra rows came from.
+ */
+afterAll(async () => {
+  const desks = Object.values(DESK_EMAILS);
+  await db.user.deleteMany({
+    where: { email: { endsWith: "@indefine.in", notIn: desks } },
+  });
 });
 
 describe("seed against a live database", () => {

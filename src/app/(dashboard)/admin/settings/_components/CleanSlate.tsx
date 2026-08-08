@@ -42,14 +42,15 @@ export function CleanSlate() {
 }
 
 /**
- * Repair tool, not a reset: takes the seeded sample items back out of a
- * catalogue that is already live. Check first, then remove — nobody should
- * have to guess how many rows a button on this page is about to touch.
+ * Repair tool, not a reset: folds the seeded sample items back into the
+ * imported catalogue on a system that is already live. Check first, then
+ * apply — nobody should have to guess how many rows a button on this page is
+ * about to touch, least of all when stock is riding on them.
  */
 function RemoveSampleItems() {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [found, setFound] = useState<SampleCleanupSummary | null>(null);
+  const [plan, setPlan] = useState<SampleCleanupSummary | null>(null);
 
   function run(preview: boolean) {
     startTransition(async () => {
@@ -60,16 +61,16 @@ function RemoveSampleItems() {
           return;
         }
         if (preview) {
-          setFound(res);
-          const n = res.kitchen.deleted + res.kitchen.deactivated + res.fnb.deleted + res.fnb.deactivated;
-          if (n === 0) toast.success("No sample items left — the catalogue is clean.");
+          setPlan(res);
+          if (planTotal(res) === 0) toast.success("No sample items left — the catalogue is clean.");
           return;
         }
         toast.success(
-          `Removed ${res.kitchen.deleted} kitchen and ${res.fnb.deleted} F&B sample items. ` +
-            `${res.kitchen.deactivated + res.fnb.deactivated} in use were hidden instead.`,
+          `${res.kitchen.merge.length} items merged into their GP twins, ` +
+            `${res.kitchen.remove.length + res.fnb.remove.length} removed, ` +
+            `${res.kitchen.hide.length + res.fnb.hide.length} hidden.`,
         );
-        setFound(null);
+        setPlan(null);
         router.refresh();
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
@@ -78,53 +79,104 @@ function RemoveSampleItems() {
     });
   }
 
-  const totalFound = found
-    ? found.kitchen.deleted + found.kitchen.deactivated + found.fnb.deleted + found.fnb.deactivated
-    : 0;
-  const kept = found ? [...found.kitchen.keptNames, ...found.fnb.keptNames] : [];
+  const total = plan ? planTotal(plan) : 0;
 
   return (
     <section className="rounded-[14px] border border-amber/40 bg-amber-wash p-4 sm:p-5">
-      <h3 className="font-serif text-[15px] font-medium text-amber">Remove sample items</h3>
+      <h3 className="font-serif text-[15px] font-medium text-amber">Clean up sample items</h3>
       <p className="mt-1 max-w-2xl text-[12.5px] text-ik-ink-2">
-        Takes the demo catalogue (the <span className="font-mono">STR-</span> kitchen items and the
-        sample F&amp;B packaging list) back out, leaving your imported{" "}
-        <span className="font-mono">GP-</span> items and everything else — orders, stock, invoices —
-        untouched. Use this instead of a reset when the day&apos;s orders are already in.
+        The demo catalogue (the <span className="font-mono">STR-</span> kitchen items and the sample
+        F&amp;B packaging list) came back on a deploy and the team received stock against it — which
+        is why those rows carry figures and the imported <span className="font-mono">GP-</span> ones
+        read zero.
       </p>
       <p className="mt-2 max-w-2xl text-[12.5px] text-ik-ink-2">
-        An item nothing points at is deleted. One that is already on a receipt, issue, recipe or
-        purchase order is <strong>hidden instead of deleted</strong>, so those documents keep
-        reading correctly — it disappears from the pickers and nothing else changes.
+        Each sample item is <strong>merged into the GP item of the same name</strong>: the stock
+        folds in at weighted average cost, and every receipt, issue, recipe line and purchase order
+        behind it re-points to the GP item. Nothing is lost — the figures move to where the team can
+        see them. Items with no GP twin are removed if nothing references them, hidden if something
+        does. Orders, invoices, customers and vendors are untouched.
       </p>
 
-      {found && totalFound > 0 && (
-        <div className="mt-3 rounded-md border border-ik-rule bg-ik-card p-3 text-[12.5px]">
-          <div className="font-medium text-ik-ink">Found {totalFound} sample item{totalFound === 1 ? "" : "s"}</div>
-          <ul className="mt-1 grid gap-0.5 text-ik-ink-2">
-            <li>Kitchen: {found.kitchen.deleted} to delete, {found.kitchen.deactivated} in use (will be hidden)</li>
-            <li>F&amp;B: {found.fnb.deleted} to delete, {found.fnb.deactivated} in use (will be hidden)</li>
-          </ul>
-          {kept.length > 0 && (
-            <div className="mt-1.5 text-[11.5px] text-ik-ink-3">
-              In use, so kept: {kept.slice(0, 12).join(", ")}
-              {kept.length > 12 ? ` and ${kept.length - 12} more` : ""}
-            </div>
+      {plan && total > 0 && (
+        <div className="mt-3 grid gap-2 rounded-md border border-ik-rule bg-ik-card p-3 text-[12.5px]">
+          <div className="font-medium text-ik-ink">
+            {total} sample item{total === 1 ? "" : "s"} found
+          </div>
+          {plan.kitchen.merge.length > 0 && (
+            <PlanBlock
+              title={`${plan.kitchen.merge.length} to merge into their GP twin (stock moves across)`}
+              rows={plan.kitchen.merge.map(
+                (r) => `${r.sku ?? "—"} ${r.name} · ${r.qty} → ${r.intoSku}`,
+              )}
+            />
+          )}
+          {plan.kitchen.blocked.length > 0 && (
+            <PlanBlock
+              tone="alert"
+              title={`${plan.kitchen.blocked.length} cannot be merged — units disagree, fix by hand`}
+              rows={plan.kitchen.blocked.map((r) => `${r.sku ?? "—"} ${r.name} — ${r.reason}`)}
+            />
+          )}
+          {plan.kitchen.remove.length + plan.fnb.remove.length > 0 && (
+            <PlanBlock
+              title={`${plan.kitchen.remove.length + plan.fnb.remove.length} to remove (nothing references them)`}
+              rows={[...plan.kitchen.remove, ...plan.fnb.remove].map(
+                (r) => `${r.sku ?? "—"} ${r.name}`,
+              )}
+            />
+          )}
+          {plan.kitchen.hide.length + plan.fnb.hide.length > 0 && (
+            <PlanBlock
+              title={`${plan.kitchen.hide.length + plan.fnb.hide.length} to hide (in use, so kept)`}
+              rows={[...plan.kitchen.hide, ...plan.fnb.hide].map((r) => `${r.sku ?? "—"} ${r.name}`)}
+            />
           )}
         </div>
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
         <Button type="button" variant="outline" disabled={pending} onClick={() => run(true)}>
-          {pending ? "Checking…" : "Check what would be removed"}
+          {pending ? "Checking…" : "Check what would happen"}
         </Button>
-        {found && totalFound > 0 && (
+        {plan && total > 0 && (
           <Button type="button" disabled={pending} onClick={() => run(false)}>
-            {pending ? "Removing…" : `Remove these ${totalFound}`}
+            {pending ? "Working… (up to a minute)" : `Apply to these ${total}`}
           </Button>
         )}
       </div>
     </section>
+  );
+}
+
+function planTotal(s: SampleCleanupSummary): number {
+  const side = (p: SampleCleanupSummary["kitchen"]) =>
+    p.merge.length + p.remove.length + p.hide.length + p.blocked.length;
+  return side(s.kitchen) + side(s.fnb);
+}
+
+/** A named group of the plan, capped so 136 rows don't bury the buttons. */
+function PlanBlock({
+  title,
+  rows,
+  tone,
+}: {
+  title: string;
+  rows: string[];
+  tone?: "alert";
+}) {
+  return (
+    <div>
+      <div className={"font-medium " + (tone === "alert" ? "text-alert" : "text-ik-ink-2")}>
+        {title}
+      </div>
+      <ul className="mt-0.5 grid gap-0.5 text-[11.5px] text-ik-ink-3">
+        {rows.slice(0, 8).map((r) => (
+          <li key={r} className="font-mono">{r}</li>
+        ))}
+        {rows.length > 8 && <li>and {rows.length - 8} more</li>}
+      </ul>
+    </div>
   );
 }
 

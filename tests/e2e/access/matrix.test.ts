@@ -7,6 +7,7 @@ import { DocumentEntityType, PaymentMethod } from "@prisma/client";
 import { AuthenticationError, AuthorizationError } from "@/server/rbac";
 import * as adminReset from "@/server/actions/admin-reset";
 import * as banquet from "@/server/actions/banquet";
+import * as catalogueCleanup from "@/server/actions/catalogue-cleanup";
 import * as catalogueImport from "@/server/actions/catalogue-import";
 import * as chefRequisitions from "@/server/actions/chef-requisitions";
 import * as customerInvoices from "@/server/actions/customer-invoices";
@@ -603,6 +604,11 @@ const CASES: GateCase[] = [
   // and the catalogue is already in from the seed, so it writes nothing new.
   gate("catalogue-import", "importCatalogueFromFiles", ["admin"], () =>
     catalogueImport.importCatalogueFromFiles(),
+  ),
+  // Preview pass: counts what it would remove and writes nothing, so the
+  // probe can run it for the desks its gate admits without touching rows.
+  gate("catalogue-cleanup", "removeSampleCatalogueItems", ["admin", "manager"], () =>
+    catalogueCleanup.removeSampleCatalogueItems(true),
   ),
   gate("users", "createUser", ["admin"], () => users.createUser({})),
   gate("users", "updateUser", ["admin"], () => users.updateUser(MISSING_ID, {})),

@@ -5,37 +5,56 @@ import { Role } from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import { sha256Json } from "@/lib/audit";
+import { unitsEquivalent } from "@/lib/units";
 import { actionFailure, type ActionResultWith } from "@/server/action-result";
+import { mergeIngredient } from "@/server/actions/inventory";
 
-// Removes the bootstrap seed's sample catalogue from a live system.
+// Folds the bootstrap seed's sample catalogue back into the client's own.
 //
 // The container re-ran prisma/seed.ts on every deploy while SEED_DB was
-// true, so after the client erased and imported their own catalogue the
-// 136 demo STR-nnnn ingredients (and the demo F&B packaging list) came
-// straight back beside the real ones. The seed can no longer do that, but
-// the rows it already planted have to come out — and by then real orders
-// had been taken, so "erase everything and import again" is off the table.
+// true, so after the client erased and imported their own catalogue the 136
+// demo STR-nnnn ingredients came back beside the real ones. The seed can no
+// longer do that (see prisma/seed.ts), but by the time it was caught the
+// team had been receiving stock — and they had been picking the STR- twin,
+// because it was the one showing a figure. So the GP- items read zero while
+// the real stock sat on rows that should not exist.
 //
-// A sample row is one the import did not create: every imported item
-// carries a GP- code. Anything else in the catalogue is either seed data or
-// pre-import legacy, and neither belongs in the pickers.
+// That rules out deleting them: the stock and every receipt, issue and PO
+// line behind it would go too. Each sample row is instead MERGED into its
+// GP- twin by name, which is what mergeIngredient already does — fold the
+// stock in at weighted average, re-point all eight reference tables, retire
+// the source. Only rows with no twin fall through to delete (nothing points
+// at them) or deactivate (something does).
 //
-// Rows nothing points at are deleted. Rows something DOES point at — a
-// receipt, an issue, a recipe line, a PO line — are deactivated instead, so
-// the documents that reference them keep reading correctly and only the
-// pickers get clean. Nothing that names a real order is ever removed.
+// A sample row is one the import did not create: every imported item carries
+// a GP- code.
 
-/** What each catalogue's cleanup did. */
-export interface CleanupSide {
-  deleted: number;
-  deactivated: number;
-  /** The in-use ones, so the admin can see what stayed and why. */
-  keptNames: string[];
+/** One sample row and what the cleanup will do with it. */
+export interface CleanupPlanRow {
+  id: string;
+  name: string;
+  sku: string | null;
+  qty: string;
+  /** Set when a GP- twin was found by name. */
+  intoSku?: string;
+  /** Why it is not being merged, when it isn't. */
+  reason?: string;
+}
+
+export interface CleanupPlan {
+  /** Has a GP- twin in the same unit — stock and history move across. */
+  merge: CleanupPlanRow[];
+  /** No twin, nothing references it — safe to delete outright. */
+  remove: CleanupPlanRow[];
+  /** No twin but referenced by a document — hidden, never deleted. */
+  hide: CleanupPlanRow[];
+  /** Twin found but the units disagree; merging would corrupt the figures. */
+  blocked: CleanupPlanRow[];
 }
 
 export interface SampleCleanupSummary {
-  kitchen: CleanupSide;
-  fnb: CleanupSide;
+  kitchen: CleanupPlan;
+  fnb: CleanupPlan;
   /** True when nothing was written — the preview pass. */
   preview: boolean;
 }
@@ -59,12 +78,20 @@ const BANQUET_REFS = {
   vendorPOLines: true,
 } as const;
 
-function total(counts: Record<string, number>): number {
+function refCount(counts: Record<string, number>): number {
   return Object.values(counts).reduce((sum, n) => sum + n, 0);
 }
 
+/** The seed and the spreadsheets disagree on case and stray spaces, and that
+ *  is exactly the pair we need to recognise as one item. */
+function nameKey(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+const emptyPlan = (): CleanupPlan => ({ merge: [], remove: [], hide: [], blocked: [] });
+
 /**
- * @param preview when true, counts what would happen and writes nothing.
+ * @param preview when true, works out the plan and writes nothing.
  */
 export async function removeSampleCatalogueItems(
   preview = false,
@@ -72,74 +99,137 @@ export async function removeSampleCatalogueItems(
   try {
     const session = await requireRole([Role.ADMIN, Role.MANAGER]);
 
-    const [ingredients, banquetItems] = await Promise.all([
+    // ── Kitchen ────────────────────────────────────────────────────────
+    const [samples, keepers] = await Promise.all([
       db.ingredient.findMany({
-        where: { NOT: { sku: { startsWith: "GP-" } } },
-        select: { id: true, name: true, sku: true, _count: { select: INGREDIENT_REFS } },
+        // Active only. A merged source is retired, not deleted — that is
+        // mergeIngredient keeping the audit trail — and a second run must
+        // not come back and delete the row it just retired.
+        where: { active: true, NOT: { sku: { startsWith: "GP-" } } },
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          unit: true,
+          onHandQty: true,
+          _count: { select: INGREDIENT_REFS },
+        },
       }),
-      db.banquetItem.findMany({
-        // sku is nullable on BanquetItem, and a seeded row has none.
-        where: { OR: [{ sku: null }, { NOT: { sku: { startsWith: "GP-" } } }] },
-        select: { id: true, name: true, sku: true, _count: { select: BANQUET_REFS } },
+      db.ingredient.findMany({
+        where: { active: true, sku: { startsWith: "GP-" } },
+        select: { id: true, name: true, sku: true, unit: true },
       }),
     ]);
+    const twinByName = new Map(keepers.map((k) => [nameKey(k.name), k]));
 
-    const split = <T extends { id: string; name: string; _count: Record<string, number> }>(
-      rows: T[],
-    ) => ({
-      removable: rows.filter((r) => total(r._count) === 0),
-      inUse: rows.filter((r) => total(r._count) > 0),
+    const kitchen = emptyPlan();
+    // id → target id, built alongside the plan so the write pass does not
+    // have to re-derive any of this.
+    const merges: Array<[string, string]> = [];
+    for (const s of samples) {
+      const row: CleanupPlanRow = {
+        id: s.id,
+        name: s.name,
+        sku: s.sku,
+        qty: s.onHandQty.toString(),
+      };
+      const twin = twinByName.get(nameKey(s.name));
+      if (twin) {
+        if (unitsEquivalent(s.unit, twin.unit)) {
+          kitchen.merge.push({ ...row, intoSku: twin.sku });
+          merges.push([s.id, twin.id]);
+        } else {
+          // mergeIngredient refuses this too — 5 pkt folded into kg becomes
+          // 5 kg. Surface it so somebody aligns the units by hand.
+          kitchen.blocked.push({
+            ...row,
+            intoSku: twin.sku,
+            reason: `tracked in ${s.unit}, the GP item in ${twin.unit}`,
+          });
+        }
+      } else if (refCount(s._count) === 0) {
+        kitchen.remove.push(row);
+      } else {
+        kitchen.hide.push({ ...row, reason: "referenced by a document" });
+      }
+    }
+
+    // ── F&B ────────────────────────────────────────────────────────────
+    // No merge exists for BanquetItem and none is invented here: the demo
+    // packaging list was never a duplicate of the client's own items, so
+    // there is nothing to fold. Delete what is unused, hide what is not.
+    const fnbSamples = await db.banquetItem.findMany({
+      // sku is nullable on BanquetItem, and a seeded row has none.
+      where: {
+        active: true,
+        OR: [{ sku: null }, { NOT: { sku: { startsWith: "GP-" } } }],
+      },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        currentStock: true,
+        _count: { select: BANQUET_REFS },
+      },
     });
+    const fnb = emptyPlan();
+    for (const s of fnbSamples) {
+      const row: CleanupPlanRow = {
+        id: s.id,
+        name: s.name,
+        sku: s.sku,
+        qty: s.currentStock.toString(),
+      };
+      if (refCount(s._count) === 0) fnb.remove.push(row);
+      else fnb.hide.push({ ...row, reason: "referenced by a document" });
+    }
 
-    const kitchen = split(ingredients);
-    const fnb = split(banquetItems);
-
-    const summary: SampleCleanupSummary = {
-      kitchen: {
-        deleted: kitchen.removable.length,
-        deactivated: kitchen.inUse.length,
-        keptNames: kitchen.inUse.map((r) => r.name),
-      },
-      fnb: {
-        deleted: fnb.removable.length,
-        deactivated: fnb.inUse.length,
-        keptNames: fnb.inUse.map((r) => r.name),
-      },
-      preview,
-    };
-
+    const summary: SampleCleanupSummary = { kitchen, fnb, preview };
     if (preview) return { ok: true, ...summary };
 
-    // One transaction: a half-cleaned catalogue is harder to reason about
-    // than an uncleaned one, and the admin would have no way to tell which
-    // half ran.
+    // Each merge is its own transaction inside mergeIngredient, which takes
+    // row locks and folds the stock at weighted average. Run them one at a
+    // time and stop at the first refusal rather than pressing on: a partly
+    // merged catalogue is still readable, and the message says which item
+    // needs a human.
+    for (const [sourceId, targetId] of merges) {
+      const res = await mergeIngredient(sourceId, targetId);
+      if (!res.ok) {
+        const failed = kitchen.merge.find((m) => m.id === sourceId);
+        return actionFailure(
+          new Error(
+            `Merged what came before it, then stopped at ${failed?.sku ?? sourceId} ` +
+              `(${failed?.name ?? "unknown"}): ${res.error}`,
+          ),
+        );
+      }
+    }
+
     await db.$transaction(async (tx) => {
-      if (kitchen.removable.length > 0) {
+      if (kitchen.remove.length > 0) {
         await tx.ingredient.deleteMany({
-          where: { id: { in: kitchen.removable.map((r) => r.id) } },
+          where: { id: { in: kitchen.remove.map((r) => r.id) } },
         });
       }
-      if (kitchen.inUse.length > 0) {
+      if (kitchen.hide.length > 0) {
         await tx.ingredient.updateMany({
-          where: { id: { in: kitchen.inUse.map((r) => r.id) } },
+          where: { id: { in: kitchen.hide.map((r) => r.id) } },
           data: { active: false },
         });
       }
-      if (fnb.removable.length > 0) {
-        await tx.banquetItem.deleteMany({
-          where: { id: { in: fnb.removable.map((r) => r.id) } },
-        });
+      if (fnb.remove.length > 0) {
+        await tx.banquetItem.deleteMany({ where: { id: { in: fnb.remove.map((r) => r.id) } } });
       }
-      if (fnb.inUse.length > 0) {
+      if (fnb.hide.length > 0) {
         await tx.banquetItem.updateMany({
-          where: { id: { in: fnb.inUse.map((r) => r.id) } },
+          where: { id: { in: fnb.hide.map((r) => r.id) } },
           data: { active: false },
         });
       }
       await tx.auditLog.create({
         data: {
           userId: session.user.id,
-          action: "SAMPLE_CATALOGUE_REMOVED",
+          action: "SAMPLE_CATALOGUE_CLEANED",
           entity: "System",
           entityId: "sample-catalogue-cleanup",
           payloadHash: sha256Json(summary),
