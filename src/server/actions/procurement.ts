@@ -1904,12 +1904,13 @@ async function matchVendorBillInner(
 }
 
 /**
- * Accounts sign off the supplier's invoice — the step that makes a bill
- * payable at all. The vendor's document must be attached (stores upload it
- * after the GRN clears; approving with nothing attached approves nothing),
- * and approving a bill that failed the 3-way match takes a written reason:
- * someone is consciously agreeing to pay other than what was ordered and
- * received, and that has to be attributable.
+ * Accounts sign off the bill — the step that makes it payable at all.
+ *
+ * The vendor's own invoice is prompted for but not required: vendors hand it
+ * over late or not at all, and requiring it left every bill unapprovable and
+ * therefore unpayable. Approving a bill that failed the 3-way match still
+ * takes a written reason — someone is consciously agreeing to pay other than
+ * what was ordered and received, and that has to be attributable.
  */
 export async function approveVendorBill(id: string, reason?: string | null): Promise<ActionResult> {
   try {
@@ -1920,13 +1921,9 @@ export async function approveVendorBill(id: string, reason?: string | null): Pro
         select: { status: true, billNo: true },
       });
       if (!bill) throw new ActionError("Bill not found");
-      const attachments = await tx.document.count({
-        where: { entityType: DocumentEntityType.VENDOR_BILL, entityId: id },
-      });
       const refusal = approveRefusal({
         billNo: bill.billNo,
         status: bill.status,
-        hasSupplierInvoice: attachments > 0,
         reason: reason ?? null,
       });
       if (refusal) throw new ActionError(refusal);

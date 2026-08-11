@@ -47,22 +47,24 @@ export function payRefusal(billNo: string, status: VendorBillStatus): string | n
 }
 
 /**
- * Why this bill can't be approved. Approval signs off the supplier's own
- * invoice, so that document has to be attached first; approving a failed
- * match on top of that is a deliberate decision and needs a written reason.
+ * Why this bill can't be approved.
+ *
+ * The supplier's own invoice is NOT required. It was, and it stopped the
+ * accounts desk dead: vendors hand the paperwork over days late or not at
+ * all, and every bill sat unapprovable and therefore unpayable in the
+ * meantime. The upload is still prompted for on the bill page, because the
+ * document belongs on the file — it just isn't the thing that gates payment.
+ * What does gate it: a bill has to have passed (or explicitly failed) the
+ * 3-way match, and approving a failed match needs a written reason.
  */
 export function approveRefusal(input: {
   billNo: string;
   status: VendorBillStatus;
-  hasSupplierInvoice: boolean;
   reason: string | null;
 }): string | null {
-  const { billNo, status, hasSupplierInvoice, reason } = input;
+  const { billNo, status, reason } = input;
   if (!APPROVABLE_STATUSES.includes(status)) {
     return `Cannot approve ${billNo} — it's ${humanizeStatus(status)}. Run the 3-way match first.`;
-  }
-  if (!hasSupplierInvoice) {
-    return `Upload the supplier's invoice for ${billNo} before approving it — approval is the sign-off on that document.`;
   }
   if (status === VendorBillStatus.DISCREPANCY && !reason?.trim()) {
     return `${billNo} doesn't match what was ordered and received. Either edit it down to the correct amounts, or give a written reason for approving it as it stands.`;

@@ -255,13 +255,7 @@ describe("no money leaves before accounts approve", () => {
   });
 });
 
-describe("approval is a signature on the supplier's own document", () => {
-  it("refuses to approve with nothing attached", async () => {
-    asAccounts();
-    const message = await expectRefused(() => approveVendorBill(billId));
-    expect(message).toContain("Upload the supplier's invoice");
-  });
-
+describe("approval is the accounts desk's signature", () => {
   it("is not the store's or the kitchen's to approve", async () => {
     // The store records the bill (they hold the paper) but does not sign it off.
     for (const become of [asStore, asChef]) {
@@ -270,7 +264,23 @@ describe("approval is a signature on the supplier's own document", () => {
     }
   });
 
-  it("approves once the invoice is attached", async () => {
+  /**
+   * The supplier's own invoice used to be required here. Vendors hand it
+   * over days late or not at all, so in production the whole accounts queue
+   * sat unapprovable — and therefore unpayable — waiting on paper nobody
+   * had. The upload is still prompted for on the bill page; it is not a gate.
+   */
+  it("approves with nothing attached", async () => {
+    asAccounts();
+    expect(await db.document.count({ where: { entityId: billId } })).toBe(0);
+
+    mustOk(await approveVendorBill(billId), "approve bill");
+    const bill = await read.vendorBill(billId);
+    expect(bill.status).toBe(VendorBillStatus.APPROVED);
+    expect(bill.approvedByUserId).not.toBeNull();
+  });
+
+  it("still takes the supplier's invoice afterwards, for the file", async () => {
     asStore();
     await uploadDocument({
       entityType: DocumentEntityType.VENDOR_BILL,
@@ -279,12 +289,7 @@ describe("approval is a signature on the supplier's own document", () => {
       fileName: "SUP-2026-118.pdf",
       kind: DocumentKind.ORIGINAL,
     });
-
-    asAccounts();
-    mustOk(await approveVendorBill(billId), "approve bill");
-    const bill = await read.vendorBill(billId);
-    expect(bill.status).toBe(VendorBillStatus.APPROVED);
-    expect(bill.approvedByUserId).not.toBeNull();
+    expect(await db.document.count({ where: { entityId: billId } })).toBe(1);
   });
 
   it("locks the 3-way match once approved", async () => {

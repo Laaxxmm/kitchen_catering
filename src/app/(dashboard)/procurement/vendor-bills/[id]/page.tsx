@@ -46,8 +46,10 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
   // Accounts approve supplier bills too (client item #12) — mirrors
   // BILL_APPROVE_ROLES in the action; PO approval stays admin/manager.
   const canApprove = (bill.status === VendorBillStatus.MATCHED || bill.status === VendorBillStatus.DISCREPANCY) && (role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS);
-  // Approval signs off the supplier's own invoice — it has to be attached
-  // first, so say that where the Approve button would otherwise be.
+  // The vendor's own invoice belongs on the file, but it does not gate
+  // approval — vendors hand it over late or never, and requiring it left the
+  // whole accounts queue unapprovable and so unpayable. Prompt for it; don't
+  // withhold the button.
   const hasSupplierInvoice = canApprove
     ? (await listDocuments(DocumentEntityType.VENDOR_BILL, bill.id)).length > 0
     : false;
@@ -110,7 +112,7 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
             {canMatch && <ActionResultButton action={doMatch} successMessage="3-way match complete">Run 3-way match</ActionResultButton>}
             {/* A mismatched bill is approved from the banner below, where the
                 reason box is — never with a one-click button. */}
-            {canApprove && hasSupplierInvoice && !needsApprovalReason && (
+            {canApprove && !needsApprovalReason && (
               <ActionResultButton action={doApprove} successMessage="Bill approved">Approve</ActionResultButton>
             )}
             {canPay && (
@@ -136,10 +138,10 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
       </div>
 
       {canApprove && !hasSupplierInvoice && (
-        <div className="mb-4 rounded-md border border-amber-wash bg-amber-wash p-3 text-[12.5px] text-ik-ink-2">
-          <h3 className="mb-1 font-medium text-amber">Supplier&apos;s invoice not attached</h3>
-          Upload the invoice the vendor gave you (bottom of this page) before approving. Approving
-          is the sign-off on that document.
+        <div className="mb-4 rounded-md border border-ik-rule bg-ik-paper-alt p-3 text-[12.5px] text-ik-ink-2">
+          <h3 className="mb-1 font-medium text-ik-ink">Supplier&apos;s invoice not attached</h3>
+          Attach it at the bottom of this page whenever the vendor hands it over — it belongs on the
+          file. You can approve and pay without it.
         </div>
       )}
 
@@ -187,7 +189,7 @@ export default async function VendorBillDetailPage({ params }: { params: Promise
 
       {/* Separate from the list above: a DISCREPANCY bill whose note failed to
           parse still needs a way to be approved. */}
-      {canApprove && needsApprovalReason && hasSupplierInvoice && (
+      {canApprove && needsApprovalReason && (
         <div className="mb-4 rounded-md border border-amber-wash bg-amber-wash p-3 text-[12.5px]">
           <p className="mb-1.5 text-ik-ink-2">
             We pay for what was ordered and received. Either{" "}

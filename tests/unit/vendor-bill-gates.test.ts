@@ -49,26 +49,22 @@ describe("approval", () => {
   const base = {
     billNo: "VB-26-27-0007",
     status: VendorBillStatus.MATCHED,
-    hasSupplierInvoice: true,
     reason: null,
   };
 
-  it("approves a clean match with the supplier's invoice attached", () => {
+  it("approves a clean match", () => {
     expect(approveRefusal(base)).toBeNull();
   });
 
-  it("refuses when the supplier's invoice is not attached", () => {
-    const refusal = approveRefusal({ ...base, hasSupplierInvoice: false });
-    expect(refusal).toContain("Upload the supplier's invoice");
-  });
-
-  it("checks the attachment before the reason — upload is the first fix", () => {
-    const refusal = approveRefusal({
-      ...base,
-      status: VendorBillStatus.DISCREPANCY,
-      hasSupplierInvoice: false,
-    });
-    expect(refusal).toContain("Upload the supplier's invoice");
+  // The supplier's invoice used to be required here, and it stopped the
+  // accounts desk dead: vendors hand the paperwork over days late or not at
+  // all, so every bill sat unapprovable and therefore unpayable. The upload
+  // is still prompted for on the bill page — it just isn't a gate.
+  it("does not need the supplier's invoice attached", () => {
+    expect(approveRefusal(base)).toBeNull();
+    expect(
+      approveRefusal({ ...base, status: VendorBillStatus.DISCREPANCY, reason: "short delivery" }),
+    ).toBeNull();
   });
 
   it("refuses a mismatched bill with no written reason", () => {
