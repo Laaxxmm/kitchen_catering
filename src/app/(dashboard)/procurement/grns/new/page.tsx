@@ -3,8 +3,10 @@ import { Decimal } from "decimal.js";
 import { Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { getVendorPO, createGRN } from "@/server/actions/procurement";
+import { listIngredients } from "@/server/actions/inventory";
+import { listBanquetPickerItems } from "@/server/actions/banquet";
 import { gateRolePage } from "@/server/rbac";
-import { GRNForm } from "./_components/GRNForm";
+import { GRNForm, type GRNSubmitInput } from "./_components/GRNForm";
 
 export const dynamic = "force-dynamic";
 
@@ -20,11 +22,19 @@ export default async function NewGRNPage({
   const po = await getVendorPO(poId);
   if (!po) notFound();
 
+  // Both catalogues, for the "they also brought this" picker. The vendor
+  // decides what turns up, not the PO, so the choice can't be narrowed to
+  // what was ordered.
+  const [ingredients, banquetItems] = await Promise.all([
+    listIngredients({ active: true }),
+    listBanquetPickerItems(),
+  ]);
+
   // Returns the full result (id + optional unit-mismatch warnings) instead
   // of redirecting server-side — the form toasts the warnings first, then
   // navigates to the created GRN. A redirect() here would throw past the
   // client and the warnings would never be seen.
-  async function create(input: { poId: string; notes: string | null; lines: Array<{ poLineId: string; acceptedQty: string; rejectedQty: string; reason: string | null }> }) {
+  async function create(input: GRNSubmitInput) {
     "use server";
     return await createGRN(input);
   }
@@ -46,6 +56,22 @@ export default async function NewGRNPage({
           alreadyReceived: l.receivedQty.toString(),
           remaining: new Decimal(l.quantity.toString()).minus(new Decimal(l.receivedQty.toString())).toString(),
         }))}
+        catalogue={[
+          ...ingredients.map((i) => ({
+            key: `ing:${i.id}`,
+            ingredientId: i.id,
+            banquetItemId: null,
+            label: `${i.sku} · ${i.name}`,
+            unit: i.unit,
+          })),
+          ...banquetItems.map((b) => ({
+            key: `fnb:${b.id}`,
+            ingredientId: null,
+            banquetItemId: b.id,
+            label: `${b.sku ?? "—"} · ${b.name} (F&B)`,
+            unit: b.unit,
+          })),
+        ]}
         onSubmit={create}
       />
     </>

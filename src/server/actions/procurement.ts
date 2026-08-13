@@ -1019,13 +1019,94 @@ async function createGRNInner(
     });
     const receivedQtyById = new Map(lockedLines.map((l) => [l.id, l.receivedQty]));
 
+    // ── Items the vendor delivered that the PO never listed ──────────────
+    // They join the PO as new lines, priced as delivered, and are then
+    // received by the ordinary loop below. Off-PO stock with no PO line
+    // would leave the supplier's bill nothing to reconcile against, and the
+    // 3-way match reads PO vs GRN vs bill.
+    const poLines = [...po.lines];
+    const grnLineInputs = [...input.lines];
+    const amendments: Array<{ description: string; from: string; to: string; reason: string }> = [];
+
+    if (input.extraLines && input.extraLines.length > 0) {
+      const maxSort = poLines.reduce((m, l) => Math.max(m, l.sortOrder), -1);
+      const createdIds: string[] = [];
+      for (const [idx, extra] of input.extraLines.entries()) {
+        const qty = toDecimal(extra.quantity);
+        if (qty.lte(0)) throw new ActionError("An added item needs a quantity above zero.");
+        // The item names itself — description, unit and code come off the
+        // catalogue row, never off the form, so an added line reads exactly
+        // like one raised on the PO in the first place.
+        const [ingredient, banquetItem] = await Promise.all([
+          extra.ingredientId
+            ? tx.ingredient.findUnique({
+                where: { id: extra.ingredientId },
+                select: { id: true, name: true, unit: true, sku: true },
+              })
+            : Promise.resolve(null),
+          extra.banquetItemId
+            ? tx.banquetItem.findUnique({
+                where: { id: extra.banquetItemId },
+                select: { id: true, name: true, unit: true, sku: true },
+              })
+            : Promise.resolve(null),
+        ]);
+        const item = ingredient ?? banquetItem;
+        if (!item) throw new ActionError("The added item is not in the catalogue.");
+
+        const { subtotal, tax, total } = computeLine({
+          quantity: extra.quantity,
+          unitPrice: extra.unitPrice,
+          discountPct: "0",
+          gstRatePct: extra.gstRatePct ?? "0",
+        });
+        const created = await tx.vendorPOLine.create({
+          data: {
+            poId: po.id,
+            sortOrder: maxSort + 1 + idx,
+            ingredientId: ingredient?.id ?? null,
+            banquetItemId: banquetItem?.id ?? null,
+            sku: item.sku ?? "",
+            description: item.name,
+            unit: item.unit,
+            quantity: extra.quantity,
+            unitPrice: extra.unitPrice,
+            gstRatePct: extra.gstRatePct ?? "0",
+            lineSubtotal: subtotal.toString(),
+            lineTax: tax.toString(),
+            lineTotal: total.toString(),
+          },
+        });
+        createdIds.push(created.id);
+        grnLineInputs.push({
+          poLineId: created.id,
+          acceptedQty: extra.quantity,
+          rejectedQty: "0",
+          reason: extra.reason,
+        });
+        amendments.push({
+          description: item.name,
+          from: "not on the PO",
+          to: `${extra.quantity} ${item.unit}`,
+          reason: extra.reason,
+        });
+      }
+      // Re-read with the loop's include shape so the new lines post stock
+      // exactly like the ones raised on the PO.
+      const created = await tx.vendorPOLine.findMany({
+        where: { id: { in: createdIds } },
+        include: { ingredient: true, banquetItem: { select: { name: true, unit: true } } },
+      });
+      poLines.push(...created);
+    }
+
     // H1: lock every ingredient this GRN will post stock to, up front and in
     // a stable (sorted) order — concurrent GRNs touching the same ingredients
     // can't deadlock and can't lose each other's moving-average update. The
     // catalogue snapshot is re-read under the lock at the compute site below.
     const ingredientLockIds = new Set<string>();
-    for (const li of input.lines) {
-      const pl = po.lines.find((l) => l.id === li.poLineId);
+    for (const li of grnLineInputs) {
+      const pl = poLines.find((l) => l.id === li.poLineId);
       if (pl?.ingredientId && toDecimal(li.acceptedQty).gt(0)) {
         ingredientLockIds.add(pl.ingredientId);
       }
@@ -1046,9 +1127,9 @@ async function createGRNInner(
       },
     });
 
-    for (let i = 0; i < input.lines.length; i++) {
-      const lineInput = input.lines[i];
-      const poLine = po.lines.find((l) => l.id === lineInput.poLineId);
+    for (let i = 0; i < grnLineInputs.length; i++) {
+      const lineInput = grnLineInputs[i];
+      const poLine = poLines.find((l) => l.id === lineInput.poLineId);
       if (!poLine) throw new ActionError("PO line not found");
 
       // M7: use the receivedQty re-read under the row lock, not the stale
@@ -1057,12 +1138,47 @@ async function createGRNInner(
       const orderedRemaining = toDecimal(poLine.quantity).minus(toDecimal(freshReceivedQty));
       const accepted = toDecimal(lineInput.acceptedQty);
       const rejected = toDecimal(lineInput.rejectedQty ?? "0");
-      if (accepted.plus(rejected).gt(orderedRemaining)) {
-        throw new ActionError(
-          `Cannot receive ${accepted.plus(rejected).toString()} of "${poLine.description}" — only ${orderedRemaining.toString()} remaining on PO`,
-        );
-      }
       if (accepted.lt(0) || rejected.lt(0)) throw new ActionError("Quantities must be non-negative");
+
+      // 100 g ordered, 500 g delivered, and the kitchen wants it. Refusing
+      // left the store with stock on the shelf and nothing in the system, so
+      // instead the PO line is raised to what actually turned up — the
+      // supplier's bill then has a PO line to agree with, and the 3-way
+      // match still means something. Committed spend is changing, so it
+      // takes a written reason.
+      const takingTotal = accepted.plus(rejected);
+      if (takingTotal.gt(orderedRemaining)) {
+        if (!lineInput.overReceiptReason?.trim()) {
+          throw new ActionError(
+            `"${poLine.description}": the PO has ${orderedRemaining.toString()} ${poLine.unit} left, you're recording ${takingTotal.toString()}. Say why you're taking more than was ordered.`,
+          );
+        }
+        const newQuantity = toDecimal(freshReceivedQty).plus(takingTotal);
+        const { subtotal, tax, total } = computeLine({
+          quantity: newQuantity.toString(),
+          unitPrice: poLine.unitPrice.toString(),
+          discountPct: "0",
+          gstRatePct: poLine.gstRatePct.toString(),
+        });
+        await tx.vendorPOLine.update({
+          where: { id: poLine.id },
+          data: {
+            quantity: newQuantity.toString(),
+            lineSubtotal: subtotal.toString(),
+            lineTax: tax.toString(),
+            lineTotal: total.toString(),
+          },
+        });
+        amendments.push({
+          description: poLine.description,
+          from: `${poLine.quantity.toString()} ${poLine.unit}`,
+          to: `${newQuantity.toString()} ${poLine.unit}`,
+          reason: lineInput.overReceiptReason.trim(),
+        });
+        // Everything downstream — the GRN line's orderedQty, the PO status
+        // roll-up — must read the raised figure, not the ordered one.
+        poLine.quantity = new Prisma.Decimal(newQuantity.toString());
+      }
 
       const grnLine = await tx.gRNLine.create({
         data: {
@@ -1337,7 +1453,37 @@ async function createGRNInner(
     const newPoStatus = allReceived ? VendorPOStatus.RECEIVED : VendorPOStatus.PARTIALLY_RECEIVED;
 
     await tx.gRN.update({ where: { id: grn.id }, data: { status: newGrnStatus } });
-    await tx.vendorPO.update({ where: { id: po.id }, data: { status: newPoStatus } });
+
+    // An amended PO carries amended totals. Same summarise() the creation
+    // and edit paths use, over every line — so a PO the delivery changed
+    // adds up exactly like one raised that way to begin with, and the
+    // supplier's bill has the right figure to match against.
+    const amendedTotals =
+      amendments.length > 0
+        ? summarise({
+            lines: poLinesNow.map((l) => ({
+              quantity: l.quantity.toString(),
+              unitPrice: l.unitPrice.toString(),
+              discountPct: "0",
+              gstRatePct: l.gstRatePct.toString(),
+            })),
+            supplierStateCode: indefineStateCode(),
+            placeOfSupplyStateCode: po.placeOfSupplyStateCode,
+          })
+        : null;
+    await tx.vendorPO.update({
+      where: { id: po.id },
+      data: {
+        status: newPoStatus,
+        ...(amendedTotals
+          ? {
+              subtotal: amendedTotals.subtotal.toString(),
+              taxTotal: amendedTotals.taxTotal.toString(),
+              grandTotal: amendedTotals.grandTotal.toString(),
+            }
+          : {}),
+      },
+    });
 
     await tx.auditLog.create({
       data: {
@@ -1345,9 +1491,24 @@ async function createGRNInner(
         action: "GRN_CREATED",
         entity: "GRN",
         entityId: grn.id,
-        payloadHash: sha256Json({ poId: po.id, lines: input.lines.length }),
+        payloadHash: sha256Json({ poId: po.id, lines: grnLineInputs.length }),
       },
     });
+
+    // The delivery changed the order. Recorded separately from the GRN so
+    // "who agreed to pay for more than we ordered, and why" is one row, not
+    // something to be inferred by diffing a PO against its own GRN.
+    if (amendments.length > 0) {
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "PO_AMENDED_AT_RECEIPT",
+          entity: "VendorPO",
+          entityId: po.id,
+          payloadHash: sha256Json({ grnNo, amendments }),
+        },
+      });
+    }
 
     return { id: grn.id, grnNo };
   });

@@ -18,24 +18,76 @@ interface POLine {
   remaining: string;
 }
 
+/** An item from either catalogue, for the "they also brought this" picker. */
+export interface CatalogueItem {
+  key: string;
+  ingredientId: string | null;
+  banquetItemId: string | null;
+  label: string;
+  unit: string;
+}
+
+export interface GRNSubmitInput {
+  poId: string;
+  notes: string | null;
+  lines: Array<{
+    poLineId: string;
+    acceptedQty: string;
+    rejectedQty: string;
+    reason: string | null;
+    overReceiptReason?: string | null;
+  }>;
+  extraLines?: Array<{
+    ingredientId: string | null;
+    banquetItemId: string | null;
+    quantity: string;
+    unitPrice: string;
+    reason: string;
+  }>;
+}
+
 interface Props {
   poId: string;
   lines: POLine[];
-  onSubmit: (input: { poId: string; notes: string | null; lines: Array<{ poLineId: string; acceptedQty: string; rejectedQty: string; reason: string | null }> }) => Promise<ActionResultWith<{ id: string; grnNo: string; warnings?: string[] }>>;
+  catalogue: CatalogueItem[];
+  onSubmit: (
+    input: GRNSubmitInput,
+  ) => Promise<ActionResultWith<{ id: string; grnNo: string; warnings?: string[] }>>;
 }
 
-interface DraftRow { acceptedQty: string; rejectedQty: string; reason: string }
+interface DraftRow {
+  acceptedQty: string;
+  rejectedQty: string;
+  reason: string;
+  /** Only asked for once the line goes over what the PO still has open. */
+  overReceiptReason: string;
+}
 
-export function GRNForm({ poId, lines, onSubmit }: Props) {
+interface ExtraRow { key: string; quantity: string; unitPrice: string; reason: string }
+
+export function GRNForm({ poId, lines, catalogue, onSubmit }: Props) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [notes, setNotes] = useState("");
   const [rows, setRows] = useState<Record<string, DraftRow>>(
-    Object.fromEntries(lines.map((l) => [l.id, { acceptedQty: "0", rejectedQty: "0", reason: "" }])),
+    Object.fromEntries(
+      lines.map((l) => [l.id, { acceptedQty: "0", rejectedQty: "0", reason: "", overReceiptReason: "" }]),
+    ),
   );
+  const [extras, setExtras] = useState<ExtraRow[]>([]);
 
   function setRow(id: string, patch: Partial<DraftRow>) {
     setRows((p) => ({ ...p, [id]: { ...p[id], ...patch } }));
+  }
+
+  /** Over what the PO still has open — 100 g ordered, 500 g delivered. */
+  function isOver(l: POLine): boolean {
+    const taking = Number(rows[l.id].acceptedQty || 0) + Number(rows[l.id].rejectedQty || 0);
+    return taking > Number(l.remaining);
+  }
+
+  function setExtra(i: number, patch: Partial<ExtraRow>) {
+    setExtras((p) => p.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   }
 
   /**
@@ -61,15 +113,46 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
         acceptedQty: rows[l.id].acceptedQty,
         rejectedQty: rows[l.id].rejectedQty,
         reason: rows[l.id].reason || null,
+        overReceiptReason: isOver(l) ? rows[l.id].overReceiptReason.trim() || null : null,
       }));
-    if (payload.length === 0) {
+
+    const overMissingReason = lines.find((l) => isOver(l) && !rows[l.id].overReceiptReason.trim());
+    if (overMissingReason) {
       return toast.error(
-        "Nothing recorded yet — type what arrived under Accept, or press “Not received” on a line the vendor didn't bring.",
+        `${overMissingReason.description}: more arrived than the PO has open. Say why you're taking the extra.`,
+      );
+    }
+
+    const extraPayload = extras
+      .filter((x) => x.key && Number(x.quantity) > 0)
+      .map((x) => {
+        const item = catalogue.find((c) => c.key === x.key)!;
+        return {
+          ingredientId: item.ingredientId,
+          banquetItemId: item.banquetItemId,
+          quantity: x.quantity,
+          unitPrice: x.unitPrice || "0",
+          reason: x.reason.trim(),
+        };
+      });
+    const extraMissingReason = extraPayload.find((x) => !x.reason);
+    if (extraMissingReason) {
+      return toast.error("An added item needs a note saying why it's on the delivery.");
+    }
+
+    if (payload.length === 0 && extraPayload.length === 0) {
+      return toast.error(
+        "Nothing recorded yet — type what arrived under Accept, press “Not received” on a line the vendor didn't bring, or add an item they delivered that isn't on the PO.",
       );
     }
     startTransition(async () => {
       try {
-        const res = await onSubmit({ poId, notes: notes || null, lines: payload });
+        const res = await onSubmit({
+          poId,
+          notes: notes || null,
+          lines: payload,
+          extraLines: extraPayload.length > 0 ? extraPayload : undefined,
+        });
         if (!res.ok) {
           toast.error(res.error);
           return;
@@ -116,8 +199,11 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
                   <td colSpan={3} className="py-1 pr-2 text-[12px] text-ik-ink-3">✓ fully received</td>
                 ) : (
                   <>
-                    <td className="py-1 pr-2"><input type="number" step="any" min="0" max={l.remaining} value={rows[l.id].acceptedQty} onChange={(e) => setRow(l.id, { acceptedQty: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
-                    <td className="py-1 pr-2"><input type="number" step="any" min="0" max={l.remaining} value={rows[l.id].rejectedQty} onChange={(e) => setRow(l.id, { rejectedQty: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
+                    {/* No max: more can turn up than was ordered, and the
+                        shelf doesn't care what the PO said. Going over asks
+                        for a reason below and raises the PO to match. */}
+                    <td className="py-1 pr-2"><input type="number" step="any" min="0" value={rows[l.id].acceptedQty} onChange={(e) => setRow(l.id, { acceptedQty: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
+                    <td className="py-1 pr-2"><input type="number" step="any" min="0" value={rows[l.id].rejectedQty} onChange={(e) => setRow(l.id, { rejectedQty: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
                     <td className="py-1 pr-2">
                       <div className="flex items-center gap-1">
                         <input value={rows[l.id].reason} onChange={(e) => setRow(l.id, { reason: e.target.value })} placeholder="reject reason" className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1" />
@@ -134,9 +220,93 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
                 )}
               </tr>
             ))}
+            {/* The over-delivery prompt gets its own row so the table columns
+                stay put — a reason box squeezed into the Reason cell would
+                push Accept and Reject off the edge on a small screen. */}
+            {lines.filter((l) => Number(l.remaining) > 0 && isOver(l)).map((l) => (
+              <tr key={`over-${l.id}`} className="border-b border-amber-wash bg-amber-wash">
+                <td colSpan={7} className="px-1 py-1.5">
+                  <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                    <span className="text-amber">
+                      <strong>{l.description}</strong>: more arrived than the PO has open
+                      ({l.remaining} {l.unit}). Taking it raises the PO to what came, so the
+                      supplier&apos;s bill still matches.
+                    </span>
+                    <input
+                      value={rows[l.id].overReceiptReason}
+                      onChange={(e) => setRow(l.id, { overReceiptReason: e.target.value })}
+                      placeholder="why you're taking the extra"
+                      className="h-8 min-w-56 flex-1 rounded border border-ik-rule bg-ik-card px-1"
+                    />
+                  </div>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
         </div>
+      </section>
+
+      {/* Things the vendor brought that the PO never listed. They join the
+          PO as new lines and are received here, so the supplier's bill has
+          something to reconcile against. */}
+      <section className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-medium text-[14px] text-ik-ink">They also delivered…</h3>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setExtras((p) => [...p, { key: "", quantity: "", unitPrice: "", reason: "" }])}
+          >
+            + Add an item not on the PO
+          </Button>
+        </div>
+        {extras.length === 0 ? (
+          <p className="text-[12px] text-ik-ink-3">
+            Only if something turned up that isn&apos;t listed above. It gets added to the PO at the
+            price you enter and received in this same GRN.
+          </p>
+        ) : (
+          <div className="grid gap-2">
+            {extras.map((x, i) => {
+              const item = catalogue.find((c) => c.key === x.key);
+              return (
+                <div key={i} className="grid items-end gap-2 sm:grid-cols-[minmax(0,2fr),90px,110px,minmax(0,1.5fr),70px]">
+                  <div className="grid gap-1">
+                    <Label htmlFor={`extra-item-${i}`}>Item</Label>
+                    <select
+                      id={`extra-item-${i}`}
+                      value={x.key}
+                      onChange={(e) => setExtra(i, { key: e.target.value })}
+                      className="h-8 rounded border border-ik-rule bg-ik-card px-1 text-[12.5px]"
+                    >
+                      <option value="">— pick an item —</option>
+                      {catalogue.map((c) => (
+                        <option key={c.key} value={c.key}>{c.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid gap-1">
+                    <Label htmlFor={`extra-qty-${i}`}>Qty {item ? `(${item.unit})` : ""}</Label>
+                    <input id={`extra-qty-${i}`} type="number" step="any" min="0" value={x.quantity} onChange={(e) => setExtra(i, { quantity: e.target.value })} className="h-8 rounded border border-ik-rule bg-ik-card px-1 text-right font-mono text-[12.5px]" />
+                  </div>
+                  <div className="grid gap-1">
+                    <Label htmlFor={`extra-rate-${i}`}>Rate ₹</Label>
+                    <input id={`extra-rate-${i}`} type="number" step="any" min="0" value={x.unitPrice} onChange={(e) => setExtra(i, { unitPrice: e.target.value })} className="h-8 rounded border border-ik-rule bg-ik-card px-1 text-right font-mono text-[12.5px]" />
+                  </div>
+                  <div className="grid gap-1">
+                    <Label htmlFor={`extra-why-${i}`}>Why it&apos;s here</Label>
+                    <input id={`extra-why-${i}`} value={x.reason} onChange={(e) => setExtra(i, { reason: e.target.value })} placeholder="e.g. sent in place of a short item" className="h-8 rounded border border-ik-rule bg-ik-card px-1 text-[12.5px]" />
+                  </div>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setExtras((p) => p.filter((_, idx) => idx !== i))}>
+                    Remove
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <div className="grid gap-1 max-w-2xl">

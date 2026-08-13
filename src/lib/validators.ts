@@ -736,14 +736,46 @@ export const GRNLineInput = z.object({
   acceptedQty: decimalString,
   rejectedQty: decimalString.optional(),
   reason: z.string().max(500).nullable().optional(),
+  /**
+   * Required only when accepted + rejected exceeds what the PO still has
+   * open — 100 g ordered, 500 g delivered. Taking the extra raises the PO
+   * line to what actually arrived so the supplier's bill still has a PO to
+   * agree with; that changes committed spend, so it carries a reason.
+   */
+  overReceiptReason: z.string().max(500).nullable().optional(),
 });
 export type GRNLineInputT = z.infer<typeof GRNLineInput>;
 
-export const GRNCreateInput = z.object({
-  poId: z.string(),
-  notes: z.string().max(2000).nullable().optional(),
-  lines: z.array(GRNLineInput).min(1),
-});
+/**
+ * Something the vendor delivered that the PO never listed. It joins the PO
+ * as a new line and is received in the same GRN — off-PO stock would
+ * otherwise have nothing for the supplier's bill to reconcile against.
+ */
+export const GRNExtraLineInput = z
+  .object({
+    ingredientId: z.string().min(1).nullable().optional(),
+    banquetItemId: z.string().min(1).nullable().optional(),
+    quantity: decimalString,
+    unitPrice: decimalString,
+    gstRatePct: decimalString.optional(),
+    reason: z.string().min(1).max(500),
+  })
+  .refine((l) => !!l.ingredientId !== !!l.banquetItemId, {
+    message: "Pick exactly one item — a kitchen ingredient or an F&B item.",
+  });
+export type GRNExtraLineInputT = z.infer<typeof GRNExtraLineInput>;
+
+export const GRNCreateInput = z
+  .object({
+    poId: z.string(),
+    notes: z.string().max(2000).nullable().optional(),
+    // May be empty when everything delivered is off-PO.
+    lines: z.array(GRNLineInput),
+    extraLines: z.array(GRNExtraLineInput).optional(),
+  })
+  .refine((v) => v.lines.length > 0 || (v.extraLines?.length ?? 0) > 0, {
+    message: "Record at least one line.",
+  });
 export type GRNCreateInputT = z.infer<typeof GRNCreateInput>;
 
 export const VendorBillLineInput = z.object({
