@@ -110,9 +110,12 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   // that issue it out.
   { pattern: /^\/inventory\/returns(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
   { pattern: /^\/inventory\/transfers(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER"] },
-  // Recording incoming stock — store + accounts (books-side receipt). The
-  // chef can view stock levels but doesn't record receipts.
-  { pattern: /^\/inventory\/receipts(\/|$)/, allow: ["ADMIN", "MANAGER", "STORE_KEEPER", "ACCOUNTS"] },
+  // Adding stock by hand. NOT the store: goods reach the kitchen shelf by
+  // receiving the delivery against its PO (the GRN), so the order, the goods
+  // and the supplier's bill agree and the 3-way match has something to check.
+  // A typed-in receipt bypasses all three. Accounts keep it for the
+  // books-side receipt; the chef only ever reads stock levels.
+  { pattern: /^\/inventory\/receipts(\/|$)/, allow: ["ADMIN", "MANAGER", "ACCOUNTS"] },
   // Adding a NEW ingredient is management-only (store/chef were creating
   // duplicates that stranded GRNs). Must precede the /inventory rule below.
   { pattern: /^\/inventory\/ingredients\/new(\/|$)/, allow: ["ADMIN", "MANAGER"] },

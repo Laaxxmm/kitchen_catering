@@ -276,9 +276,13 @@ export async function recordIngredientReceipt(raw: unknown): Promise<ActionResul
 }
 
 async function recordIngredientReceiptInner(raw: unknown): Promise<{ ok: true; id: string }> {
-  // ACCOUNTS records books-side receipts — matches the /inventory/receipts
-  // middleware rule ("store + accounts"). Issues stay store-only (L1).
-  const session = await requireRole([...WRITE_ROLES, Role.ACCOUNTS]);
+  // NOT the store keeper. Goods reach the kitchen shelf by receiving the
+  // delivery against its PO (the GRN) — that is what gives the 3-way match
+  // something to check. A hand-typed receipt bypasses the order, the goods
+  // note and the supplier's bill in one go, which is how stock and the
+  // ledger drift apart. Accounts keep it for the books-side receipt.
+  // Matches the /inventory/receipts route rule.
+  const session = await requireRole([...STOCK_EDIT_ROLES, Role.ACCOUNTS]);
   const input = IngredientReceiptInput.parse(raw);
 
   const result = await db.$transaction(async (tx) => {

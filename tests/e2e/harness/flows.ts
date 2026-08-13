@@ -136,13 +136,16 @@ export async function driveOrderToDelivered(
 }
 
 /** Put stock on the shelf the honest way — a recorded receipt, which also
- *  sets the moving-average cost the issue will snapshot. */
+ *  sets the moving-average cost the issue will snapshot.
+ *
+ *  As a manager, not the store: a hand-typed receipt became admin/manager
+ *  only once the store's route to stock was the GRN. */
 export async function stockUp(
   ingredientId: string,
   qty: string,
   unitCost = "200",
 ): Promise<void> {
-  asStore();
+  asManager();
   mustOk(
     await recordIngredientReceipt({ ingredientId, qty, unitCost, supplier: "E2E Provisions" }),
     "record receipt",

@@ -122,20 +122,31 @@ describe("setting a stock figure by hand", () => {
 });
 
 describe("the desks that keep their daily work", () => {
-  it("lets the store keeper receive, issue, return and transfer", async () => {
+  /**
+   * The hand-typed receipt left the store's hands alongside the adjustments
+   * and the bulk count. Their route to stock is the GRN — receiving the
+   * delivery against its PO — so the order, the goods and the supplier's
+   * bill agree and the 3-way match has something to check. Everything
+   * downstream of the shelf is still theirs.
+   */
+  it("no longer lets the store keeper type stock in by hand", async () => {
+    const line = await spareIngredient();
+    asStore();
+    const why = await expectRefused(() =>
+      recordIngredientReceipt({ ingredientId: line, qty: "30", unitCost: "10" }),
+    );
+    expect(why).toMatch(/Requires one of/);
+    expectDecimal(await read.onHand(line), "0", "nothing reached the shelf");
+  });
+
+  it("lets the store keeper issue, return and transfer", async () => {
     const order = await placeCateringOrder();
     const line = await spareIngredient();
+    // Stock arrives the way it now does — booked in by management, standing
+    // in for the GRN that puts it on the shelf in production.
+    await stockUp(line, "30", "10");
 
     asStore();
-    mustOk(
-      await recordIngredientReceipt({
-        ingredientId: line,
-        qty: "30",
-        unitCost: "10",
-        supplier: "E2E Provisions",
-      }),
-      "store receives",
-    );
     const issueId = mustOk(
       await recordDirectIngredientIssue({ ingredientId: line, orderId: order.id, qty: "12" }),
       "store issues",

@@ -44,6 +44,12 @@ describe("a narrower rule still restricts the one below it", () => {
   it("keeps hand-set stock figures to management", () => {
     expect(routeAllows("/inventory/adjustments/new", "STORE_KEEPER")).toBe(false);
     expect(routeAllows("/inventory/audit", "STORE_KEEPER")).toBe(false);
+    // Adding stock by hand went the same way: the store's route to stock is
+    // the GRN, which keeps the order, the goods and the bill agreeing.
+    expect(routeAllows("/inventory/receipts", "STORE_KEEPER")).toBe(false);
+    expect(routeAllows("/inventory/receipts", "ACCOUNTS")).toBe(true);
+    // Receiving a delivery against its PO is still theirs.
+    expect(routeAllows("/procurement/grns/new", "STORE_KEEPER")).toBe(true);
     // The log is theirs to read; posting a correction is not.
     expect(routeAllows("/inventory/adjustments", "STORE_KEEPER")).toBe(true);
   });

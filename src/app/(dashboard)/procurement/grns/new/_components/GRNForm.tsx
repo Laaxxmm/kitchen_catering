@@ -38,6 +38,20 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
     setRows((p) => ({ ...p, [id]: { ...p[id], ...patch } }));
   }
 
+  /**
+   * "The vendor didn't bring it." Leaving both boxes at 0 records nothing at
+   * all — the line is dropped and the GRN has no lines to post — so the store
+   * was stuck on a line it could not clear. Not received means rejecting the
+   * whole outstanding quantity, which is a number the screen already knows.
+   */
+  function notReceived(l: POLine) {
+    setRow(l.id, {
+      acceptedQty: "0",
+      rejectedQty: l.remaining,
+      reason: rows[l.id].reason.trim() || "Not delivered by the vendor",
+    });
+  }
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const payload = lines
@@ -48,7 +62,11 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
         rejectedQty: rows[l.id].rejectedQty,
         reason: rows[l.id].reason || null,
       }));
-    if (payload.length === 0) return toast.error("Enter accepted or rejected qty on at least one line");
+    if (payload.length === 0) {
+      return toast.error(
+        "Nothing recorded yet — type what arrived under Accept, or press “Not received” on a line the vendor didn't bring.",
+      );
+    }
     startTransition(async () => {
       try {
         const res = await onSubmit({ poId, notes: notes || null, lines: payload });
@@ -100,7 +118,18 @@ export function GRNForm({ poId, lines, onSubmit }: Props) {
                   <>
                     <td className="py-1 pr-2"><input type="number" step="any" min="0" max={l.remaining} value={rows[l.id].acceptedQty} onChange={(e) => setRow(l.id, { acceptedQty: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
                     <td className="py-1 pr-2"><input type="number" step="any" min="0" max={l.remaining} value={rows[l.id].rejectedQty} onChange={(e) => setRow(l.id, { rejectedQty: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
-                    <td className="py-1 pr-2"><input value={rows[l.id].reason} onChange={(e) => setRow(l.id, { reason: e.target.value })} placeholder="reject reason" className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1" /></td>
+                    <td className="py-1 pr-2">
+                      <div className="flex items-center gap-1">
+                        <input value={rows[l.id].reason} onChange={(e) => setRow(l.id, { reason: e.target.value })} placeholder="reject reason" className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1" />
+                        <button
+                          type="button"
+                          onClick={() => notReceived(l)}
+                          className="h-8 shrink-0 rounded border border-ik-rule px-2 text-[11.5px] text-ik-ink-2 hover:bg-ik-paper-alt"
+                        >
+                          Not received
+                        </button>
+                      </div>
+                    </td>
                   </>
                 )}
               </tr>

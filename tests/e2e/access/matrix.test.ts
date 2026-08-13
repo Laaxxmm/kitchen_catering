@@ -125,10 +125,13 @@ const CASES: GateCase[] = [
   gate("inventory", "reactivateIngredient", ["admin", "manager"], () =>
     inventory.reactivateIngredient(MISSING_ID),
   ),
+  // Not the store: kitchen stock arrives by receiving the delivery against
+  // its PO (the GRN), which the store keeper still does. A hand-typed
+  // receipt would bypass the order, the goods note and the bill at once.
   gate(
     "inventory",
     "recordIngredientReceipt",
-    ["admin", "manager", "store", "accounts"],
+    ["admin", "manager", "accounts"],
     () => inventory.recordIngredientReceipt({}),
   ),
   gate("inventory", "recordDirectIngredientIssue", ["admin", "manager", "store"], () =>

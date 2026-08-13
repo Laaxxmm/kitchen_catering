@@ -24,7 +24,10 @@ const STOCK_TABS = [
 export function InventoryNav({ active, role }: Props) {
   // Tabs match what the middleware actually lets each role open — a tab
   // that lands on /forbidden is worse than no tab.
-  //   receipts: ADMIN/MANAGER/STORE_KEEPER/ACCOUNTS
+  //   receipts: ADMIN/MANAGER/ACCOUNTS — NOT the store. Stock reaches the
+  //     kitchen shelf by receiving a delivery against its PO (the GRN), so
+  //     that the order, the goods and the supplier's bill agree. A hand-typed
+  //     receipt bypasses all three, which is why the store no longer has one.
   //   issues / returns / transfers: ADMIN/MANAGER/STORE_KEEPER
   //   adjustments: ADMIN/MANAGER/STORE_KEEPER — the store keeper reads the
   //     log (that page says who to ask); posting one is admin/manager
@@ -32,7 +35,7 @@ export function InventoryNav({ active, role }: Props) {
   const canStock = role === "ADMIN" || role === "MANAGER" || role === "STORE_KEEPER";
   const tabs = [
     BASE_TABS[0],
-    ...(canStock || role === "ACCOUNTS" ? [BASE_TABS[1]] : []),
+    ...(canEditStockDirectly(role) || role === "ACCOUNTS" ? [BASE_TABS[1]] : []),
     ...(canStock ? [BASE_TABS[2], ...STOCK_TABS] : []),
     ...(canEditStockDirectly(role) ? [BASE_TABS[3]] : []),
   ];
