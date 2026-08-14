@@ -165,6 +165,91 @@ describe("more arrived than was ordered", () => {
   });
 });
 
+describe("the vendor is never bringing the rest", () => {
+  /**
+   * "Not received" rejects the outstanding quantity. On receivedQty alone
+   * the PO sat at PARTIALLY_RECEIVED for ever — and a part-received PO with
+   * no bill yet offered no way to raise one, so the order was stuck behind
+   * goods nobody was ever going to deliver. A rejected balance means
+   * nothing more is expected, so the line is settled.
+   */
+  it("settles the PO once every line is received or rejected", async () => {
+    const po = await approvedPO("2");
+    asStore();
+    mustOk(
+      await createGRN({
+        poId: po.id,
+        notes: null,
+        lines: [
+          {
+            poLineId: po.lineId,
+            acceptedQty: "0",
+            rejectedQty: "2",
+            reason: "Not delivered by the vendor",
+          },
+        ],
+      }),
+      "post a GRN for goods that never came",
+    );
+    const after = await read.purchaseOrder(po.id);
+    expect(after.status).toBe(VendorPOStatus.RECEIVED);
+    expectDecimal(after.lines[0].receivedQty, "0", "nothing was received");
+  });
+
+  it("settles a partly delivered line when the balance is rejected", async () => {
+    const po = await approvedPO("10");
+    asStore();
+    mustOk(
+      await createGRN({
+        poId: po.id,
+        notes: null,
+        lines: [{ poLineId: po.lineId, acceptedQty: "6", rejectedQty: "0", reason: null }],
+      }),
+      "six arrive",
+    );
+    expect((await read.purchaseOrder(po.id)).status).toBe(VendorPOStatus.PARTIALLY_RECEIVED);
+
+    mustOk(
+      await createGRN({
+        poId: po.id,
+        notes: null,
+        lines: [{ poLineId: po.lineId, acceptedQty: "0", rejectedQty: "4", reason: "short-shipped" }],
+      }),
+      "the other four are never coming",
+    );
+    const after = await read.purchaseOrder(po.id);
+    expect(after.status).toBe(VendorPOStatus.RECEIVED);
+    expectDecimal(after.lines[0].receivedQty, "6", "only the six that arrived are stock");
+  });
+
+  it("still lets a re-delivery be received against a rejected line", async () => {
+    const po = await approvedPO("2");
+    asStore();
+    mustOk(
+      await createGRN({
+        poId: po.id,
+        notes: null,
+        lines: [{ poLineId: po.lineId, acceptedQty: "0", rejectedQty: "2", reason: "damaged" }],
+      }),
+      "reject the lot",
+    );
+    // Rejecting is not a deduction — the vendor replacing them still books in.
+    mustOk(
+      await createGRN({
+        poId: po.id,
+        notes: null,
+        lines: [{ poLineId: po.lineId, acceptedQty: "2", rejectedQty: "0", reason: null }],
+      }),
+      "vendor re-sends",
+    );
+    expectDecimal(
+      (await read.purchaseOrder(po.id)).lines[0].receivedQty,
+      "2",
+      "the replacement is stock",
+    );
+  });
+});
+
 describe("something arrived that was never ordered", () => {
   it("adds it to the PO and receives it in the same GRN", async () => {
     const po = await approvedPO("2");

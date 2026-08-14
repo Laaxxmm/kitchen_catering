@@ -513,11 +513,19 @@ function NextStep({ status, notes, bills, vendorPending, vendorName, approveVend
         Log another delivery when the rest comes in.{" "}
         {bills
           ? `${bills.headline}.${bills.next ? ` ${bills.next}` : ""}`
-          : "The supplier's bill can wait until everything is in."}
+          : "You can bill for what has arrived — we pay for what was ordered and received."}
         <div className="mt-2 flex flex-wrap gap-2">
           {canReceive && (
             <Link href={receiveHref}>
               <Button size="sm">Log another delivery</Button>
+            </Link>
+          )}
+          {/* billLinks is null until a bill exists, so without this a
+              part-delivered PO offered no way to raise the first one, and
+              the copy told them to wait for goods that were never coming. */}
+          {!bills && canRecordBill && (
+            <Link href={recordBillHref}>
+              <Button size="sm" variant="outline">Record supplier bill</Button>
             </Link>
           )}
           {billLinks}

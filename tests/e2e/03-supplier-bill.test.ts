@@ -127,7 +127,7 @@ describe("purchase orders are signed off by value", () => {
         lines: [{ poLineId: receivedPoLineId, acceptedQty: "20", rejectedQty: "0" }],
       }),
     );
-    expect(message).toContain("must be approved");
+    expect(message).toContain("Cannot receive against a pending approval purchase order");
   });
 
   it("the admin's signature completes it", async () => {

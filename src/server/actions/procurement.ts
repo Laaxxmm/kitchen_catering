@@ -998,11 +998,22 @@ async function createGRNInner(
       },
     });
     if (!po) throw new ActionError("PO not found");
+    // RECEIVED is here on purpose. A PO reaches it once every line is
+    // received or rejected — and a rejected line is exactly the one a vendor
+    // re-sends the next morning. The real protection is per line below:
+    // anything beyond what the line still has open needs a written reason.
+    // What this guard is actually for is stopping receipts against a PO that
+    // is draft, cancelled or closed.
     const ok =
       po.status === VendorPOStatus.APPROVED ||
       po.status === VendorPOStatus.SENT ||
-      po.status === VendorPOStatus.PARTIALLY_RECEIVED;
-    if (!ok) throw new ActionError("PO must be approved/sent before receiving goods");
+      po.status === VendorPOStatus.PARTIALLY_RECEIVED ||
+      po.status === VendorPOStatus.RECEIVED;
+    if (!ok) {
+      throw new ActionError(
+        `Cannot receive against a ${humanizeStatus(po.status).toLowerCase()} purchase order.`,
+      );
+    }
 
     // M7: lock every PO line this GRN receives against (sorted, FOR UPDATE)
     // and re-read receivedQty under the lock. The include snapshot is stale —
@@ -1447,10 +1458,34 @@ async function createGRNInner(
     const anyRejected = grnLines.some((l) => toDecimal(l.rejectedQty).gt(0));
     const newGrnStatus = anyRejected ? GRNStatus.PARTIALLY_ACCEPTED : GRNStatus.ACCEPTED;
 
-    // Recompute PO status
+    // Recompute PO status.
+    //
+    // A line is settled when nothing more is expected on it — received in
+    // full, OR the balance was rejected. Rejecting is the store saying "this
+    // isn't coming": on receivedQty alone the PO sat at PARTIALLY_RECEIVED
+    // for ever, which took the supplier's bill with it and left the whole
+    // order stuck behind goods that were never going to arrive.
+    //
+    // Rejected quantity is NOT deducted from receivedQty and does not block
+    // a later delivery — orderedRemaining above still measures against
+    // receivedQty, so a vendor who re-sends a rejected item can still be
+    // received against the same line.
     const poLinesNow = await tx.vendorPOLine.findMany({ where: { poId: po.id } });
-    const allReceived = poLinesNow.every((l) => toDecimal(l.receivedQty).gte(toDecimal(l.quantity)));
-    const newPoStatus = allReceived ? VendorPOStatus.RECEIVED : VendorPOStatus.PARTIALLY_RECEIVED;
+    const rejectedByLine = new Map(
+      (
+        await tx.gRNLine.groupBy({
+          by: ["poLineId"],
+          where: { poLineId: { in: poLinesNow.map((l) => l.id) } },
+          _sum: { rejectedQty: true },
+        })
+      ).map((r) => [r.poLineId, toDecimal(r._sum.rejectedQty ?? 0)]),
+    );
+    const allSettled = poLinesNow.every((l) =>
+      toDecimal(l.receivedQty)
+        .plus(rejectedByLine.get(l.id) ?? 0)
+        .gte(toDecimal(l.quantity)),
+    );
+    const newPoStatus = allSettled ? VendorPOStatus.RECEIVED : VendorPOStatus.PARTIALLY_RECEIVED;
 
     await tx.gRN.update({ where: { id: grn.id }, data: { status: newGrnStatus } });
 
