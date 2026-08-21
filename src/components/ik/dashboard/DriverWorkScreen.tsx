@@ -73,14 +73,19 @@ export interface UpcomingOrder {
   headcount: number;
   eventDate: string;
   customerName: string;
+  /** What's being served — F&B plan the room and the service around it. */
+  items: Array<{ label: string; portions: string }>;
 }
 
 interface Props {
   eventPrep: EventPrepOrder[];
   pickups: PickupOrder[];
   deliveries: DriverDelivery[];
-  /** #18: confirmed event orders in the next 7 days — read-only heads-up
-   *  while the food is still in the kitchen. Collapsed by default. */
+  /** Confirmed event orders in the next 7 days, from the moment the order
+   *  exists. Nothing to action yet, but F&B need the menu and the pax count
+   *  to start arranging — so each card carries the dishes and opens the
+   *  order. It used to be a dead <li>, which left the team looking at an
+   *  event they could see but not read. Collapsed by default. */
   upcoming?: UpcomingOrder[];
 }
 
@@ -207,30 +212,37 @@ export function DriverWorkScreen({ eventPrep, pickups, deliveries, upcoming = []
       {upcoming.length > 0 && (
         <details className="mt-4 rounded-md border border-ik-rule bg-ik-card p-3">
           <summary className="cursor-pointer text-[13px] font-medium text-ik-ink">
-            Upcoming orders ({upcoming.length}) <span className="font-normal text-ik-ink-3">· next 7 days, still in the kitchen</span>
+            Upcoming orders ({upcoming.length}) <span className="font-normal text-ik-ink-3">· next 7 days — open one to see the full order</span>
           </summary>
           <div className="mt-2.5">
             <CappedList items={upcoming} className="grid gap-2" keyOf={(o) => o.id}>
               {(o) => (
-                <li className="rounded-md border border-ik-rule bg-ik-paper-alt p-2.5">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <div className="flex flex-wrap items-baseline gap-2">
-                      <span className="font-mono text-[12.5px] text-brand-700">{o.code}</span>
-                      <span className="rounded-full bg-ik-card px-2 py-0.5 text-[10.5px] text-ik-ink-2 ring-1 ring-ik-rule">
-                        {CHANNEL_LABEL[o.channel]}
+                <li className="rounded-md border border-ik-rule bg-ik-paper-alt transition hover:border-brand-500/50">
+                  <Link href={`/orders/${o.id}`} className="block p-2.5">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span className="font-mono text-[12.5px] text-brand-700">{o.code}</span>
+                        <span className="rounded-full bg-ik-card px-2 py-0.5 text-[10.5px] text-ik-ink-2 ring-1 ring-ik-rule">
+                          {CHANNEL_LABEL[o.channel]}
+                        </span>
+                      </div>
+                      <EventDateBadge target={o.eventDate} />
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[12.5px]">
+                      <span className="text-ik-ink">
+                        <strong>{o.customerName}</strong>
+                        <span className="text-ik-ink-3"> · {o.headcount} pax</span>
+                      </span>
+                      <span className="rounded-full bg-amber-wash px-2 py-0.5 text-[10.5px] font-medium text-amber-700">
+                        {STATUS_LABEL[o.status]}
                       </span>
                     </div>
-                    <EventDateBadge target={o.eventDate} />
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[12.5px]">
-                    <span className="text-ik-ink">
-                      <strong>{o.customerName}</strong>
-                      <span className="text-ik-ink-3"> · {o.headcount} pax</span>
-                    </span>
-                    <span className="rounded-full bg-amber-wash px-2 py-0.5 text-[10.5px] font-medium text-amber-700">
-                      {STATUS_LABEL[o.status]}
-                    </span>
-                  </div>
+                    {o.items.length > 0 && (
+                      <div className="mt-1.5 border-t border-ik-rule pt-1.5 text-[11.5px] text-ik-ink-2">
+                        {o.items.map((it) => `${it.label} × ${it.portions}`).join(" · ")}
+                      </div>
+                    )}
+                  </Link>
                 </li>
               )}
             </CappedList>

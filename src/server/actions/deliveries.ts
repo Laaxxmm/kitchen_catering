@@ -271,6 +271,10 @@ export async function listEventPrepQueue() {
  * gate) with an event in the next 7 days. Includes the pre-kitchen
  * statuses the event-prep queue doesn't watch, so F&B sees an order while
  * it's still being chef-reviewed or cooked.
+ *
+ * Carries the menu. F&B arrange the room, the cutlery and the service round
+ * what is being served, and that planning starts the moment the order
+ * exists — not when the chef gets to it.
  */
 export async function listUpcomingEventOrders() {
   await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
@@ -297,6 +301,10 @@ export async function listUpcomingEventOrders() {
       headcount: true,
       eventDate: true,
       customer: { select: { name: true } },
+      items: {
+        orderBy: { sortOrder: "asc" },
+        select: { id: true, portions: true, dish: { select: { name: true } } },
+      },
     },
     orderBy: { eventDate: "asc" },
     take: 100,
@@ -309,6 +317,10 @@ export async function listUpcomingEventOrders() {
     headcount: o.headcount,
     eventDate: o.eventDate.toISOString(),
     customerName: o.customer.name,
+    items: o.items.map((it) => ({
+      label: it.dish?.name ?? "—",
+      portions: it.portions.toString(),
+    })),
   }));
 }
 
