@@ -28,10 +28,21 @@ export interface EventPrepOrder {
   eventDate: string;
   deliveryAddress: string;
   customerName: string;
+  /** Where the order itself has got to — the prep queue now starts before
+   *  the kitchen has agreed to it, so the card has to say so. */
+  status: OrderStatus;
   prepReadyAt: string | null;
   prepReadyBy: string | null;
   staff: AllocatedStaff[];
 }
+
+/** Statuses where the order is on the prep list but nobody has committed to
+ *  it yet. Arrangements can start; the card just doesn't pretend it's set. */
+const UNCONFIRMED_STATUSES: OrderStatus[] = [
+  "PENDING_ADMIN_APPROVAL",
+  "PENDING_CHEF_APPROVAL",
+  "CHANGES_PROPOSED_BY_CHEF",
+];
 
 export interface OrderLine {
   label: string;
@@ -277,6 +288,13 @@ function EventPrepCard({ order, highlight }: { order: EventPrepOrder; highlight:
         <span className="text-ik-ink-3"> · {order.headcount} pax</span>
       </div>
       <div className="mt-0.5 text-[12.5px] text-ik-ink-2">{order.deliveryAddress}</div>
+      {/* Cutlery and staffing follow the pax count, so prep starts now — but
+          the pax count can still move while the order is unsigned. */}
+      {UNCONFIRMED_STATUSES.includes(order.status) && (
+        <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-ik-card px-2 py-0.5 text-[10.5px] font-medium text-amber-700 ring-1 ring-amber/40">
+          {STATUS_LABEL[order.status]} · pax may still change
+        </div>
+      )}
       {/* Serving-staff chips — the F&B crew allocated to run this event. */}
       <StaffAllocation orderId={order.id} staff={order.staff} canEdit compact />
       <div className="mt-2.5 flex flex-wrap items-center gap-2">

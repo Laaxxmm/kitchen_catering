@@ -51,6 +51,28 @@ const EVENT_PREP_STATUSES: OrderStatus[] = [
 ];
 
 /**
+ * What the F&B team's prep queue covers — everything above, PLUS the order
+ * before the kitchen has agreed to it.
+ *
+ * Cutlery, crockery and staffing are driven by the pax count and the
+ * channel, not by the menu, so that work can start the moment the booking
+ * exists. Waiting for the chef meant a 250-cover event 48 hours out was
+ * absent from the one screen the team plans from.
+ *
+ * The card carries the status, so an order nobody has signed off reads that
+ * way — the risk being guarded against is arranging for an event that is
+ * later cut down or declined, and the answer to that is showing the state,
+ * not hiding the order.
+ */
+const EVENT_PREP_QUEUE_STATUSES: OrderStatus[] = [
+  OrderStatus.PENDING_ADMIN_APPROVAL,
+  OrderStatus.PENDING_CHEF_APPROVAL,
+  OrderStatus.CHANGES_PROPOSED_BY_CHEF,
+  OrderStatus.CHEF_APPROVED,
+  ...EVENT_PREP_STATUSES,
+];
+
+/**
  * 24-byte random token, base64url-encoded — used for the public
  * feedback link minted on delivery completion. Same shape as the
  * existing CustomerInvoice.shareToken.
@@ -229,12 +251,13 @@ export async function listEventPrepQueue() {
   const rows = await db.order.findMany({
     where: {
       channel: { in: EVENT_DELIVERY_CHANNEL_LIST },
-      status: { in: EVENT_PREP_STATUSES },
+      status: { in: EVENT_PREP_QUEUE_STATUSES },
     },
     select: {
       id: true,
       code: true,
       channel: true,
+      status: true,
       headcount: true,
       eventDate: true,
       deliveryAddress: true,
@@ -255,6 +278,7 @@ export async function listEventPrepQueue() {
     id: o.id,
     code: o.code,
     channel: o.channel,
+    status: o.status,
     headcount: o.headcount,
     eventDate: o.eventDate.toISOString(),
     deliveryAddress: o.deliveryAddress,
@@ -297,15 +321,7 @@ export async function listUpcomingEventOrders() {
   const rows = await db.order.findMany({
     where: {
       channel: { in: EVENT_DELIVERY_CHANNEL_LIST },
-      status: {
-        in: [
-          OrderStatus.PENDING_ADMIN_APPROVAL,
-          OrderStatus.PENDING_CHEF_APPROVAL,
-          OrderStatus.CHANGES_PROPOSED_BY_CHEF,
-          OrderStatus.CHEF_APPROVED,
-          ...EVENT_PREP_STATUSES,
-        ],
-      },
+      status: { in: EVENT_PREP_QUEUE_STATUSES },
       eventDate: { gte: now, lt: horizon },
     },
     select: {
