@@ -614,10 +614,14 @@ export default async function DashboardPage({
     const todayW = istDayWindow();
     const tomorrowW = istDayWindow(new Date(), 1);
     const weekW = istWeekWindow();
+    // Counts every event on this screen, the upcoming list included. It
+    // used to count only the three work queues, so a day with nothing to
+    // dispatch read "All 0" directly above seven upcoming orders.
     const countIn = (w: { from: Date; toExclusive: Date } | null) =>
       allEventPrep.filter((o) => within(o.eventDate, w)).length +
       allPickups.filter((o) => within(o.eventDate, w)).length +
-      allDeliveries.filter((d) => within(d.scheduledAt, w)).length;
+      allDeliveries.filter((d) => within(d.scheduledAt, w)).length +
+      upcoming.filter((o) => within(o.eventDate, w)).length;
     const pillCounts = {
       today: countIn(todayW),
       tomorrow: countIn(tomorrowW),
@@ -658,7 +662,11 @@ export default async function DashboardPage({
               ⏰ {tomorrowPrep} event{tomorrowPrep === 1 ? "" : "s"} tomorrow still need{tomorrowPrep === 1 ? "s" : ""} cutlery prep — get ahead now →
             </Link>
           )}
-          {eventPrep.length + pickups.length + myDeliveries.length === 0 && scope !== "all" && (
+          {/* Only when the screen really is empty. With upcoming orders listed
+              below, "Nothing for today" read as "nothing at all". */}
+          {eventPrep.length + pickups.length + myDeliveries.length === 0 &&
+            upcoming.length === 0 &&
+            scope !== "all" && (
             <p className="text-[12.5px] text-ik-ink-3">
               Nothing {scope === "today" ? "for today" : "in this window"} —{" "}
               <Link href="/dashboard?scope=all" className="text-brand hover:underline">
