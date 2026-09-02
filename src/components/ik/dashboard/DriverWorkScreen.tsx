@@ -206,13 +206,15 @@ export function DriverWorkScreen({ eventPrep, pickups, deliveries, upcoming = []
         })()
       )}
 
-      {/* #18: read-only heads-up of confirmed events in the next 7 days —
-          still in the kitchen, nothing to action yet. Native <details>,
-          collapsed by default. */}
+      {/* Events in the next 30 days, from the moment the order is submitted.
+          Native <details>, but OPEN by default: this is where F&B first meet
+          a new order, and folded away a booking taken this morning read as
+          nothing at all. */}
       {upcoming.length > 0 && (
-        <details className="mt-4 rounded-md border border-ik-rule bg-ik-card p-3">
+        <details open className="mt-4 rounded-md border border-ik-rule bg-ik-card p-3">
           <summary className="cursor-pointer text-[13px] font-medium text-ik-ink">
-            Upcoming orders ({upcoming.length}) <span className="font-normal text-ik-ink-3">· next 7 days — open one to see the full order</span>
+            Upcoming orders ({upcoming.length}){" "}
+            <span className="font-normal text-ik-ink-3">· next 30 days — open one to see the full order</span>
           </summary>
           <div className="mt-2.5">
             <CappedList items={upcoming} className="grid gap-2" keyOf={(o) => o.id}>

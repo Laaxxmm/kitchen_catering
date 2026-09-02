@@ -267,10 +267,24 @@ export async function listEventPrepQueue() {
 
 /**
  * #18: read-only "what's coming" list for the F&B / delivery dashboard —
- * confirmed event-delivery orders (accepted onward, i.e. past the manager
- * gate) with an event in the next 7 days. Includes the pre-kitchen
- * statuses the event-prep queue doesn't watch, so F&B sees an order while
- * it's still being chef-reviewed or cooked.
+ * event-delivery orders with an event in the next 30 days, from the moment
+ * the order is submitted. Includes the pre-kitchen statuses the event-prep
+ * queue doesn't watch, so F&B sees an order while it is still waiting on
+ * the admin, being chef-reviewed, or cooking.
+ *
+ * PENDING_ADMIN_APPROVAL is in the list deliberately. Every new order lands
+ * there first (admin sees them all before the kitchen does), so leaving it
+ * out meant a manager could take two orders and F&B would see only the one
+ * the admin had already got to — the other was invisible until someone
+ * signed it, which is exactly when the cutlery planning needed to start.
+ * The card shows the status, so an unapproved order reads as unapproved.
+ *
+ * DRAFT stays out: not submitted is not an order.
+ *
+ * The window was 7 days and that was too short. Cutlery, crockery and hired
+ * items for a 300-cover event are arranged weeks out, and an order booked
+ * further ahead than a week simply wasn't on the F&B screen — the team saw
+ * one of the manager's two orders and had no way to tell the other existed.
  *
  * Carries the menu. F&B arrange the room, the cutlery and the service round
  * what is being served, and that planning starts the moment the order
@@ -279,19 +293,20 @@ export async function listEventPrepQueue() {
 export async function listUpcomingEventOrders() {
   await requireRole([Role.ADMIN, Role.MANAGER, Role.DELIVERY]);
   const now = new Date();
-  const in7Days = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
+  const horizon = new Date(now.getTime() + 30 * 24 * 3600 * 1000);
   const rows = await db.order.findMany({
     where: {
       channel: { in: EVENT_DELIVERY_CHANNEL_LIST },
       status: {
         in: [
+          OrderStatus.PENDING_ADMIN_APPROVAL,
           OrderStatus.PENDING_CHEF_APPROVAL,
           OrderStatus.CHANGES_PROPOSED_BY_CHEF,
           OrderStatus.CHEF_APPROVED,
           ...EVENT_PREP_STATUSES,
         ],
       },
-      eventDate: { gte: now, lt: in7Days },
+      eventDate: { gte: now, lt: horizon },
     },
     select: {
       id: true,
