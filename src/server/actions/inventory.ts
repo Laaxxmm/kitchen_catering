@@ -23,6 +23,7 @@ import {
   checkReturnQty,
   remainingReturnable,
 } from "@/lib/stock-movement";
+import { classifyStock } from "@/lib/stock-health";
 import { unitsEquivalent } from "@/lib/units";
 import { istToUtc } from "@/lib/time";
 import { toDecimal } from "@/lib/money";
@@ -1344,6 +1345,94 @@ export async function listIngredients(opts: { query?: string; active?: boolean; 
     ? rows.filter((r) => toDecimal(r.onHandQty).lte(toDecimal(r.reorderLevel)))
     : rows;
 }
+
+/**
+ * Every active kitchen item with its real usage attached, classified.
+ *
+ * The stock page used to ask one question — is on hand at or below the
+ * reorder level — and reorder level is 0 on almost every row, so the answer
+ * was "out" for the ~285 items the import created with no opening count and
+ * that nobody has ever drawn. A red number that big is read once and then
+ * ignored, which is exactly what happened: the store went back to walking
+ * the shelves every morning.
+ *
+ * Usage is aggregated per item rather than fetched per row — the catalogue
+ * is 400+ items and a query each would be 400+ round trips on a page load.
+ */
+export async function listStockHealth() {
+  await requireRole(READ_ROLES);
+  const [items, issueStats, receiptStats] = await Promise.all([
+    db.ingredient.findMany({
+      where: { active: true },
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        unit: true,
+        onHandQty: true,
+        reorderLevel: true,
+        avgUnitCost: true,
+      },
+      orderBy: { name: "asc" },
+    }),
+    db.ingredientIssue.groupBy({
+      by: ["ingredientId"],
+      _sum: { qty: true },
+      _min: { issuedAt: true },
+      _max: { issuedAt: true },
+    }),
+    // First receipt matters too: an item received a fortnight ago and drawn
+    // once yesterday has been in play a fortnight, not a day.
+    db.ingredientReceipt.groupBy({
+      by: ["ingredientId"],
+      _min: { receivedAt: true },
+    }),
+  ]);
+
+  const issues = new Map(issueStats.map((r) => [r.ingredientId, r]));
+  const receipts = new Map(receiptStats.map((r) => [r.ingredientId, r]));
+  const now = new Date();
+
+  return items.map((i) => {
+    const issue = issues.get(i.id);
+    const firstReceipt = receipts.get(i.id)?._min.receivedAt ?? null;
+    const firstIssue = issue?._min.issuedAt ?? null;
+    const firstMovementAt =
+      firstReceipt && firstIssue
+        ? firstReceipt < firstIssue
+          ? firstReceipt
+          : firstIssue
+        : (firstReceipt ?? firstIssue);
+
+    const health = classifyStock(
+      {
+        onHandQty: i.onHandQty,
+        reorderLevel: i.reorderLevel,
+        issuedQty: issue?._sum.qty ?? 0,
+        firstMovementAt,
+        lastIssuedAt: issue?._max.issuedAt ?? null,
+      },
+      now,
+    );
+
+    return {
+      id: i.id,
+      sku: i.sku,
+      name: i.name,
+      unit: i.unit,
+      onHand: toDecimal(i.onHandQty).toString(),
+      reorderLevel: toDecimal(i.reorderLevel).toString(),
+      avgCost: toDecimal(i.avgUnitCost).toString(),
+      bucket: health.bucket,
+      dailyRate: health.dailyRate.toDecimalPlaces(3).toString(),
+      daysCover: health.daysCover,
+      suggestedQty: health.suggestedQty.toString(),
+      lastIssuedAt: issue?._max.issuedAt?.toISOString() ?? null,
+    };
+  });
+}
+
+export type StockHealthRow = Awaited<ReturnType<typeof listStockHealth>>[number];
 
 export async function getIngredient(id: string) {
   await requireRole(READ_ROLES);
