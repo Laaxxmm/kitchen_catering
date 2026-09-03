@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { db } from "@/server/db";
+import { kitchenStockCounts } from "@/server/reports/stock-health";
 
 interface StoreMini {
   key: string;
@@ -7,6 +8,9 @@ interface StoreMini {
   href: string;
   itemCount: number;
   low: number;
+  /** Kitchen only: items the kitchen is actually drawing. The other stores
+   *  have no issue history to derive a rate from. */
+  inUse?: number;
 }
 
 function countLow(
@@ -19,20 +23,25 @@ function countLow(
 }
 
 /**
- * Lighter reference row for the launcher — item count + low-stock flags per
- * store, no 7-day consumption number (that lives on the Stock detail page).
- * Secondary surface + smaller than the task tiles so it doesn't compete.
- * Reuses the same queries as the old StoresOverviewPanel.
+ * Lighter reference row for the launcher — item count + what needs ordering
+ * per store. Secondary surface, smaller than the task tiles.
+ *
+ * The kitchen figure used to be `onHandQty <= 0`, which read "243 low" out
+ * of 421 items: nearly every one of them a catalogue row imported with no
+ * opening count that has never been issued. It now comes from the shared
+ * classifier, so this strip, the attention bar and the stock page all say
+ * the same thing — and the kitchen card also shows how many items are in
+ * regular use, which is the honest denominator for a 421-item catalogue.
  */
 export async function StoresStrip() {
   const [
-    kitchenCount, kitchenLow,
+    kitchenCount, kitchenStock,
     hkCount, hkLowAll,
     maintCount, maintLowAll,
     banquetCount, banquetLowAll,
   ] = await Promise.all([
     db.ingredient.count({ where: { active: true } }),
-    db.ingredient.count({ where: { active: true, onHandQty: { lte: 0 } } }),
+    kitchenStockCounts(),
     db.housekeepingItem.count({ where: { active: true } }),
     db.housekeepingItem.findMany({ where: { active: true, minStock: { not: null } }, select: { currentStock: true, minStock: true } }),
     db.maintenanceItem.count({ where: { active: true } }),
@@ -42,7 +51,14 @@ export async function StoresStrip() {
   ]);
 
   const cards: StoreMini[] = [
-    { key: "kitchen", label: "Kitchen", href: "/inventory/ingredients", itemCount: kitchenCount, low: kitchenLow },
+    {
+      key: "kitchen",
+      label: "Kitchen",
+      href: "/inventory/ingredients",
+      itemCount: kitchenCount,
+      low: kitchenStock.toOrder,
+      inUse: kitchenStock.inRegularUse,
+    },
     { key: "housekeeping", label: "Housekeeping", href: "/housekeeping", itemCount: hkCount, low: countLow(hkLowAll) },
     { key: "maintenance", label: "Maintenance", href: "/maintenance", itemCount: maintCount, low: countLow(maintLowAll) },
     { key: "banquet", label: "Banquet", href: "/banquet", itemCount: banquetCount, low: countLow(banquetLowAll) },
@@ -77,7 +93,7 @@ export async function StoresStrip() {
             <div className={"text-[22px] font-bold leading-none tabular-nums " + (totalLow > 0 ? "text-alert" : "text-ik-ink-3")}>
               {totalLow}
             </div>
-            <div className="mt-1 text-[10.5px] uppercase tracking-wide text-ik-ink-3">low</div>
+            <div className="mt-1 text-[10.5px] uppercase tracking-wide text-ik-ink-3">to order</div>
           </div>
         </div>
       </div>
@@ -103,9 +119,14 @@ export async function StoresStrip() {
             </div>
             <div className="mt-0.5 text-[11.5px]">
               {c.low > 0 ? (
-                <span className="font-medium text-alert">{c.low} low</span>
+                <span className="font-medium text-alert">{c.low} to order</span>
               ) : (
-                <span className="text-positive">all stocked</span>
+                <span className="text-positive">nothing to order</span>
+              )}
+              {/* The denominator that makes the number readable: 421 items
+                  in the catalogue, a fraction of them actually in use. */}
+              {c.inUse !== undefined && (
+                <span className="text-ik-ink-3"> · {c.inUse} in use</span>
               )}
             </div>
           </Link>

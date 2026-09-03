@@ -2,6 +2,7 @@ import "./db-url";
 
 import { beforeAll, describe, expect, it } from "vitest";
 import { listStockHealth } from "@/server/actions/inventory";
+import { kitchenStockCounts } from "@/server/reports/stock-health";
 import {
   asManager,
   asStore,
@@ -106,5 +107,48 @@ describe("what the store is shown", () => {
     const { ingredients } = seeded();
     const rows = await listStockHealth();
     expect(find(rows, ingredients.plentiful)).toBeDefined();
+  });
+});
+
+/**
+ * Four surfaces used to answer "what needs ordering" with four slightly
+ * different variations on `on hand <= reorder level`, and reorder level is 0
+ * on nearly every row — so the stock page, the attention bar, the stores
+ * strip and the sidebar badge each counted the untouched half of the
+ * catalogue, in their own way. They now share one classifier; this is what
+ * stops them drifting apart again.
+ */
+describe("one definition, every surface", () => {
+  it("counts the same items the stock page lists", async () => {
+    await asStore();
+    const [rows, counts] = await Promise.all([listStockHealth(), kitchenStockCounts()]);
+    const bucket = (b: string) => rows.filter((r) => r.bucket === b).length;
+
+    expect(counts.total).toBe(rows.length);
+    expect(counts.outNeeded).toBe(bucket("OUT_NEEDED"));
+    expect(counts.runningOut).toBe(bucket("RUNNING_OUT"));
+    expect(counts.toOrder).toBe(bucket("OUT_NEEDED") + bucket("RUNNING_OUT"));
+  });
+
+  it("leaves the never-used and the dormant out of the order count", async () => {
+    await asStore();
+    const counts = await kitchenStockCounts();
+    // Every item is in exactly one bucket, and the two quiet ones are not
+    // part of what anybody is asked to act on.
+    expect(
+      counts.outNeeded + counts.runningOut + counts.watch + counts.healthy +
+        counts.neverUsed + counts.dormant,
+    ).toBe(counts.total);
+    expect(counts.inRegularUse).toBe(counts.total - counts.neverUsed - counts.dormant);
+    expect(counts.toOrder).toBeLessThanOrEqual(counts.inRegularUse);
+  });
+
+  it("does not count an untouched catalogue as things to order", async () => {
+    await asStore();
+    const counts = await kitchenStockCounts();
+    // The whole point: a catalogue full of never-issued rows produces an
+    // order list of zero, not one the size of the catalogue.
+    expect(counts.neverUsed).toBeGreaterThan(0);
+    expect(counts.toOrder).toBeLessThan(counts.neverUsed);
   });
 });

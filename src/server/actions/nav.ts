@@ -13,6 +13,7 @@ import { db } from "@/server/db";
 import { hasRole, requireSession } from "@/server/rbac";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
+import { kitchenStockCounts } from "@/server/reports/stock-health";
 import type { NavBadges } from "@/lib/nav-config";
 
 /**
@@ -35,7 +36,7 @@ const computeNavBadges = unstable_cache(
   async (): Promise<NavBadges> => {
   const now = new Date();
 
-  const [pendingOrders, openReqs, lowStockRows, poPending, billsMatch, billsPay, openInvoices, overdueInvoices] =
+  const [pendingOrders, openReqs, kitchenStock, poPending, billsMatch, billsPay, openInvoices, overdueInvoices] =
     await Promise.all([
       db.order.count({
         where: {
@@ -54,11 +55,11 @@ const computeNavBadges = unstable_cache(
           order: { status: { notIn: INACTIVE_ORDER_STATUSES } },
         },
       }),
-      // Column-to-column comparison isn't expressible in Prisma's where —
-      // count in SQL rather than fetching every ingredient to filter in JS.
-      db.$queryRaw<Array<{ count: number }>>`
-        SELECT COUNT(*)::int AS count FROM "Ingredient"
-        WHERE "active" = true AND "onHandQty" <= "reorderLevel"`,
+      // Was: COUNT(*) WHERE onHandQty <= reorderLevel. reorderLevel is 0 on
+      // almost every row, so the badge counted the whole untouched half of
+      // the catalogue. Same classifier as the stock page, the attention bar
+      // and the stores strip — one definition, four places.
+      kitchenStockCounts(),
       db.vendorPO.count({ where: { status: VendorPOStatus.PENDING_APPROVAL } }),
       db.vendorBill.count({
         where: { status: { in: [VendorBillStatus.DRAFT, VendorBillStatus.PENDING_MATCH, VendorBillStatus.DISCREPANCY] } },
@@ -78,7 +79,7 @@ const computeNavBadges = unstable_cache(
       }),
     ]);
 
-  const lowStock = lowStockRows[0]?.count ?? 0;
+  const lowStock = kitchenStock.toOrder;
   const buy = poPending + billsMatch + billsPay;
 
   const badges: NavBadges = {};

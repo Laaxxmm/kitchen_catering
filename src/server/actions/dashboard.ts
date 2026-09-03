@@ -16,6 +16,7 @@ import { hasRole, requireSession } from "@/server/rbac";
 import { toDecimal } from "@/lib/money";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
+import { kitchenStockCounts } from "@/server/reports/stock-health";
 
 /**
  * Returns the 4 dashboard KPIs and a role-aware "my queue" count.
@@ -47,7 +48,7 @@ export async function getDashboardSummary() {
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
-  const [todayOrders, dueOrders, todayDeliveries, deliveredToday, openInvoices, lowStockIngredients] = await Promise.all([
+  const [todayOrders, dueOrders, todayDeliveries, deliveredToday, openInvoices, stockCounts] = await Promise.all([
     db.order.count({
       where: {
         eventDate: { gte: todayStart, lt: tomorrowStart },
@@ -94,16 +95,19 @@ export async function getDashboardSummary() {
       _sum: { grandTotal: true, amountPaid: true },
       _count: { _all: true },
     }),
-    db.$queryRaw<Array<{ count: number }>>`
-      SELECT COUNT(*)::int AS count FROM "Ingredient"
-      WHERE "active" = true AND "onHandQty" <= "reorderLevel"`,
+    // Was: COUNT(*) WHERE onHandQty <= reorderLevel. reorderLevel defaults
+    // to 0, so that counted every catalogue row sitting at zero — 258 of
+    // them in the attention bar, almost all never issued in their life. The
+    // shared classifier answers the question that was actually being asked:
+    // what has run out or is about to, among the items the kitchen uses.
+    kitchenStockCounts(),
   ]);
 
   const outstandingAR = toDecimal(openInvoices._sum.grandTotal ?? "0")
     .minus(toDecimal(openInvoices._sum.amountPaid ?? "0"))
     .toDecimalPlaces(2);
   const openInvoiceCount = openInvoices._count._all;
-  const lowStockCount = lowStockIngredients[0]?.count ?? 0;
+  const lowStockCount = stockCounts.toOrder;
 
   // ─── My queue ─────────────────────────────────────────────────────────
   let myQueue: { count: number; label: string; href: string } | null = null;

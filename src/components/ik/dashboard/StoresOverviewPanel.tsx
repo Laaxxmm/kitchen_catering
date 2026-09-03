@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { db } from "@/server/db";
+import { kitchenStockCounts } from "@/server/reports/stock-health";
 
 interface StoreCard {
   key: string;
@@ -25,7 +26,7 @@ export async function StoresOverviewPanel() {
   const [
     kitchenCount,
     kitchenIssues,
-    kitchenLow,
+    kitchenStock,
     hkCount,
     hkIssues,
     hkLowAll,
@@ -38,16 +39,10 @@ export async function StoresOverviewPanel() {
   ] = await Promise.all([
     db.ingredient.count({ where: { active: true } }),
     db.ingredientIssue.count({ where: { issuedAt: { gte: oneWeekAgo } } }),
-    db.ingredient.count({
-      where: {
-        active: true,
-        // onHandQty <= reorderLevel — Prisma can't express the cross-field
-        // compare cleanly, so we approximate with a > 0 reorderLevel +
-        // onHandQty <= 0 check. The dedicated low-stock list lives on
-        // the inventory page; this number is a rough indicator.
-        onHandQty: { lte: 0 },
-      },
-    }),
+    // Same classifier as the stock page and the attention bar. The old
+    // approximation here (onHandQty <= 0) counted every catalogue row that
+    // had never been counted or drawn.
+    kitchenStockCounts(),
     db.housekeepingItem.count({ where: { active: true } }),
     db.housekeepingIssue.count({ where: { issuedAt: { gte: oneWeekAgo } } }),
     db.housekeepingItem.findMany({
@@ -86,7 +81,7 @@ export async function StoresOverviewPanel() {
       href: "/inventory/ingredients",
       itemCount: kitchenCount,
       issuesLast7d: kitchenIssues,
-      lowStock: kitchenLow,
+      lowStock: kitchenStock.toOrder,
     },
     {
       key: "housekeeping",
@@ -149,9 +144,9 @@ export async function StoresOverviewPanel() {
             </div>
             <div className="mt-1 text-[10.5px]">
               {c.lowStock > 0 ? (
-                <span className="text-alert">{c.lowStock} low</span>
+                <span className="text-alert">{c.lowStock} to order</span>
               ) : (
-                <span className="text-ik-ink-3">no low-stock flags</span>
+                <span className="text-ik-ink-3">nothing to order</span>
               )}
             </div>
           </Link>
