@@ -24,10 +24,11 @@ export default auth((req) => {
     pathname.startsWith("/icons") ||
     pathname === "/manifest.webmanifest" ||
     pathname === "/favicon.ico" ||
+    // /q/<token> is the customer's quote link. It is the ONLY unauthenticated
+    // app route; a prefix listed here for a path that does not exist yet is
+    // an open door the day someone creates it, which is why /i/, /f/ and
+    // /api/pdf/public/ came out.
     pathname.startsWith("/q/") ||
-    pathname.startsWith("/i/") ||
-    pathname.startsWith("/f/") ||
-    pathname.startsWith("/api/pdf/public/") ||
     pathname === "/forbidden"
   ) {
     return NextResponse.next();
@@ -50,6 +51,6 @@ export default auth((req) => {
 
 export const config = {
   matcher: [
-    "/((?!api/auth|api/mobile|api/pdf/public|_next/static|_next/image|_next/data|favicon\\.ico|icons|manifest\\.webmanifest|q/|i/|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|avif|css|js|map|txt|woff2?|ttf|otf)$).*)",
+    "/((?!api/auth|api/mobile|_next/static|_next/image|_next/data|favicon\\.ico|icons|manifest\\.webmanifest|q/|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|avif|css|js|map|txt|woff2?|ttf|otf)$).*)",
   ],
 };
