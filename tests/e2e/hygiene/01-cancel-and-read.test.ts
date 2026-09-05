@@ -26,6 +26,7 @@ import {
   mustOk,
   placeCateringOrder,
   read,
+  asUser,
 } from "../harness";
 
 /**
@@ -125,19 +126,29 @@ describe("reading one order by id", () => {
   });
 
   /**
-   * Act as a role that has no seeded desk of its own. `requireRole` reads the
-   * role off the session object and nothing else, so re-badging a registered
-   * user IS the role change — put it back afterwards.
+   * Act as a role that has no seeded desk of its own. `requireSession` now
+   * takes the role from the User ROW, not the session object — a re-badged
+   * session would just be overwritten. So the row is what changes, and the
+   * session carries the row's new version; both go back afterwards.
    */
   async function asRole<T>(role: Role, fn: () => Promise<T>): Promise<T> {
     const user = desk("store");
-    const real = user.role;
-    user.role = role;
-    asStore();
+    const before = await db.user.findUniqueOrThrow({ where: { id: user.id } });
+    const changed = await db.user.update({
+      where: { id: user.id },
+      data: { role, sessionVersion: { increment: 1 } },
+    });
+    asUser({ ...user, role, sessionVersion: changed.sessionVersion });
     try {
       return await fn();
     } finally {
-      user.role = real;
+      const restored = await db.user.update({
+        where: { id: user.id },
+        data: { role: before.role, sessionVersion: { increment: 1 } },
+      });
+      // The desk's cached session must match the row again for later tests.
+      user.sessionVersion = restored.sessionVersion;
+      asStore();
     }
   }
 

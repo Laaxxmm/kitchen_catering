@@ -1,4 +1,4 @@
-import { auth } from "@/server/auth";
+import { requireSession } from "@/server/rbac";
 import { db } from "@/server/db";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,11 @@ export const dynamic = "force-dynamic";
 const BUILD_FINGERPRINT = process.env.RAILWAY_GIT_COMMIT_SHA ?? `boot-${Date.now()}`;
 
 export async function GET() {
-  const session = await auth();
+  // requireSession, not auth(): a deactivated user's bell should go quiet
+  // with the rest of their session rather than keep counting for 24h.
+  // Any refusal — signed out, deactivated, stale token — is just "0" here;
+  // the next guarded page load is what bounces them to /login.
+  const session = await requireSession().catch(() => null);
   if (!session?.user) return Response.json({ count: 0, build: BUILD_FINGERPRINT });
   const count = await db.notification.count({
     where: { userId: session.user.id, readAt: null },

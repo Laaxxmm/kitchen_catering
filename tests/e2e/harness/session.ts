@@ -14,6 +14,8 @@ export interface HarnessUser {
   name: string;
   email: string;
   role: Role;
+  /** What the token would carry. requireSession compares it to the row. */
+  sessionVersion: number;
 }
 
 /** The six seeded desks, by the name the tests use. */
@@ -77,6 +79,13 @@ export const asChef = () => become("chef");
 export const asStore = () => become("store");
 export const asDelivery = () => become("delivery");
 export const asAccounts = () => become("accounts");
+
+/** Sign in as any User row — for the lifecycle tests, where the desk's own
+ *  cached session is exactly the stale token under test. */
+export function asUser(user: HarnessUser): HarnessUser {
+  current = user;
+  return user;
+}
 
 /** Nobody is signed in — every guarded action must throw AuthenticationError. */
 export function asNobody(): void {

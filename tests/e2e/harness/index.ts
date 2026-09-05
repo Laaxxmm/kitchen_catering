@@ -63,6 +63,7 @@ export {
   asDelivery,
   asAccounts,
   asNobody,
+  asUser,
   actingAs,
   desk,
   DESK_EMAILS,

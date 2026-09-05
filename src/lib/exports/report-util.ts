@@ -1,5 +1,5 @@
 import { Role } from "@prisma/client";
-import { auth } from "@/server/auth";
+import { requireSession, AuthenticationError } from "@/server/rbac";
 
 // Reports carry financial data — restricted to management + the books desk.
 const REPORT_ROLES: Role[] = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
@@ -17,8 +17,16 @@ export async function gateReport(): Promise<Response | null> {
  * aren't finance-only). Returns a Response to short-circuit, or null when ok.
  */
 export async function gateExport(roles: Role[]): Promise<Response | null> {
-  const session = await auth();
-  if (!session?.user) return new Response("Unauthorized", { status: 401 });
+  // requireSession re-checks the User row (active + sessionVersion), so a
+  // deactivated account can't keep pulling exports on a token that has
+  // not yet expired.
+  let session;
+  try {
+    session = await requireSession();
+  } catch (e) {
+    if (e instanceof AuthenticationError) return new Response("Unauthorized", { status: 401 });
+    throw e;
+  }
   if (!roles.includes(session.user.role)) return new Response("Forbidden", { status: 403 });
   return null;
 }

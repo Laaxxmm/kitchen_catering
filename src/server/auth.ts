@@ -13,11 +13,14 @@ declare module "next-auth" {
     user: {
       id: string;
       role: Role;
+      /** Snapshot of User.sessionVersion when the token was minted. */
+      sessionVersion: number;
     } & DefaultSession["user"];
   }
 
   interface User {
     role: Role;
+    sessionVersion: number;
   }
 }
 
@@ -25,6 +28,7 @@ declare module "next-auth/jwt" {
   interface JWT {
     id: string;
     role: Role;
+    sv: number;
   }
 }
 
@@ -100,6 +104,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           name: user.name,
           role: user.role,
+          sessionVersion: user.sessionVersion,
         };
       },
     }),

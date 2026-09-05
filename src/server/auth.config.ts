@@ -14,7 +14,12 @@ import type { Role } from "@prisma/client";
  * `./auth.ts` and is merged in there — not here.
  */
 const authConfig = {
-  session: { strategy: "jwt" },
+  // 24h, down from Auth.js's 30-day default. The lifetime is the outer
+  // bound only — the real revocation is `sessionVersion` (see rbac.ts):
+  // every guarded call compares the version in the token with the User
+  // row, so a deactivated account or a changed role takes effect on the
+  // next request, not on the next login.
+  session: { strategy: "jwt", maxAge: 24 * 60 * 60 },
   pages: {
     signIn: "/login",
     // Bounce auth errors back to /login (with the error code in the
@@ -30,6 +35,7 @@ const authConfig = {
       if (user) {
         token.id = user.id as string;
         token.role = (user as { role: Role }).role;
+        token.sv = (user as { sessionVersion?: number }).sessionVersion ?? 0;
       }
       return token;
     },
@@ -37,6 +43,11 @@ const authConfig = {
       if (token && session.user) {
         session.user.id = token.id as string;
         session.user.role = token.role as Role;
+        // A token minted before sessionVersion existed has no `sv`. -1 can
+        // never equal a row's version, so those sessions end on their next
+        // guarded call and the user signs in once to get a current token.
+        session.user.sessionVersion =
+          typeof token.sv === "number" ? token.sv : -1;
       }
       return session;
     },

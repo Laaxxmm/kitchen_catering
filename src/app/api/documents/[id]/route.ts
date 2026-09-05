@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { DocumentEntityType, Role } from "@prisma/client";
-import { auth } from "@/server/auth";
+import { requireSession, AuthenticationError } from "@/server/rbac";
 import { db } from "@/server/db";
 import { streamDocument } from "@/lib/storage";
 import { Readable } from "node:stream";
@@ -35,9 +35,17 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  // requireSession, not auth(): the token alone is not enough any more —
+  // a deactivated user's token stays valid until it expires, and the row
+  // check is what ends it (rbac.ts).
+  let session;
+  try {
+    session = await requireSession();
+  } catch (e) {
+    if (e instanceof AuthenticationError) {
+      return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+    }
+    throw e;
   }
   const { id } = await params;
   const doc = await db.document.findUnique({ where: { id } });

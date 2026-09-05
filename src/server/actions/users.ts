@@ -74,6 +74,11 @@ export async function updateUser(id: string, raw: unknown): Promise<ActionResult
         if (input.password.length < 8) throw new ActionError("Password must be at least 8 characters");
         data.passwordHash = await bcrypt.hash(input.password, 12);
       }
+      // Any of these must reach a browser that is already signed in — see
+      // requireSession. Bumping the version is what ends its token.
+      if (input.role || input.password || input.active === false) {
+        data.sessionVersion = { increment: 1 };
+      }
       await tx.user.update({ where: { id }, data });
       await tx.auditLog.create({
         data: {
@@ -99,7 +104,11 @@ export async function deactivateUser(
     const session = await requireRole(ADMIN_ONLY);
     if (id === session.user.id) throw new ActionError("You cannot deactivate yourself");
     await db.$transaction(async (tx) => {
-      await tx.user.update({ where: { id }, data: { active: false } });
+      await tx.user.update({
+        where: { id },
+        // The version bump is what actually signs them out — see requireSession.
+        data: { active: false, sessionVersion: { increment: 1 } },
+      });
       await tx.auditLog.create({
         data: {
           userId: session.user.id,

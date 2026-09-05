@@ -384,6 +384,11 @@ model User {
   employmentType EmploymentType?
   phone          String?
   active         Boolean         @default(true)
+  // Bumped on deactivate, role change and password change. The web session
+  // is a JWT that used to live 30 days no matter what happened to the row
+  // behind it; every guarded call now compares the version baked into the
+  // token with this one and signs the user out on mismatch.
+  sessionVersion Int             @default(0)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 

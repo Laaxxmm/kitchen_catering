@@ -1,6 +1,8 @@
+import { cache } from "react";
 import { Role } from "@prisma/client";
 import { redirect } from "next/navigation";
 import { auth } from "./auth";
+import { db } from "./db";
 
 export class AuthorizationError extends Error {
   constructor(message = "Forbidden") {
@@ -16,9 +18,33 @@ export class AuthenticationError extends Error {
   }
 }
 
+/**
+ * The User row as it is NOW, not as it was when the token was minted. One
+ * primary-key read per request — `cache` dedupes it across every guarded
+ * call in the same render, so a page that touches six actions pays once.
+ */
+const liveUser = cache((id: string) =>
+  db.user.findUnique({
+    where: { id },
+    select: { active: true, role: true, sessionVersion: true },
+  }),
+);
+
 export async function requireSession() {
   const session = await auth();
   if (!session?.user?.id) throw new AuthenticationError();
+
+  // The JWT used to be trusted for its whole lifetime, so deactivating
+  // someone — or changing their role — did nothing to a browser that was
+  // already signed in. Compare the token's version with the row: a
+  // mismatch (deactivate, role change, password change) ends the session
+  // on this call, and the role is taken from the row so a change applies
+  // now rather than at the next login.
+  const live = await liveUser(session.user.id);
+  if (!live || !live.active || live.sessionVersion !== session.user.sessionVersion) {
+    throw new AuthenticationError("Your session has ended — please sign in again");
+  }
+  session.user.role = live.role;
   return session;
 }
 
