@@ -13,8 +13,15 @@ export const dynamic = "force-dynamic";
  * trapped between an error page and a login page that won't show. A route
  * handler can clear cookies; a server component cannot.
  */
-export async function GET(req: NextRequest) {
-  const res = NextResponse.redirect(new URL("/login?reason=ended", req.url), { status: 303 });
+export async function GET(_req: NextRequest) {
+  // A relative Location on purpose. Behind Railway's proxy the request URL
+  // the handler sees is the container's own 0.0.0.0:8080, and building an
+  // absolute URL from it sent browsers to a host that does not exist.
+  // Browsers resolve a relative Location against the page they asked for.
+  const res = new NextResponse(null, {
+    status: 303,
+    headers: { Location: "/login?reason=ended" },
+  });
   // Auth.js names the cookie by scheme: `__Secure-` prefix over https.
   for (const name of ["authjs.session-token", "__Secure-authjs.session-token"]) {
     res.cookies.set(name, "", { maxAge: 0, path: "/" });
