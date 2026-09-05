@@ -829,9 +829,26 @@ describe("the ledger", () => {
     const covered = new Set(CASES.map((c) => `${c.module}.${c.action}`));
     const unaccounted: string[] = [];
 
-    for (const file of readdirSync(dir).filter((f) => f.endsWith(".ts"))) {
-      const moduleName = file.replace(/\.ts$/, "");
-      const source = readFileSync(path.join(dir, file), "utf8");
+    // A module is either one file (`banquet.ts`) or a directory of lifecycle
+    // stages behind a barrel (`orders.ts` + `orders/*.ts`). Either way the
+    // key is `orders.createOrder` — the barrel keeps the import path, and the
+    // stage files are where the `export async function` lines now live. A
+    // stage directory's `_shared.ts` holds helpers, not actions, and is
+    // skipped by the leading underscore.
+    const sources: Array<{ moduleName: string; file: string }> = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith(".ts")) {
+        sources.push({ moduleName: entry.name.replace(/\.ts$/, ""), file: path.join(dir, entry.name) });
+      } else if (entry.isDirectory()) {
+        for (const inner of readdirSync(path.join(dir, entry.name))) {
+          if (inner.endsWith(".ts") && !inner.startsWith("_")) {
+            sources.push({ moduleName: entry.name, file: path.join(dir, entry.name, inner) });
+          }
+        }
+      }
+    }
+    for (const { moduleName, file } of sources) {
+      const source = readFileSync(file, "utf8");
       for (const match of source.matchAll(/^export async function (\w+)/gm)) {
         const name = match[1];
         const key = `${moduleName}.${name}`;
