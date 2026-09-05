@@ -5,6 +5,7 @@ import { Role } from "@prisma/client";
 import { db } from "@/server/db";
 import { createUser, deactivateUser, updateUser } from "@/server/actions/users";
 import { listIngredients, setReorderLevel } from "@/server/actions/inventory";
+import { sessionIsLive } from "@/server/rbac";
 import {
   asAdmin,
   asUser,
@@ -115,5 +116,28 @@ describe("what did not change", () => {
     asUser(probe);
     mustOk(await storeCall(), "still signed in");
     expect((await listIngredients({ active: true })).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The layout and /login ask this question without throwing, so a dead
+ * cookie is cleared and the person lands on the login page — instead of an
+ * error boundary and a login page that bounces them straight back. This is
+ * what took production down for every signed-in user on 5 September: the
+ * first deploy of session versions rejected every existing token from
+ * inside the page render.
+ */
+describe("the non-throwing liveness check the layout uses", () => {
+  it("is false for a token minted before versions existed", async () => {
+    const probe = await throwaway(Role.STORE_KEEPER);
+    expect(await sessionIsLive({ user: { ...probe, sessionVersion: -1 } })).toBe(false);
+    expect(await sessionIsLive({ user: probe })).toBe(true);
+  });
+
+  it("goes false the moment the account is deactivated", async () => {
+    const probe = await throwaway(Role.STORE_KEEPER);
+    await asAdmin();
+    mustOk(await deactivateUser(probe.id), "deactivate");
+    expect(await sessionIsLive({ user: probe })).toBe(false);
   });
 });

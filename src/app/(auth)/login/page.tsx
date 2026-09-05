@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { sessionIsLive } from "@/server/rbac";
 import { auth } from "@/server/auth";
 import { LoginForm } from "./LoginForm";
 
@@ -12,6 +13,9 @@ export default async function LoginPage({
   searchParams: Promise<{ callbackUrl?: string; error?: string }>;
 }) {
   const session = await auth();
+  // A signed-in user goes to the app — unless the server no longer honours
+  // their cookie, in which case bouncing them there is a loop. Clear it.
+  if (session?.user && !(await sessionIsLive(session))) redirect("/api/auth/ended");
   const sp = await searchParams;
   if (session?.user) redirect(sp.callbackUrl ?? "/");
 

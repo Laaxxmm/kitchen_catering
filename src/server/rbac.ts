@@ -30,6 +30,19 @@ const liveUser = cache((id: string) =>
   }),
 );
 
+/**
+ * Is this session still honoured? Same test requireSession applies, without
+ * the throw — for the two places that must redirect rather than fail:
+ * the dashboard layout (every page load) and /login (which would otherwise
+ * bounce a dead-but-valid cookie straight back to the dashboard).
+ */
+export async function sessionIsLive(session: {
+  user: { id: string; sessionVersion: number };
+}): Promise<boolean> {
+  const live = await liveUser(session.user.id);
+  return !!live && live.active && live.sessionVersion === session.user.sessionVersion;
+}
+
 export async function requireSession() {
   const session = await auth();
   if (!session?.user?.id) throw new AuthenticationError();
