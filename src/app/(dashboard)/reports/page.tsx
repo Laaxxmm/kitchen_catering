@@ -34,6 +34,7 @@ export default function ReportsHubPage() {
 /** On-screen views for tracing usage and auditing. Access to each is gated
  *  at its own route; the tiles just point the way from one hub. */
 const ONSCREEN: { href: string; title: string; desc: string }[] = [
+  { href: "/reports/order-timeline", title: "Order timeline", desc: "For a date range, every order's stamps — taken, accepted, kitchen, store, cooking, handover, F&B, delivery — and whether it was on time." },
   { href: "/reports/budget-vs-actual", title: "Monthly variance", desc: "Revenue, cost split, and variance vs prior month for a chosen calendar month." },
   { href: "/reports/stock-ledger", title: "Stock ledger", desc: "Per item, per store — opening, in, out, adjustments and closing balance for a date range." },
   { href: "/inventory/ingredients", title: "Kitchen stock", desc: "Every ingredient (incl. veg, frozen, non-veg) — on-hand qty, value, and per-item movement history." },

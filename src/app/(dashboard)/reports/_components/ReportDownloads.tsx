@@ -13,6 +13,7 @@ interface ReportDef {
 
 const REPORTS: ReportDef[] = [
   { key: "sales", title: "Sales & order P&L", desc: "Orders in the range with revenue, cost split and margin.", ranged: true },
+  { key: "order-timeline", title: "Order timeline", desc: "Per order: taken, accepted, kitchen, store, cooking, handover, F&B, delivery — and on time or late.", ranged: true },
   { key: "gst", title: "GST / tax summary", desc: "Output GST (sales invoices) + input GST (purchases), for filing.", ranged: true },
   { key: "stock", title: "Stock & procurement", desc: "Stock valuation + purchase orders + vendor bills.", ranged: true },
   { key: "payments", title: "Payments (AR / AP)", desc: "Everything outstanding — receivables and payables.", ranged: false },
