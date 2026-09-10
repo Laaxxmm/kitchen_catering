@@ -6,6 +6,7 @@ import type { InvoiceBankDetailsT } from "@/lib/validators";
 import { SettingsEditor } from "./_components/SettingsEditor";
 import { InvoiceBankDetailsCard } from "./_components/InvoiceBankDetailsCard";
 import { CleanSlate } from "./_components/CleanSlate";
+import { listStockCounts } from "@/server/actions/stock-count-import";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ export default async function SettingsPage() {
     return saveInvoiceBankDetails(input);
   }
 
+  const stockCounts = await listStockCounts();
   return (
     <>
       <PageHeader
@@ -43,7 +45,7 @@ export default async function SettingsPage() {
         }))}
         onSave={upsert}
       />
-      <CleanSlate />
+      <CleanSlate stockCounts={stockCounts} />
     </>
   );
 }

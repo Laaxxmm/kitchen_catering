@@ -27,6 +27,7 @@ import * as procurement from "@/server/actions/procurement";
 import * as productionJobs from "@/server/actions/production-jobs";
 import * as reminders from "@/server/actions/reminders";
 import * as settings from "@/server/actions/settings";
+import * as stockCountImport from "@/server/actions/stock-count-import";
 import * as stockTransfer from "@/server/actions/stock-transfer";
 import * as storeStock from "@/server/actions/store-stock";
 import * as users from "@/server/actions/users";
@@ -612,6 +613,13 @@ const CASES: GateCase[] = [
   // probe can run it for the desks its gate admits without touching rows.
   gate("catalogue-cleanup", "removeSampleCatalogueItems", ["admin", "manager"], () =>
     catalogueCleanup.removeSampleCatalogueItems(true),
+  ),
+  // A count id that matches no file: an admin dies past the gate on ENOENT.
+  gate("stock-count-import", "previewStockCount", ["admin"], () =>
+    stockCountImport.previewStockCount("0000-00-00"),
+  ),
+  gate("stock-count-import", "applyStockCount", ["admin"], () =>
+    stockCountImport.applyStockCount("0000-00-00"),
   ),
   gate("users", "createUser", ["admin"], () => users.createUser({})),
   gate("users", "updateUser", ["admin"], () => users.updateUser(MISSING_ID, {})),

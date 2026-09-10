@@ -15,6 +15,8 @@ import {
   removeSampleCatalogueItems,
   type SampleCleanupSummary,
 } from "@/server/actions/catalogue-cleanup";
+import { applyStockCount, previewStockCount } from "@/server/actions/stock-count-import";
+import type { StockCountPlan } from "@/server/stock-count-core";
 import { isNextNavigationError } from "@/lib/next-error";
 
 /**
@@ -29,15 +31,128 @@ import { isNextNavigationError } from "@/lib/next-error";
  *      items; the other two deliberately leave them alone.
  * All ADMIN-only (the actions re-check) and gated behind a typed phrase.
  */
-export function CleanSlate() {
+export function CleanSlate({
+  stockCounts = [],
+}: {
+  /** Physical counts shipped with this build (data/stock-counts). */
+  stockCounts?: Array<{ id: string; source: string; rows: number }>;
+}) {
   return (
     <div className="mt-8 grid gap-4">
+      {stockCounts.map((c) => (
+        <ApplyStockCount key={c.id} count={c} />
+      ))}
       <RemoveSampleItems />
       <ImportCatalogue />
       <ClearOrders />
       <FullReset />
       <EraseEverything />
     </div>
+  );
+}
+
+/**
+ * A physical count from the store's spreadsheet, reconciled into
+ * data/stock-counts/<date>.json and applied here in one press: twins merged,
+ * missing items created (never duplicated), units corrected, quantities
+ * posted as a count, prices set. Check first, then apply.
+ */
+function ApplyStockCount({ count }: { count: { id: string; source: string; rows: number } }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [plan, setPlan] = useState<StockCountPlan | null>(null);
+
+  function check() {
+    startTransition(async () => {
+      try {
+        const res = await previewStockCount(count.id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+        setPlan(res.plan);
+      } catch (err) {
+        if (isNextNavigationError(err)) throw err;
+        toast.error(err instanceof Error ? err.message : "Could not read the count");
+      }
+    });
+  }
+
+  function apply() {
+    startTransition(async () => {
+      try {
+        const res = await applyStockCount(count.id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success(
+          `Count ${count.id} applied — ${res.quantitiesChanged} quantities, ${res.costsSet} prices, ` +
+            `${res.created} new items, ${res.merged} merged, ${res.unitsChanged} units.`,
+        );
+        setPlan(null);
+        router.refresh();
+      } catch (err) {
+        if (isNextNavigationError(err)) throw err;
+        toast.error(err instanceof Error ? err.message : "Apply failed");
+      }
+    });
+  }
+
+  const changed = plan
+    ? plan.update.filter((u) => u.qtyFrom !== u.qtyTo || (u.costTo !== null && u.costTo !== u.costFrom) || u.unitTo)
+    : [];
+
+  return (
+    <section className="rounded-[14px] border border-brand-500/40 bg-ik-card p-4 sm:p-5">
+      <h3 className="font-serif text-[15px] font-medium text-ik-ink">Apply stock count · {count.id}</h3>
+      <p className="mt-1 max-w-2xl text-[12.5px] text-ik-ink-2">
+        {count.rows} rows from <em>{count.source}</em>. Sets on-hand and price for every item on the
+        sheet through the same paths the store uses — a count posting per item, a receipt or issue
+        for the difference — so the ledger stays whole. Anything the sheet names that the catalogue
+        lacks is created; anything that already exists by name is updated, never duplicated.
+      </p>
+
+      {plan && plan.alreadyApplied && (
+        <p className="mt-2 text-[12.5px] font-medium text-positive">Already applied.</p>
+      )}
+      {plan && !plan.alreadyApplied && (
+        <div className="mt-3 grid gap-2 rounded-md border border-ik-rule bg-ik-paper-alt p-3 text-[12.5px]">
+          {plan.problems.length > 0 && (
+            <PlanBlock tone="alert" title={`${plan.problems.length} problem(s) — fix the file first`} rows={plan.problems} />
+          )}
+          {plan.merges.length > 0 && (
+            <PlanBlock title={`${plan.merges.length} to merge`} rows={plan.merges.map((m) => `${m.from} ${m.fromName} → ${m.into} ${m.intoName}`)} />
+          )}
+          {plan.create.length > 0 && (
+            <PlanBlock title={`${plan.create.length} new item(s)`} rows={plan.create.map((c) => `${c.name} · ${c.qty} ${c.unit}${c.cost ? ` @ ₹${c.cost}` : ""}`)} />
+          )}
+          {plan.existing.length > 0 && (
+            <PlanBlock title={`${plan.existing.length} already exist by name — updated, not duplicated`} rows={plan.existing.map((e) => `${e.code} ${e.name}`)} />
+          )}
+          <PlanBlock
+            title={`${changed.length} of ${plan.update.length} items change`}
+            rows={changed.map(
+              (u) =>
+                `${u.code} ${u.name}: ${u.qtyFrom} → ${u.qtyTo} ${u.unitTo ?? u.unitFrom}` +
+                (u.unitTo ? ` (unit ${u.unitFrom} → ${u.unitTo})` : "") +
+                (u.costTo !== null && u.costTo !== u.costFrom ? ` · ₹${u.costFrom} → ₹${u.costTo}` : ""),
+            )}
+          />
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button type="button" variant="outline" disabled={pending} onClick={check}>
+          {pending ? "Checking…" : "Check what would change"}
+        </Button>
+        {plan && !plan.alreadyApplied && plan.problems.length === 0 && (
+          <Button type="button" disabled={pending} onClick={apply}>
+            {pending ? "Applying… (up to a minute)" : `Apply count ${count.id}`}
+          </Button>
+        )}
+      </div>
+    </section>
   );
 }
 

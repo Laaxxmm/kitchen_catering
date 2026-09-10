@@ -1,0 +1,1160 @@
+{
+ "id": "2026-09-10",
+ "takenOn": "2026-09-10",
+ "source": "GROCERY LIST UPDATE - SEPT 9TH.xlsx (SEPT 10TH column; Eshwar rate, Dheer when absent)",
+ "merges": [
+  {
+   "from": "GP-703",
+   "into": "GP-155",
+   "why": "Idli rice was listed twice; the count sheet uses 'Orange Idli rice'"
+  }
+ ],
+ "rows": [
+  {
+   "row": 2,
+   "code": "GP-380",
+   "name": "EGG",
+   "unit": "tray",
+   "qty": "9.000",
+   "cost": "6.000"
+  },
+  {
+   "row": 3,
+   "code": "GP-005",
+   "name": "Masoor Dal",
+   "unit": "kg",
+   "qty": "13.700",
+   "cost": "94.000"
+  },
+  {
+   "row": 4,
+   "code": "GP-006",
+   "name": "Toor dal",
+   "unit": "kg",
+   "qty": "6.700",
+   "cost": "141.000"
+  },
+  {
+   "row": 5,
+   "code": "GP-165",
+   "name": "Urad Dal/Uddin Bele R",
+   "unit": "kg",
+   "qty": "9.000",
+   "cost": "148.000"
+  },
+  {
+   "row": 6,
+   "code": "GP-008",
+   "name": "Urad Dal whole",
+   "unit": "kg",
+   "qty": "4.000",
+   "cost": "156.000"
+  },
+  {
+   "row": 7,
+   "code": "GP-167",
+   "name": "Yellow moong dal / Hesaru Bele Spl",
+   "unit": "kg",
+   "qty": "4.200",
+   "cost": "119.000"
+  },
+  {
+   "row": 8,
+   "code": "GP-137",
+   "name": "Chana dal / Kadle Bele Reg",
+   "unit": "kg",
+   "qty": "6.000",
+   "cost": "99.000"
+  },
+  {
+   "row": 9,
+   "code": "GP-142",
+   "name": "Fried grams / Dried Chenna Reg",
+   "unit": "kg",
+   "qty": "9.000",
+   "cost": "108.000"
+  },
+  {
+   "row": 10,
+   "code": "GP-535",
+   "name": "STAFF RICE",
+   "unit": "kg",
+   "qty": "52.000",
+   "cost": "55.000"
+  },
+  {
+   "row": 11,
+   "new": true,
+   "name": "GUEST RICE",
+   "unit": "kg",
+   "qty": "52.000",
+   "cost": null
+  },
+  {
+   "row": 12,
+   "code": "GP-372",
+   "name": "Dawat Basmati rice",
+   "unit": "kg",
+   "qty": "45.000",
+   "cost": null
+  },
+  {
+   "row": 13,
+   "code": "GP-157",
+   "name": "Poha / Avalakki Reg",
+   "unit": "kg",
+   "qty": "0.800",
+   "cost": "56.000"
+  },
+  {
+   "row": 14,
+   "code": "GP-155",
+   "name": "Orange Idli rice",
+   "unit": "kg",
+   "qty": "26.000",
+   "cost": "43.000"
+  },
+  {
+   "row": 15,
+   "code": "GP-140",
+   "name": "Dosa Rice / Rice IR8",
+   "unit": "kg",
+   "qty": "26.000",
+   "cost": "37.000"
+  },
+  {
+   "row": 16,
+   "code": "GP-154",
+   "name": "Orange Atta 50kg Bag / Atta Chakke",
+   "unit": "kg",
+   "qty": "10.400",
+   "cost": "44.000"
+  },
+  {
+   "row": 17,
+   "code": "GP-018",
+   "name": "Maida",
+   "unit": "kg",
+   "qty": "9.900",
+   "cost": "44.000"
+  },
+  {
+   "row": 18,
+   "code": "GP-019",
+   "name": "Rice Flour",
+   "unit": "kg",
+   "qty": "1.700",
+   "cost": "46.000"
+  },
+  {
+   "row": 19,
+   "code": "GP-134",
+   "name": "Besan / Kadle Hittu",
+   "unit": "kg",
+   "qty": "22.500",
+   "cost": "96.000"
+  },
+  {
+   "row": 20,
+   "code": "GP-509",
+   "name": "Ragi flour",
+   "unit": "kg",
+   "qty": "3.000",
+   "cost": "57.000"
+  },
+  {
+   "row": 21,
+   "code": "GP-021",
+   "name": "Corn flour",
+   "unit": "kg",
+   "qty": "3.000",
+   "cost": "50.750"
+  },
+  {
+   "row": 22,
+   "code": "GP-022",
+   "name": "Chiroti rava",
+   "unit": "kg",
+   "qty": "12.200",
+   "cost": "48.000"
+  },
+  {
+   "row": 23,
+   "code": "GP-156",
+   "name": "Orange sooji(local rava) / Rave Uppitu Reg",
+   "unit": "kg",
+   "qty": "3.900",
+   "cost": "47.000"
+  },
+  {
+   "row": 24,
+   "code": "GP-024",
+   "name": "Rajma chitra",
+   "unit": "kg",
+   "qty": "6.400",
+   "cost": "138.000"
+  },
+  {
+   "row": 25,
+   "code": "GP-025",
+   "name": "Red rajma",
+   "unit": "kg",
+   "qty": "10.000",
+   "cost": "158.000"
+  },
+  {
+   "row": 26,
+   "code": "GP-136",
+   "name": "Black Urad Dal",
+   "unit": "kg",
+   "qty": "2.000",
+   "cost": "129.000"
+  },
+  {
+   "row": 27,
+   "code": "GP-393",
+   "name": "Green Moong Whole",
+   "unit": "kg",
+   "qty": "13.000",
+   "cost": "148.000"
+  },
+  {
+   "row": 28,
+   "code": "GP-135",
+   "name": "Black chana / Kadle Kalu",
+   "unit": "kg",
+   "qty": "12.000",
+   "cost": "90.000"
+  },
+  {
+   "row": 29,
+   "code": "GP-166",
+   "name": "White chana / Kabuli",
+   "unit": "kg",
+   "qty": "7.100",
+   "cost": "119.000"
+  },
+  {
+   "row": 30,
+   "code": "GP-030",
+   "name": "Green peas dry",
+   "unit": "kg",
+   "qty": "7.000",
+   "cost": "65.000"
+  },
+  {
+   "row": 31,
+   "code": "GP-510",
+   "name": "Halasande",
+   "unit": "kg",
+   "qty": "2.020",
+   "cost": "102.000"
+  },
+  {
+   "row": 32,
+   "code": "GP-151",
+   "name": "Millet/Navane",
+   "unit": "kg",
+   "qty": "7.600",
+   "cost": "89.000"
+  },
+  {
+   "row": 33,
+   "code": "GP-032",
+   "name": "White till",
+   "unit": "kg",
+   "qty": "0.700",
+   "cost": "210.000"
+  },
+  {
+   "row": 34,
+   "code": "GP-511",
+   "name": "Black till",
+   "unit": "kg",
+   "qty": "0.100",
+   "cost": null
+  },
+  {
+   "row": 35,
+   "code": "GP-251",
+   "name": "Badam seeds",
+   "unit": "kg",
+   "qty": "0.700",
+   "cost": "1038.000"
+  },
+  {
+   "row": 36,
+   "code": "GP-034",
+   "name": "Pista",
+   "unit": "kg",
+   "qty": "0.750",
+   "cost": "2450.000"
+  },
+  {
+   "row": 37,
+   "code": "GP-148",
+   "name": "Magaj",
+   "unit": "kg",
+   "qty": "2.300",
+   "cost": "607.000"
+  },
+  {
+   "row": 38,
+   "code": "GP-037",
+   "name": "Ground nuts/peanuts",
+   "unit": "kg",
+   "qty": "3.000",
+   "cost": "169.000"
+  },
+  {
+   "row": 39,
+   "code": "GP-038",
+   "name": "Super Garam Masala 200gm",
+   "unit": "pct",
+   "qty": "7.500",
+   "cost": "102.860"
+  },
+  {
+   "row": 40,
+   "code": "GP-039",
+   "name": "Everest Garam Masala 500gm",
+   "unit": "pct",
+   "qty": "0.000",
+   "cost": null
+  },
+  {
+   "row": 41,
+   "code": "GP-040",
+   "name": "MDH Garam masala 100gm",
+   "unit": "pct",
+   "qty": "14.000",
+   "cost": "92.000"
+  },
+  {
+   "row": 42,
+   "code": "GP-150",
+   "name": "MDH Kashmiri CHILLI 100GM",
+   "unit": "pct",
+   "qty": "0.000",
+   "cost": "107.620"
+  },
+  {
+   "row": 43,
+   "code": "GP-144",
+   "name": "Kashmiri chilli powder 500gm",
+   "unit": "pct",
+   "qty": "0.000",
+   "cost": "944.760"
+  },
+  {
+   "row": 44,
+   "code": "GP-409",
+   "name": "Kibs Badam Feast Powder 500g",
+   "unit": "pct",
+   "qty": "3.000",
+   "cost": "130.000"
+  },
+  {
+   "row": 45,
+   "code": "GP-042",
+   "name": "Yellow Chilly Powder 100gms",
+   "unit": "pct",
+   "qty": "5.000",
+   "cost": "105.000"
+  },
+  {
+   "row": 46,
+   "code": "GP-159",
+   "name": "Shakti Chilly Powder 500gm",
+   "unit": "pct",
+   "qty": "10.000",
+   "cost": "160.950"
+  },
+  {
+   "row": 47,
+   "code": "GP-043",
+   "name": "MTR Chilly Powder 500gm",
+   "unit": "pct",
+   "qty": "5.000",
+   "cost": "302.840"
+  },
+  {
+   "row": 48,
+   "code": "GP-044",
+   "name": "Meat masala 200Gm",
+   "unit": "pct",
+   "qty": "5.000",
+   "cost": "143.810"
+  },
+  {
+   "row": 49,
+   "code": "GP-045",
+   "name": "Turmeric 500gm",
+   "unit": "pct",
+   "qty": "7.000",
+   "cost": "140.000"
+  },
+  {
+   "row": 50,
+   "code": "GP-706",
+   "name": "Chunky chat masala 100gm",
+   "unit": "pct",
+   "qty": "26.000",
+   "cost": "75.000"
+  },
+  {
+   "row": 51,
+   "code": "GP-138",
+   "name": "Chat masala 200gm",
+   "unit": "pct",
+   "qty": "6.000",
+   "cost": "129.520"
+  },
+  {
+   "row": 52,
+   "code": "GP-046",
+   "name": "chat masala 500gm",
+   "unit": "pct",
+   "qty": "0.000",
+   "cost": "311.430"
+  },
+  {
+   "row": 53,
+   "code": "GP-163",
+   "name": "Tamarind Chap Spl",
+   "unit": "kg",
+   "qty": "3.700",
+   "cost": "166.000"
+  },
+  {
+   "row": 54,
+   "code": "GP-152",
+   "name": "MTR Samabar Powder 200 gm",
+   "unit": "pct",
+   "qty": "6.000",
+   "cost": null
+  },
+  {
+   "row": 55,
+   "code": "GP-158",
+   "name": "Sambar powder500gm",
+   "unit": "pct",
+   "qty": "0.000",
+   "cost": "210.000"
+  },
+  {
+   "row": 56,
+   "code": "GP-049",
+   "name": "Sambar powder 1KG",
+   "unit": "pct",
+   "qty": "0.000",
+   "cost": "395.000"
+  },
+  {
+   "row": 57,
+   "code": "GP-050",
+   "name": "Dhaniya powder 500gm",
+   "unit": "pct",
+   "qty": "2.000",
+   "cost": "134.290"
+  },
+  {
+   "row": 58,
+   "code": "GP-051",
+   "name": "Dhaniya seeds",
+   "unit": "kg",
+   "qty": "4.500",
+   "cost": "179.000"
+  },
+  {
+   "row": 59,
+   "code": "GP-052",
+   "name": "Byadgi chilli",
+   "unit": "kg",
+   "qty": "1.000",
+   "cost": "739.000"
+  },
+  {
+   "row": 60,
+   "code": "GP-053",
+   "name": "Round chilli",
+   "unit": "kg",
+   "qty": "2.000",
+   "cost": "459.000"
+  },
+  {
+   "row": 61,
+   "code": "GP-054",
+   "name": "Salem chilli",
+   "unit": "kg",
+   "qty": "3.300",
+   "cost": "360.950"
+  },
+  {
+   "row": 62,
+   "code": "GP-055",
+   "name": "Chakke/Cinnamon stick",
+   "unit": "kg",
+   "qty": "0.080",
+   "cost": "400.000"
+  },
+  {
+   "row": 63,
+   "code": "GP-056",
+   "name": "Pulav leaves",
+   "unit": "kg",
+   "qty": "0.600",
+   "cost": "180.000"
+  },
+  {
+   "row": 64,
+   "code": "GP-057",
+   "name": "Marati Moggu",
+   "unit": "kg",
+   "qty": "0.200",
+   "cost": "850.000"
+  },
+  {
+   "row": 65,
+   "code": "GP-058",
+   "name": "Lavanga",
+   "unit": "kg",
+   "qty": "0.700",
+   "cost": "929.000"
+  },
+  {
+   "row": 66,
+   "code": "GP-059",
+   "name": "Big elachi",
+   "unit": "kg",
+   "qty": "0.120",
+   "cost": "2150.000"
+  },
+  {
+   "row": 67,
+   "code": "GP-060",
+   "name": "Elachi",
+   "unit": "kg",
+   "qty": "0.300",
+   "cost": "3595.000"
+  },
+  {
+   "row": 68,
+   "code": "GP-061",
+   "name": "Jaypathra (Javitri)",
+   "unit": "kg",
+   "qty": "0.412",
+   "cost": "3246.000"
+  },
+  {
+   "row": 69,
+   "code": "GP-403",
+   "name": "Jaypal / Jakai Pc",
+   "unit": "kg",
+   "qty": "0.072",
+   "cost": "1050.000"
+  },
+  {
+   "row": 70,
+   "code": "GP-063",
+   "name": "Sompu seeds",
+   "unit": "kg",
+   "qty": "1.820",
+   "cost": "215.000"
+  },
+  {
+   "row": 71,
+   "code": "GP-064",
+   "name": "Mustard seeds",
+   "unit": "kg",
+   "qty": "1.200",
+   "cost": "123.000"
+  },
+  {
+   "row": 72,
+   "code": "GP-065",
+   "name": "Black whole pepper",
+   "unit": "kg",
+   "qty": "6.500",
+   "cost": "818.000"
+  },
+  {
+   "row": 73,
+   "code": "GP-066",
+   "name": "Star Annise",
+   "unit": "kg",
+   "qty": "0.580",
+   "cost": "729.000"
+  },
+  {
+   "row": 74,
+   "code": "GP-067",
+   "name": "Jeera seeds",
+   "unit": "kg",
+   "qty": "1.500",
+   "cost": "280.000"
+  },
+  {
+   "row": 75,
+   "code": "GP-068",
+   "name": "Jeera powder 100gm",
+   "unit": "pct",
+   "qty": "2.000",
+   "cost": "38.090"
+  },
+  {
+   "row": 76,
+   "code": "GP-069",
+   "name": "Black pepper powder",
+   "unit": "kg",
+   "qty": "1.200",
+   "cost": "52.380"
+  },
+  {
+   "row": 77,
+   "code": "GP-070",
+   "name": "White pepper powder 100Gm",
+   "unit": "kg",
+   "qty": "5.200",
+   "cost": "27.610"
+  },
+  {
+   "row": 78,
+   "code": "GP-071",
+   "name": "Methi seeds",
+   "unit": "kg",
+   "qty": "0.700",
+   "cost": "103.810"
+  },
+  {
+   "row": 79,
+   "code": "GP-121",
+   "name": "Ghus Ghus",
+   "unit": "kg",
+   "qty": "0.416",
+   "cost": "1494.000"
+  },
+  {
+   "row": 80,
+   "code": "GP-146",
+   "name": "Kitchen King Masala 500gm",
+   "unit": "pct",
+   "qty": "3.000",
+   "cost": "349.000"
+  },
+  {
+   "row": 81,
+   "code": "GP-074",
+   "name": "Kitchen King masala 100gm",
+   "unit": "pct",
+   "qty": "0.000",
+   "cost": "82.000"
+  },
+  {
+   "row": 82,
+   "code": "GP-414",
+   "name": "Maggie",
+   "unit": "pct",
+   "qty": "6.000",
+   "cost": "315.000"
+  },
+  {
+   "row": 83,
+   "code": "GP-076",
+   "name": "Kallu hoo/ lichen",
+   "unit": "kg",
+   "qty": "0.628",
+   "cost": "680.000"
+  },
+  {
+   "row": 84,
+   "code": "GP-077",
+   "name": "Sugar",
+   "unit": "kg",
+   "qty": "6.900",
+   "cost": "45.230"
+  },
+  {
+   "row": 85,
+   "code": "GP-143",
+   "name": "Jaggery Powder 500g",
+   "unit": "pct",
+   "qty": "17.000",
+   "cost": "81.000"
+  },
+  {
+   "row": 86,
+   "code": "GP-079",
+   "name": "Jaggery ball",
+   "unit": "kg",
+   "qty": "1.000",
+   "cost": "63.000"
+  },
+  {
+   "row": 87,
+   "code": "GP-080",
+   "name": "Aromatic mix",
+   "unit": "box",
+   "qty": "4",
+   "cost": "153.000"
+  },
+  {
+   "row": 88,
+   "code": "GP-160",
+   "name": "Soya bean",
+   "unit": "kg",
+   "qty": "2.000",
+   "cost": "112.380"
+  },
+  {
+   "row": 89,
+   "code": "GP-145",
+   "name": "Kismiss / Dry Grapes",
+   "unit": "kg",
+   "qty": "1.500",
+   "cost": "406.000"
+  },
+  {
+   "row": 90,
+   "code": "GP-083",
+   "name": "Baby cashewnut",
+   "unit": "kg",
+   "qty": "2.500",
+   "cost": "549.000"
+  },
+  {
+   "row": 91,
+   "code": "GP-084",
+   "name": "Cashewnut 4p",
+   "unit": "kg",
+   "qty": "0.600",
+   "cost": "834.290"
+  },
+  {
+   "row": 92,
+   "code": "GP-085",
+   "name": "Rasam powder 200gm",
+   "unit": "pct",
+   "qty": "1.200",
+   "cost": "153.330"
+  },
+  {
+   "row": 93,
+   "code": "GP-086",
+   "name": "Bisibelebath powder 200Gm",
+   "unit": "pct",
+   "qty": "11.000",
+   "cost": "152.380"
+  },
+  {
+   "row": 94,
+   "code": "GP-087",
+   "name": "Puliyogare powder 200gm",
+   "unit": "pct",
+   "qty": "0.000",
+   "cost": "135.240"
+  },
+  {
+   "row": 95,
+   "code": "GP-088",
+   "name": "Puliyogare powder 1kg",
+   "unit": "pct",
+   "qty": "0.000",
+   "cost": "390.000"
+  },
+  {
+   "row": 96,
+   "code": "GP-515",
+   "name": "TOMATO KETCHUP",
+   "unit": "btl",
+   "qty": "7",
+   "cost": "107.000"
+  },
+  {
+   "row": 97,
+   "code": "GP-090",
+   "name": "Vinegar",
+   "unit": "btl",
+   "qty": "3.000",
+   "cost": "32.000"
+  },
+  {
+   "row": 98,
+   "code": "GP-091",
+   "name": "Red chilli sauce",
+   "unit": "btl",
+   "qty": "5.000",
+   "cost": "41.900"
+  },
+  {
+   "row": 99,
+   "code": "GP-092",
+   "name": "Green chilli sauce",
+   "unit": "btl",
+   "qty": "5.000",
+   "cost": "41.900"
+  },
+  {
+   "row": 100,
+   "code": "GP-093",
+   "name": "Dark soya sauce",
+   "unit": "btl",
+   "qty": "3.000",
+   "cost": "41.900"
+  },
+  {
+   "row": 101,
+   "code": "GP-377",
+   "name": "Dry mango powder/Amchur powder",
+   "unit": "pct",
+   "qty": "2",
+   "cost": "71.200"
+  },
+  {
+   "row": 102,
+   "code": "GP-094",
+   "name": "orange red bush",
+   "unit": "tin",
+   "qty": "0.000",
+   "cost": "55.000"
+  },
+  {
+   "row": 103,
+   "code": "GP-095",
+   "name": "Kesari bush",
+   "unit": "tin",
+   "qty": "0.000",
+   "cost": "85.000"
+  },
+  {
+   "row": 104,
+   "code": "GP-513",
+   "name": "Ingu(LG powder)",
+   "unit": "btl",
+   "qty": "5.000",
+   "cost": "52.500"
+  },
+  {
+   "row": 105,
+   "code": "GP-514",
+   "name": "Keora water",
+   "unit": "btl",
+   "qty": "6.000",
+   "cost": "56.780"
+  },
+  {
+   "row": 106,
+   "code": "GP-168",
+   "name": "Zaika gulabari / Rose Water",
+   "unit": "btl",
+   "qty": "6.000",
+   "cost": "64.760"
+  },
+  {
+   "row": 107,
+   "code": "GP-097",
+   "name": "Tata salt(powder)",
+   "unit": "kg",
+   "qty": "4.000",
+   "cost": "31.000"
+  },
+  {
+   "row": 108,
+   "code": "GP-098",
+   "name": "Stone salt",
+   "unit": "kg",
+   "qty": "16.000",
+   "cost": "20.000"
+  },
+  {
+   "row": 109,
+   "code": "GP-132",
+   "name": "Ajwin",
+   "unit": "kg",
+   "qty": "0.000",
+   "cost": "275.000"
+  },
+  {
+   "row": 110,
+   "code": "GP-099",
+   "name": "Mayonnaise",
+   "unit": "pct",
+   "setUnit": "pct",
+   "qty": "7",
+   "cost": "99.000"
+  },
+  {
+   "row": 111,
+   "code": "GP-474",
+   "name": "Saffron",
+   "unit": "pct",
+   "qty": "0",
+   "cost": null
+  },
+  {
+   "row": 112,
+   "code": "GP-101",
+   "name": "Kasuri methi 100gm",
+   "unit": "pct",
+   "qty": "4.000",
+   "cost": "48.000"
+  },
+  {
+   "row": 113,
+   "code": "GP-133",
+   "name": "Anil shavige Vermicelli",
+   "unit": "pct",
+   "qty": "8.000",
+   "cost": "53.330"
+  },
+  {
+   "row": 114,
+   "code": "GP-103",
+   "name": "Roasted vermicelli",
+   "unit": "pct",
+   "qty": "6.000",
+   "cost": "122.850"
+  },
+  {
+   "row": 115,
+   "code": "GP-516",
+   "name": "Noodles",
+   "unit": "pct",
+   "qty": "13.000",
+   "cost": null
+  },
+  {
+   "row": 116,
+   "code": "GP-147",
+   "name": "Macroni Pasta 500gm",
+   "unit": "pct",
+   "qty": "4.000",
+   "cost": "61.900"
+  },
+  {
+   "row": 117,
+   "code": "GP-104",
+   "name": "Roasted North papad(masala papad)",
+   "unit": "pct",
+   "qty": "1",
+   "cost": "385.000"
+  },
+  {
+   "row": 118,
+   "code": "GP-105",
+   "name": "Flavour papad(sago chilly)",
+   "unit": "pct",
+   "qty": "6.000",
+   "cost": "58.570"
+  },
+  {
+   "row": 119,
+   "code": "GP-106",
+   "name": "Urad dal papad(lotus)",
+   "unit": "pct",
+   "qty": "3.000",
+   "cost": "40.000"
+  },
+  {
+   "row": 120,
+   "code": "GP-107",
+   "name": "Rice papad 500gm",
+   "unit": "pct",
+   "qty": "10.000",
+   "cost": "174.000"
+  },
+  {
+   "row": 121,
+   "code": "GP-108",
+   "name": "Fryums",
+   "unit": "kg",
+   "qty": "0.000",
+   "cost": "78.000"
+  },
+  {
+   "row": 122,
+   "code": "GP-164",
+   "name": "Tea powder-red label 950g",
+   "unit": "pct",
+   "qty": "6.316",
+   "cost": "503.810"
+  },
+  {
+   "row": 123,
+   "code": "GP-139",
+   "name": "Coffee powder-Bru Ins 500gm",
+   "unit": "pct",
+   "qty": "10.000",
+   "cost": "660.000"
+  },
+  {
+   "row": 124,
+   "code": "GP-111",
+   "name": "Coffee Cothas 500gm",
+   "unit": "pct",
+   "qty": "6.000",
+   "cost": "385.000"
+  },
+  {
+   "row": 125,
+   "code": "GP-112",
+   "name": "Sunpure oil",
+   "unit": "lts",
+   "qty": "10.000",
+   "cost": "167.140"
+  },
+  {
+   "row": 126,
+   "code": "GP-113",
+   "name": "Coconut oil",
+   "unit": "pct",
+   "qty": "5",
+   "cost": "319.000"
+  },
+  {
+   "row": 127,
+   "code": "GP-114",
+   "name": "Coconut milk",
+   "unit": "tin",
+   "qty": "1",
+   "cost": "110.000"
+  },
+  {
+   "row": 128,
+   "code": "GP-115",
+   "name": "Mustard oil",
+   "unit": "btl",
+   "qty": "1",
+   "cost": "198.090"
+  },
+  {
+   "row": 129,
+   "code": "GP-518",
+   "name": "Olive oil",
+   "unit": "btl",
+   "qty": "1",
+   "cost": "370.470"
+  },
+  {
+   "row": 130,
+   "new": true,
+   "name": "Dry Coconut",
+   "unit": "kg",
+   "qty": "0.514",
+   "cost": "429.000"
+  },
+  {
+   "row": 132,
+   "code": "GP-118",
+   "name": "Fruit jam",
+   "unit": "btl",
+   "setUnit": "btl",
+   "qty": "1",
+   "cost": "167.610"
+  },
+  {
+   "row": 133,
+   "code": "GP-519",
+   "name": "Pickle 5kg",
+   "unit": "kg",
+   "qty": "10.000",
+   "cost": "270.000"
+  },
+  {
+   "row": 134,
+   "code": "GP-119",
+   "name": "Honey Dabur 1kg",
+   "unit": "kg",
+   "qty": "1.000",
+   "cost": "200.000"
+  },
+  {
+   "row": 135,
+   "code": "GP-120",
+   "name": "Tomato Puree",
+   "unit": "pcs",
+   "qty": "0",
+   "cost": "69.520"
+  },
+  {
+   "row": 136,
+   "code": "GP-520",
+   "name": "Sabudana",
+   "unit": "kg",
+   "qty": "2.000",
+   "cost": "65.000"
+  },
+  {
+   "row": 137,
+   "code": "GP-153",
+   "name": "Nylon sabudana / Sago 500",
+   "unit": "kg",
+   "qty": "3.500",
+   "cost": "79.000"
+  },
+  {
+   "row": 138,
+   "code": "GP-521",
+   "name": "Oregano Leaves 1kg",
+   "unit": "nos",
+   "qty": "1.000",
+   "cost": null
+  },
+  {
+   "row": 139,
+   "code": "GP-503",
+   "name": "Whole Ragi",
+   "unit": "kg",
+   "qty": "2.020",
+   "cost": "56.000"
+  },
+  {
+   "row": 140,
+   "code": "GP-366",
+   "name": "Coconut Milk Powder",
+   "unit": "pct",
+   "qty": "0",
+   "cost": "951.430"
+  },
+  {
+   "row": 141,
+   "new": true,
+   "name": "Oyster sauce",
+   "unit": "btl",
+   "qty": "1.000",
+   "cost": "276.000"
+  },
+  {
+   "row": 142,
+   "code": "GP-693",
+   "name": "Kokum Syrup",
+   "unit": "btl",
+   "qty": "0.000",
+   "cost": "140.000"
+  },
+  {
+   "row": 143,
+   "code": "GP-684",
+   "name": "Chicken chettinad Masala",
+   "unit": "kg",
+   "qty": "0.000",
+   "cost": "550.000"
+  },
+  {
+   "row": 144,
+   "code": "GP-701",
+   "name": "Custard Powder 200gm",
+   "unit": "pct",
+   "qty": "7.500",
+   "cost": "150.000"
+  },
+  {
+   "row": 145,
+   "new": true,
+   "name": "Coconut Powder",
+   "unit": "kg",
+   "qty": "0.000",
+   "cost": "290.000"
+  }
+ ]
+}
