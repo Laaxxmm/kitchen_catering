@@ -88,9 +88,8 @@
    "new": true,
    "name": "GUEST RICE",
    "unit": "kg",
-   "qty": "51.000",
-   "cost": null,
-   "qtyNote": "Sheet said 6; 1 pct issued on the morning of 11 Sep before this count was applied"
+   "qty": "52.000",
+   "cost": null
   },
   {
    "row": 12,
@@ -659,8 +658,9 @@
    "code": "GP-414",
    "name": "Maggie",
    "unit": "pct",
-   "qty": "6.000",
-   "cost": "315.000"
+   "qty": "5.000",
+   "cost": "315.000",
+   "qtyNote": "Sheet said 6; 1 pct issued on the morning of 11 Sep before this count was applied"
   },
   {
    "row": 83,
