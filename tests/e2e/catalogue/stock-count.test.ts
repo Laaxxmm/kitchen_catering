@@ -118,7 +118,7 @@ describe("applying a stock count", () => {
   it("the real count file plans clean against the imported catalogue", async () => {
     await asAdmin();
     const { readFileSync } = await import("node:fs");
-    const count = JSON.parse(readFileSync("data/stock-counts/2026-09-10.json", "utf8")) as StockCountFile;
+    const count = JSON.parse(readFileSync("data/stock-counts/2026-09-11.json", "utf8")) as StockCountFile;
     const plan = await planStockCount(count);
     expect(plan.problems).toEqual([]);
     expect(plan.merges).toHaveLength(1);
