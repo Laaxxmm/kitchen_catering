@@ -16,9 +16,9 @@
    "name": "EGG",
    "unit": "tray",
    "qty": "6.000",
-   "cost": "6.000",
+   "cost": "168.000",
    "qtyNote": "Sheet said 9; 3 tray issued on the morning of 11 Sep before this count was applied",
-   "costNote": "Tray cost as given on the sheet, per the client on 11 Sep"
+   "costNote": "Tray cost ₹168 per the client on 11 Sep (sheet's ₹6 was per egg)"
   },
   {
    "row": 3,
