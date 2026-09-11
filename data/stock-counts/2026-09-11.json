@@ -1,6 +1,6 @@
 {
  "id": "2026-09-11",
- "takenOn": "2026-09-10",
+ "takenOn": "2026-09-11",
  "source": "GROCERY LIST UPDATE - SEPT 9TH.xlsx, revised 11 Sep (SEPT 10TH column; single average rate)",
  "merges": [
   {
@@ -15,8 +15,9 @@
    "code": "GP-380",
    "name": "EGG",
    "unit": "tray",
-   "qty": "9.000",
-   "cost": "6.000"
+   "qty": "6.000",
+   "cost": "6.000",
+   "qtyNote": "Sheet said 9; 3 tray issued on the morning of 11 Sep before this count was applied"
   },
   {
    "row": 3,
@@ -87,8 +88,9 @@
    "new": true,
    "name": "GUEST RICE",
    "unit": "kg",
-   "qty": "52.000",
-   "cost": null
+   "qty": "51.000",
+   "cost": null,
+   "qtyNote": "Sheet said 6; 1 pct issued on the morning of 11 Sep before this count was applied"
   },
   {
    "row": 12,
