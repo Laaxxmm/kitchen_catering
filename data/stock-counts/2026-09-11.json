@@ -16,8 +16,9 @@
    "name": "EGG",
    "unit": "tray",
    "qty": "6.000",
-   "cost": "6.000",
-   "qtyNote": "Sheet said 9; 3 tray issued on the morning of 11 Sep before this count was applied"
+   "cost": "180.000",
+   "qtyNote": "Sheet said 9; 3 tray issued on the morning of 11 Sep before this count was applied",
+   "costNote": "Sheet rate ₹6 is per egg; item is tracked per tray of 30, so ₹6 × 30"
   },
   {
    "row": 3,
