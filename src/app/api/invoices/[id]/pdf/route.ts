@@ -25,17 +25,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     // subtotal ÷ pax. Legacy invoices predate finalHeadcount and fall back
     // to the order, i.e. exactly what they printed before.
     order: inv.order
-      ? { headcount: inv.finalHeadcount ?? inv.order.headcount, mealType: inv.order.mealType }
+      ? { headcount: inv.finalHeadcount ?? inv.order.headcount, mealType: inv.order.mealType, eventDate: inv.order.eventDate }
       : null,
     placeOfSupplyStateCode: inv.placeOfSupplyStateCode,
     irn: inv.irn,
     ackNo: inv.ackNo,
     ackDate: inv.ackDate,
     customer: {
-      name: inv.customer.name,
+      name: inv.customer.billingCompanyName || inv.customer.name,
       gstin: inv.customer.gstin,
       billingAddress: inv.customer.billingAddress,
       stateCode: inv.customer.stateCode,
+      vendorCode: inv.customer.vendorCode,
+      creditDays: inv.customer.creditDays,
     },
     lines: inv.lines.map((l) => ({
       description: l.description,
@@ -43,6 +45,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       unit: l.unit,
       unitPrice: l.unitPrice.toString(),
       gstRatePct: l.gstRatePct.toString(),
+      days: l.days,
+      serviceDate: l.serviceDate,
+      lineSubtotal: l.lineSubtotal.toString(),
       lineTotal: l.lineTotal.toString(),
     })),
     subtotal: inv.subtotal.toString(),

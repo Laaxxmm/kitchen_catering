@@ -62,6 +62,7 @@ function customerDataFromInput(input: CustomerInputT) {
     defaultTdsRatePct: input.defaultTdsRatePct ?? null,
     defaultTdsSection: input.defaultTdsSection ?? null,
     billingCompanyName: input.billingCompanyName ?? null,
+    vendorCode: input.vendorCode || null,
     ...(input.creditLimit !== undefined ? { creditLimit: input.creditLimit } : {}),
     ...(input.creditDays !== undefined ? { creditDays: input.creditDays } : {}),
     ...(input.paymentTerms !== undefined ? { paymentTerms: input.paymentTerms } : {}),

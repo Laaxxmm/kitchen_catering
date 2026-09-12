@@ -31,6 +31,8 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
       unitPrice: string;
       discountPct: string;
       gstRatePct: string;
+      days: string;
+      serviceDate: string | null;
     }>;
   }) {
     "use server";
@@ -68,6 +70,8 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
             unitPrice: l.unitPrice.toString(),
             discountPct: l.discountPct.toString(),
             gstRatePct: l.gstRatePct.toString(),
+            days: String(l.days),
+            serviceDate: l.serviceDate ? l.serviceDate.toISOString().slice(0, 10) : "",
           })),
         }}
         onSubmit={update}

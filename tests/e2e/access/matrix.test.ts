@@ -630,6 +630,9 @@ const CASES: GateCase[] = [
   gate("invoice-settings", "saveInvoiceBankDetails", ["admin", "manager"], () =>
     invoiceSettings.saveInvoiceBankDetails({ ifsc: "X".repeat(21) }),
   ),
+  gate("invoice-settings", "saveInvoiceCompanyDetails", ["admin", "manager"], () =>
+    invoiceSettings.saveInvoiceCompanyDetails({ gstin: "X".repeat(16) }),
+  ),
 
   // ── Menu + documents ──────────────────────────────────────────────────
   gate("dishes", "createDish", ["admin", "manager", "chef"], () => dishes.createDish({})),

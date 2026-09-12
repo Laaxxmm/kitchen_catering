@@ -258,6 +258,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 <TableRow>
                   <TableHead>Description</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Days</TableHead>
                   <TableHead className="text-right">Unit ₹</TableHead>
                   <TableHead className="text-right">GST %</TableHead>
                   <TableHead className="text-right">Total ₹</TableHead>
@@ -278,6 +279,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                       {MEAL_LABEL[invoice.order.mealType] ?? invoice.order.mealType} catering — {invoice.order.code}
                     </TableCell>
                     <TableCell className="text-right font-mono">{pax ?? "—"} pax</TableCell>
+                    <TableCell className="text-right font-mono">1</TableCell>
                     <TableCell className="text-right font-mono">
                       {pax ? toDecimal(invoice.subtotal).div(pax).toDecimalPlaces(2).toString() : "—"}
                     </TableCell>
@@ -291,8 +293,14 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 ) : (
                   invoice.lines.map((l) => (
                     <TableRow key={l.id}>
-                      <TableCell>{l.description}</TableCell>
+                      <TableCell>
+                        {l.description}
+                        {l.serviceDate && (
+                          <span className="ml-2 text-[12px] text-ik-ink-3">{formatIST(l.serviceDate, "dd.MM.yyyy")}</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right font-mono">{l.quantity.toString()} {l.unit}</TableCell>
+                      <TableCell className="text-right font-mono">{l.days}</TableCell>
                       <TableCell className="text-right font-mono">{l.unitPrice.toString()}</TableCell>
                       <TableCell className="text-right font-mono">{l.gstRatePct.toString()}</TableCell>
                       <TableCell className="text-right font-mono">{l.lineTotal.toString()}</TableCell>

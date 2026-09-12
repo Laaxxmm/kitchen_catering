@@ -549,6 +549,11 @@ model Customer {
   // vs. parent company). Falls back to `name` when null.
   billingCompanyName String?
 
+  // The code this customer's purchase desk knows us by (institutional
+  // buyers issue one per supplier). Printed on their invoices as
+  // "Vendor Code: …"; nothing else reads it.
+  vendorCode String?
+
   // Credit & terms
   // creditLimit:   max outstanding the customer can hold across open
   //                invoices before sales is blocked from raising a new
@@ -1843,6 +1848,12 @@ model CustomerInvoiceLine {
   unitPrice    Decimal         @db.Decimal(12, 2)
   discountPct  Decimal         @default(0) @db.Decimal(5, 2)
   gstRatePct   Decimal         @default(0) @db.Decimal(5, 2)
+  // The client's bill reads "No of Pax × Rate × No Of Days": a daily
+  // canteen contract bills 25 pax for 22 days on one line. Taxable value
+  // = quantity × days × unitPrice (less discount). The service date is
+  // printed per line when the bill spans dates; null prints blank.
+  days         Int             @default(1)
+  serviceDate  DateTime?
   lineSubtotal Decimal         @db.Decimal(14, 2)
   lineTax      Decimal         @db.Decimal(14, 2)
   lineTotal    Decimal         @db.Decimal(14, 2)

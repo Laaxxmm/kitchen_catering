@@ -6,6 +6,8 @@ export type LineInput = {
   unitPrice: Decimal | number | string;
   discountPct: Decimal | number | string;
   gstRatePct: Decimal | number | string;
+  /** "No Of Days" on the client's bill: pax × rate × days. Absent = 1. */
+  days?: Decimal | number | string | null;
 };
 
 export type LineAmounts = {
@@ -23,8 +25,9 @@ export function computeLine(input: LineInput): LineAmounts {
   const rate = toDecimal(input.unitPrice);
   const disc = toDecimal(input.discountPct);
   const gst = toDecimal(input.gstRatePct);
+  const days = input.days == null || input.days === "" ? new Decimal(1) : toDecimal(input.days);
 
-  const gross = qty.times(rate);
+  const gross = qty.times(days).times(rate);
   const discountFactor = new Decimal(1).minus(disc.div(100));
   const subtotalRaw = gross.times(discountFactor);
   const subtotal = round2(subtotalRaw);

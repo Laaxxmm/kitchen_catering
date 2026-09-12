@@ -88,6 +88,7 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
             <th className="py-2 pr-2">Description</th>
             <th className="w-16 py-2 pr-2 text-right">Qty</th>
             <th className="w-16">Unit</th>
+            <th className="w-12 py-2 pr-2 text-right">Days</th>
             <th className="w-20 py-2 pr-2 text-right">Rate ₹</th>
             <th className="w-16 py-2 pr-2 text-right">GST %</th>
             <th className="w-24 py-2 pr-2 text-right">Amount ₹</th>
@@ -96,9 +97,15 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
         <tbody className="font-mono">
           {invoice.lines.map((l) => (
             <tr key={l.id} className="border-b border-ik-rule">
-              <td className="py-2 pr-2 font-sans">{l.description}</td>
+              <td className="py-2 pr-2 font-sans">
+                {l.description}
+                {l.serviceDate && (
+                  <span className="ml-2 text-[11.5px] text-ik-ink-3">{l.serviceDate.toISOString().slice(0, 10)}</span>
+                )}
+              </td>
               <td className="py-2 pr-2 text-right">{l.quantity.toString()}</td>
               <td className="py-2 pr-2 text-ik-ink-2">{l.unit}</td>
+              <td className="py-2 pr-2 text-right">{l.days}</td>
               <td className="py-2 pr-2 text-right">{l.unitPrice.toString()}</td>
               <td className="py-2 pr-2 text-right">{l.gstRatePct.toString()}</td>
               <td className="py-2 pr-2 text-right">{l.lineTotal.toString()}</td>

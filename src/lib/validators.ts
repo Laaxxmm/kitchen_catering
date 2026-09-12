@@ -96,6 +96,9 @@ export const CustomerInput = z.object({
   // Optional "bill to" entity when the legal name on the invoice
   // differs from the customer's display name. Defaults to `name`.
   billingCompanyName: z.string().max(200).nullable().optional(),
+  // The buyer's own supplier code for us, printed as "Vendor Code" on
+  // their invoices (institutions issue one per supplier).
+  vendorCode: z.string().trim().max(60).nullable().optional(),
   creditLimit: decimalString.optional(),
   // Duration in days (0 = cash). Drives approval routing on orders:
   // ≤15 → Manager; >15 → Admin (enforced server-side).
@@ -1158,6 +1161,20 @@ export const InvoiceBankDetailsInput = z.object({
   upiId: z.string().trim().max(120).default(""),
 });
 export type InvoiceBankDetailsT = z.infer<typeof InvoiceBankDetailsInput>;
+
+// The seller block at the head of every customer invoice — stored as one
+// JSON value at Settings key "invoice.company". A blank field falls back
+// to the INDEFINE_* env value, so an unset card changes nothing.
+export const InvoiceCompanyDetailsInput = z.object({
+  name: z.string().trim().max(120).default(""),
+  /** One address line per row; printed one under the other. */
+  address: z.string().trim().max(500).default(""),
+  email: z.string().trim().max(120).default(""),
+  phone: z.string().trim().max(60).default(""),
+  mobile: z.string().trim().max(60).default(""),
+  gstin: z.string().trim().max(15).default(""),
+});
+export type InvoiceCompanyDetailsT = z.infer<typeof InvoiceCompanyDetailsInput>;
 
 // Re-export enums for callers that want to discriminate without importing
 // twice. Keeps consumer imports clean.

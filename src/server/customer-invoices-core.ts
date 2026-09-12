@@ -184,16 +184,18 @@ export async function createProformaInvoiceForOrderCore(orderId: string) {
         orderCode: fullInvoice.order?.code ?? null,
         // Pax off the invoice we just wrote, not the live order — same
         // snapshot rule as every other render of this document.
-        order: { headcount: fullInvoice.finalHeadcount ?? order.headcount, mealType: order.mealType },
+        order: { headcount: fullInvoice.finalHeadcount ?? order.headcount, mealType: order.mealType, eventDate: order.eventDate },
         placeOfSupplyStateCode: fullInvoice.placeOfSupplyStateCode,
         irn: fullInvoice.irn,
         ackNo: fullInvoice.ackNo,
         ackDate: fullInvoice.ackDate,
         customer: {
-          name: order.customer.name,
+          name: order.customer.billingCompanyName || order.customer.name,
           gstin: order.customer.gstin,
           billingAddress: order.customer.billingAddress,
           stateCode: order.customer.stateCode,
+          vendorCode: order.customer.vendorCode,
+          creditDays: order.customer.creditDays,
         },
         lines: fullInvoice.lines.map((l) => ({
           description: l.description,
@@ -201,6 +203,9 @@ export async function createProformaInvoiceForOrderCore(orderId: string) {
           unit: l.unit,
           unitPrice: l.unitPrice.toString(),
           gstRatePct: l.gstRatePct.toString(),
+          days: l.days,
+          serviceDate: l.serviceDate,
+          lineSubtotal: l.lineSubtotal.toString(),
           lineTotal: l.lineTotal.toString(),
         })),
         subtotal: fullInvoice.subtotal.toString(),

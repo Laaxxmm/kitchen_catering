@@ -38,6 +38,7 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
       notes: defaults?.notes ?? "",
       groupId: defaults?.groupId ?? "",
       billingCompanyName: defaults?.billingCompanyName ?? "",
+      vendorCode: defaults?.vendorCode ?? "",
       creditLimit: defaults?.creditLimit ?? "0",
       creditDays: defaults?.creditDays ?? 0,
     },
@@ -56,6 +57,7 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
       notes: values.notes ? values.notes : null,
       groupId: values.groupId ? values.groupId : null,
       billingCompanyName: values.billingCompanyName ? values.billingCompanyName : null,
+      vendorCode: values.vendorCode ? values.vendorCode : null,
     };
     startTransition(async () => {
       try {
@@ -190,7 +192,7 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
       <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4 sm:p-5">
         <h3 className="ik-accent-bar font-serif text-[15px] text-brand-700">Billing &amp; credit</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="grid gap-2 sm:col-span-3">
+        <div className="grid gap-2 sm:col-span-2">
           <Label htmlFor="billingCompanyName">Bill to company</Label>
           <Input
             id="billingCompanyName"
@@ -200,6 +202,14 @@ export function CustomerForm({ defaults, groups, onSubmit, submitLabel = "Save",
           <p className="text-[11.5px] text-ik-ink-3">
             When the legal entity on the invoice differs from the contact
             (e.g. branch contact, parent company billing).
+          </p>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="vendorCode">Vendor code</Label>
+          <Input id="vendorCode" placeholder="e.g. 2000010609" {...register("vendorCode")} />
+          <p className="text-[11.5px] text-ik-ink-3">
+            The code this customer&apos;s purchase desk issued for us. Printed on
+            their invoices as &ldquo;Vendor Code&rdquo;.
           </p>
         </div>
         <div className="grid gap-2">

@@ -14,7 +14,7 @@ import {
   indefineCompanyName,
   indefineGstin,
 } from "@/lib/org";
-import type { InvoiceBankDetailsT } from "@/lib/validators";
+import type { InvoiceBankDetailsT, InvoiceCompanyDetailsT } from "@/lib/validators";
 
 const INK = "#000";
 const RULE = "#000";
@@ -32,13 +32,18 @@ const money = (v: string | number) => INR.format(Number(v));
 const pct = (v: number) => String(Number(v.toFixed(2)));
 // MealType enum → printed label. BREAKFAST → "Breakfast", HIGH_TEA → "High tea".
 const mealLabel = (m: string) => m.charAt(0) + m.slice(1).toLowerCase().replaceAll("_", " ");
+// Pax prints whole; anything else (2.5 kg of cookies) keeps its decimals.
+const qty = (v: string | number) => {
+  const n = Number(v);
+  return Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/\.?0+$/, "");
+};
 
 /**
  * Reformat the stored invoice number to the client's printed style.
  * "INV-26-27-0111" → "111/2026-27". Display-only — the stored value and
  * numbering are untouched. Unknown formats pass through verbatim.
  */
-function displayInvoiceNo(stored: string): string {
+export function displayInvoiceNo(stored: string): string {
   const m = stored.trim().match(/^INV-(\d{2})-(\d{2})-(\d+)$/);
   if (!m) return stored;
   const [, fy1, fy2, serial] = m;
@@ -99,6 +104,7 @@ const s = StyleSheet.create({
   toLabel: { fontSize: 8, fontFamily: "Helvetica-Bold", marginBottom: 2 },
   toName: { fontSize: 10, fontFamily: "Helvetica-Bold" },
   toLine: { fontSize: 9, marginTop: 1 },
+  toMeta: { fontSize: 9, marginTop: 3, fontFamily: "Helvetica-Bold" },
 
   // Items table
   table: { borderTopWidth: 1, borderTopColor: RULE },
@@ -114,11 +120,12 @@ const s = StyleSheet.create({
   cellLast: { borderRightWidth: 0 },
   headText: { fontFamily: "Helvetica-Bold", fontSize: 8.5 },
   right: { textAlign: "right" },
-  cDate: { width: "15%" },
-  cParticular: { width: "34%" },
-  cPax: { width: "12%" },
-  cRate: { width: "13%" },
-  cDays: { width: "11%" },
+  cSl: { width: "7%" },
+  cDate: { width: "13%" },
+  cParticular: { width: "33%" },
+  cPax: { width: "10%" },
+  cRate: { width: "12%" },
+  cDays: { width: "10%" },
   cAmt: { width: "15%" },
 
   // Totals
@@ -168,6 +175,7 @@ const s = StyleSheet.create({
   footer: { paddingTop: 10, paddingHorizontal: 8, paddingBottom: 14 },
   footerText: { fontSize: 9 },
   signSpace: { height: 46 },
+  signName: { fontSize: 9, fontFamily: "Helvetica-Bold", textAlign: "right" },
 });
 
 interface InvoiceLine {
@@ -176,6 +184,13 @@ interface InvoiceLine {
   unit: string;
   unitPrice: string | number;
   gstRatePct: string | number;
+  /** "No Of Days" — pax × rate × days. */
+  days?: number | null;
+  /** Printed in the line's Date column; null prints blank. */
+  serviceDate?: Date | null;
+  /** The stored taxable value (post-discount, ex-tax). Preferred over
+   *  recomputing from qty × rate so the column sums to the printed Total. */
+  lineSubtotal?: string | number | null;
   lineTotal: string | number;
 }
 
@@ -195,7 +210,14 @@ interface InvoicePDFData {
 
   seller: { name: string; gstin: string; address: string; bank: BankFields };
   contact: { email?: string; phone?: string; mobile?: string };
-  customer: { name: string; address: string };
+  customer: {
+    name: string;
+    address: string;
+    gstin?: string | null;
+    vendorCode?: string | null;
+    /** Credit days; printed as "Pay Terms : N Days" when above zero. */
+    payTermsDays?: number | null;
+  };
 
   /**
    * The billed event (null for adhoc / consolidated folio invoices, which
@@ -205,7 +227,7 @@ interface InvoicePDFData {
    * rate is subtotal ÷ headcount, so taking it from anywhere but the
    * invoice makes the rate disagree with the invoice's own total.
    */
-  order?: { headcount: number | null; mealType: string } | null;
+  order?: { headcount: number | null; mealType: string; eventDate?: Date | null } | null;
 
   lines: InvoiceLine[];
   subtotal: string | number;
@@ -232,28 +254,36 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
   // Effective (blended across rates) tax percentage, derived from amounts.
   const rateOf = (tax: number) => (subtotal > 0 ? (tax / subtotal) * 100 : 0);
 
-  const dateStr = data.issuedAt ? formatIST(data.issuedAt, "dd.MM.yyyy") : "";
+  const fmt = (d: Date | null | undefined) => (d ? formatIST(d, "dd.MM.yyyy") : "");
+  const dateStr = fmt(data.issuedAt);
 
   // An order-linked bill is ONE line — the customer bought a meal for N pax,
   // not a list of dishes. Pax comes from the invoice's own final headcount
   // and the rate is the per-head share of the taxable amount on this same
-  // document, so the two can never contradict each other.
-  const days = 1; // no per-line day count is stored; the client's format defaults to 1
+  // document, so the two can never contradict each other. Its Date is the
+  // event day. Ad-hoc lines print what was keyed: date, pax, rate, days.
   const eventPax = data.order?.headcount ?? 0;
   const rows = data.order
     ? [{
+        date: fmt(data.order.eventDate) || dateStr,
         particular: [`${mealLabel(data.order.mealType)} catering`, data.orderCode]
           .filter(Boolean)
           .join(" — "),
-        pax: eventPax > 0 ? eventPax : "",
+        pax: eventPax > 0 ? String(eventPax) : "",
         rate: eventPax > 0 ? subtotal / eventPax : subtotal,
+        days: 1,
         taxable: subtotal,
       }]
     : data.lines.map((l) => ({
+        date: fmt(l.serviceDate),
         particular: l.description,
-        pax: Number(l.quantity),
+        pax: qty(l.quantity),
         rate: Number(l.unitPrice),
-        taxable: Number(l.quantity) * days * Number(l.unitPrice),
+        days: l.days ?? 1,
+        taxable:
+          l.lineSubtotal != null
+            ? Number(l.lineSubtotal)
+            : Number(l.quantity) * (l.days ?? 1) * Number(l.unitPrice),
       }));
   const b = data.seller.bank;
   const bankRows = [
@@ -263,6 +293,7 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
     ["IFSC Code", b.ifsc],
   ].filter(([, v]) => Boolean(v)) as [string, string][];
   const hasBank = bankRows.length > 0 || Boolean(b.freeText);
+  const payTerms = data.customer.payTermsDays ?? 0;
 
   return (
     <Document title={`${isProforma ? "Proforma" : "Tax"} Invoice ${data.invoiceNo}`} author={data.seller.name}>
@@ -284,7 +315,7 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
             <Text style={s.companyLine}>
               {[data.contact.phone && `Ph: ${data.contact.phone}`, data.contact.mobile && `Mob: ${data.contact.mobile}`]
                 .filter(Boolean)
-                .join("   ")}
+                .join(", ")}
             </Text>
           )}
 
@@ -297,18 +328,22 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
             </View>
           </View>
 
-          {/* TO block */}
+          {/* TO block — name, address, then the buyer's own references */}
           <View style={s.toBlock}>
             <Text style={s.toLabel}>TO</Text>
             <Text style={s.toName}>{data.customer.name}</Text>
             {nonEmptyLines(data.customer.address).map((l, i) => (
               <Text key={i} style={s.toLine}>{l}</Text>
             ))}
+            {data.customer.gstin && <Text style={s.toMeta}>GST: {data.customer.gstin}</Text>}
+            {data.customer.vendorCode && <Text style={s.toMeta}>Vendor Code: {data.customer.vendorCode}</Text>}
+            {payTerms > 0 && <Text style={s.toMeta}>Pay Terms : {payTerms} Days</Text>}
           </View>
 
           {/* Line-items table */}
           <View style={s.table}>
             <View style={[s.row, s.headRow]}>
+              <Text style={[s.cell, s.cSl, s.headText]}>Sl.No</Text>
               <Text style={[s.cell, s.cDate, s.headText]}>Date</Text>
               <Text style={[s.cell, s.cParticular, s.headText]}>Particular</Text>
               <Text style={[s.cell, s.cPax, s.headText, s.right]}>No of Pax</Text>
@@ -318,11 +353,12 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
             </View>
             {rows.map((r, i) => (
               <View key={i} style={s.row}>
-                <Text style={[s.cell, s.cDate]}>{dateStr}</Text>
+                <Text style={[s.cell, s.cSl]}>{i + 1}</Text>
+                <Text style={[s.cell, s.cDate]}>{r.date}</Text>
                 <Text style={[s.cell, s.cParticular]}>{r.particular}</Text>
                 <Text style={[s.cell, s.cPax, s.right]}>{r.pax}</Text>
                 <Text style={[s.cell, s.cRate, s.right]}>{money(r.rate)}</Text>
-                <Text style={[s.cell, s.cDays, s.right]}>{days}</Text>
+                <Text style={[s.cell, s.cDays, s.right]}>{r.days}</Text>
                 <Text style={[s.cell, s.cAmt, s.cellLast, s.right]}>{money(r.taxable)}</Text>
               </View>
             ))}
@@ -391,10 +427,11 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
             </View>
           )}
 
-          {/* Footer — leave whitespace for the physical stamp/sign */}
+          {/* Footer — whitespace for the stamp/sign, then the signatory */}
           <View style={s.footer}>
             <Text style={s.footerText}>Thanking You</Text>
             <View style={s.signSpace} />
+            <Text style={s.signName}>{data.seller.name.toUpperCase()}</Text>
           </View>
         </View>
       </Page>
@@ -404,7 +441,8 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
 
 /**
  * Render a CustomerInvoice (with its lines) to a PDF Buffer.
- * Seller-side fields come from src/lib/org.ts; contact + bank from config.
+ * Seller block and bank details come from Admin → Settings ("invoice.company",
+ * "invoice.bankDetails"); a blank setting falls back to the INDEFINE_* env.
  */
 export async function renderCustomerInvoicePDF(input: {
   invoiceNo: string;
@@ -417,7 +455,7 @@ export async function renderCustomerInvoicePDF(input: {
    * live order's), plus the meal, for every order-linked invoice. Omit for
    * adhoc / consolidated invoices (they print their own lines).
    */
-  order?: { headcount: number | null; mealType: string } | null;
+  order?: { headcount: number | null; mealType: string; eventDate?: Date | null } | null;
   placeOfSupplyStateCode: string;
   irn?: string | null;
   ackNo?: string | null;
@@ -428,6 +466,8 @@ export async function renderCustomerInvoicePDF(input: {
     gstin?: string | null;
     billingAddress: string;
     stateCode: string;
+    vendorCode?: string | null;
+    creditDays?: number | null;
   };
 
   lines: Array<{
@@ -436,6 +476,9 @@ export async function renderCustomerInvoicePDF(input: {
     unit: string;
     unitPrice: string | number;
     gstRatePct: string | number;
+    days?: number | null;
+    serviceDate?: Date | null;
+    lineSubtotal?: string | number | null;
     lineTotal: string | number;
   }>;
   subtotal: string | number;
@@ -451,7 +494,10 @@ export async function renderCustomerInvoicePDF(input: {
   // Structured bank details (Admin → Settings → Invoice bank details). Legacy
   // free-text INDEFINE_BANK_DETAILS is still honoured as a fallback. When
   // neither is set the whole bank block is omitted — no placeholder rows.
-  const bankSetting = await getSetting<InvoiceBankDetailsT>("invoice.bankDetails");
+  const [bankSetting, company] = await Promise.all([
+    getSetting<InvoiceBankDetailsT>("invoice.bankDetails"),
+    getSetting<InvoiceCompanyDetailsT>("invoice.company"),
+  ]);
   const bank: BankFields = {
     bankName: bankSetting?.bankBranch || undefined,
     accountName: bankSetting?.accountName || undefined,
@@ -466,23 +512,24 @@ export async function renderCustomerInvoicePDF(input: {
     issuedAt: input.issuedAt,
     orderCode: input.orderCode,
     order: input.order ?? null,
+    // Admin → Settings → Invoice company details, else the env config.
     seller: {
-      name: indefineCompanyName(),
-      gstin: indefineGstin(),
-      address: indefineAddress(),
+      name: company?.name || indefineCompanyName(),
+      gstin: company?.gstin || indefineGstin(),
+      address: company?.address || indefineAddress(),
       bank,
     },
-    // Contact lines come from env config (org.ts holds no contact fields).
-    // Set INDEFINE_EMAIL / INDEFINE_PHONE / INDEFINE_MOBILE to show them;
-    // unset lines are simply omitted — no hardcoded business data.
     contact: {
-      email: process.env.INDEFINE_EMAIL || undefined,
-      phone: process.env.INDEFINE_PHONE || undefined,
-      mobile: process.env.INDEFINE_MOBILE || undefined,
+      email: company?.email || process.env.INDEFINE_EMAIL || undefined,
+      phone: company?.phone || process.env.INDEFINE_PHONE || undefined,
+      mobile: company?.mobile || process.env.INDEFINE_MOBILE || undefined,
     },
     customer: {
       name: input.customer.name,
       address: input.customer.billingAddress,
+      gstin: input.customer.gstin,
+      vendorCode: input.customer.vendorCode,
+      payTermsDays: input.customer.creditDays,
     },
     lines: input.lines,
     subtotal: input.subtotal,

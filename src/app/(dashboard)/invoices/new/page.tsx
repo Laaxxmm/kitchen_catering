@@ -27,6 +27,8 @@ export default async function NewInvoicePage() {
       unitPrice: string;
       discountPct: string;
       gstRatePct: string;
+      days: string;
+      serviceDate: string | null;
     }>;
   }) {
     "use server";

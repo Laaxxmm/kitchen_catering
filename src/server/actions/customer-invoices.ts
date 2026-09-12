@@ -289,6 +289,27 @@ interface StandaloneLineInput {
   unitPrice: string;
   discountPct?: string;
   gstRatePct?: string;
+  /** "No Of Days" on the client's bill; blank = 1. */
+  days?: number | string | null;
+  /** yyyy-mm-dd; printed in the line's Date column. */
+  serviceDate?: string | null;
+}
+
+/** A whole number of days from 1 up; blank reads as 1. */
+function lineDays(l: StandaloneLineInput): number {
+  if (l.days == null || l.days === "") return 1;
+  const n = Number(l.days);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new ActionError(`"${l.description}": days must be a whole number, 1 or more`);
+  }
+  return n;
+}
+
+function lineServiceDate(l: StandaloneLineInput): Date | null {
+  if (!l.serviceDate) return null;
+  const d = new Date(l.serviceDate);
+  if (Number.isNaN(d.getTime())) throw new ActionError(`"${l.description}": the service date is not a date`);
+  return d;
 }
 
 interface StandaloneInvoiceInput {
@@ -332,6 +353,7 @@ async function createStandaloneCustomerInvoiceInner(
         unitPrice: l.unitPrice,
         discountPct: l.discountPct ?? "0",
         gstRatePct: l.gstRatePct ?? "0",
+        days: lineDays(l),
       })),
       supplierStateCode: supplierState,
       placeOfSupplyStateCode: raw.placeOfSupplyStateCode,
@@ -366,9 +388,12 @@ async function createStandaloneCustomerInvoiceInner(
               unitPrice: l.unitPrice,
               discountPct: l.discountPct ?? "0",
               gstRatePct: l.gstRatePct ?? "0",
+              days: lineDays(l),
             });
             return {
               sortOrder: idx,
+              days: lineDays(l),
+              serviceDate: lineServiceDate(l),
               description: l.description,
               hsnSac: l.hsnSac ?? null,
               quantity: l.quantity,
@@ -455,6 +480,7 @@ async function updateDraftInvoiceInner(id: string, input: EditInvoiceInput): Pro
         unitPrice: l.unitPrice,
         discountPct: l.discountPct ?? "0",
         gstRatePct: l.gstRatePct ?? "0",
+        days: lineDays(l),
       })),
       supplierStateCode: supplierState,
       placeOfSupplyStateCode: pos,
@@ -469,10 +495,13 @@ async function updateDraftInvoiceInner(id: string, input: EditInvoiceInput): Pro
           unitPrice: l.unitPrice,
           discountPct: l.discountPct ?? "0",
           gstRatePct: l.gstRatePct ?? "0",
+          days: lineDays(l),
         });
         return {
           invoiceId: id,
           sortOrder: idx,
+          days: lineDays(l),
+          serviceDate: lineServiceDate(l),
           description: l.description,
           hsnSac: l.hsnSac ?? null,
           quantity: l.quantity,
@@ -1711,7 +1740,7 @@ export async function getCustomerInvoice(id: string) {
       // headcount/mealType feed the PDF's live event line — the invoice's own
       // lines are a creation-time snapshot and go stale when the order is
       // revised (client item #6: 100 → 200 pax still printed 100).
-      order: { select: { id: true, code: true, headcount: true, mealType: true } },
+      order: { select: { id: true, code: true, headcount: true, mealType: true, eventDate: true } },
       createdBy: { select: { name: true } },
       onHoldBy: { select: { name: true } },
       approvedBy: { select: { name: true } },

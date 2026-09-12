@@ -29,6 +29,10 @@ interface DraftLine {
   unitPrice: string;
   discountPct: string;
   gstRatePct: string;
+  /** "No Of Days" on the printed bill: pax × rate × days. */
+  days: string;
+  /** yyyy-mm-dd, printed in the line's Date column; blank prints nothing. */
+  serviceDate: string;
 }
 
 interface CommonProps {
@@ -62,6 +66,8 @@ interface CreateProps extends CommonProps {
       unitPrice: string;
       discountPct: string;
       gstRatePct: string;
+      days: string;
+      serviceDate: string | null;
     }>;
   }) => Promise<ActionResult | void>;
 }
@@ -86,6 +92,8 @@ interface EditProps extends CommonProps {
       unitPrice: string;
       discountPct: string;
       gstRatePct: string;
+      days: string;
+      serviceDate: string | null;
     }>;
   }) => Promise<ActionResult | void>;
 }
@@ -93,7 +101,7 @@ interface EditProps extends CommonProps {
 type Props = CreateProps | EditProps;
 
 function emptyLine(): DraftLine {
-  return { description: "", hsnSac: "", quantity: "1", unit: "ea", unitPrice: "0", discountPct: "0", gstRatePct: "5" };
+  return { description: "", hsnSac: "", quantity: "1", unit: "pax", unitPrice: "0", discountPct: "0", gstRatePct: "5", days: "1", serviceDate: "" };
 }
 
 export function InvoiceLineEditor(props: Props) {
@@ -158,7 +166,8 @@ export function InvoiceLineEditor(props: Props) {
       const u = new Decimal(l.unitPrice || "0");
       const dec = new Decimal(l.discountPct || "0").div(100);
       const gst = new Decimal(l.gstRatePct || "0").div(100);
-      const sub = q.times(u).times(new Decimal(1).minus(dec));
+      const dd = new Decimal(l.days || "1");
+      const sub = q.times(dd).times(u).times(new Decimal(1).minus(dec));
       subtotal = subtotal.plus(sub);
       tax = tax.plus(sub.times(gst));
     }
@@ -185,6 +194,8 @@ export function InvoiceLineEditor(props: Props) {
         unitPrice: l.unitPrice,
         discountPct: l.discountPct || "0",
         gstRatePct: l.gstRatePct || "0",
+        days: l.days || "1",
+        serviceDate: l.serviceDate || null,
       }));
     if (payload.length === 0) return toast.error("Add at least one line");
 
@@ -300,11 +311,13 @@ export function InvoiceLineEditor(props: Props) {
           <table className="w-full text-[12.5px]">
             <thead className="border-b border-ik-rule text-left text-ik-ink-3">
               <tr>
-                <th className="py-1 pr-2">Description</th>
+                <th className="w-36 py-1 pr-2">Date</th>
+                <th className="py-1 pr-2">Particular</th>
                 <th className="w-20 py-1 pr-2">HSN/SAC</th>
-                <th className="w-20 py-1 pr-2 text-right">Qty</th>
+                <th className="w-20 py-1 pr-2 text-right">Pax / Qty</th>
                 <th className="w-16 py-1 pr-2">Unit</th>
                 <th className="w-24 py-1 pr-2 text-right">Rate ₹</th>
+                <th className="w-16 py-1 pr-2 text-right">Days</th>
                 <th className="w-16 py-1 pr-2 text-right">Disc %</th>
                 <th className="w-16 py-1 pr-2 text-right">GST %</th>
                 <th className="w-28 py-1 pr-2 text-right">Total ₹</th>
@@ -317,15 +330,18 @@ export function InvoiceLineEditor(props: Props) {
                 const u = new Decimal(l.unitPrice || "0");
                 const dec = new Decimal(l.discountPct || "0").div(100);
                 const gst = new Decimal(l.gstRatePct || "0").div(100);
-                const sub = q.times(u).times(new Decimal(1).minus(dec));
+                const dd = new Decimal(l.days || "1");
+                const sub = q.times(dd).times(u).times(new Decimal(1).minus(dec));
                 const tax = sub.times(gst);
                 return (
                   <tr key={idx} className="border-b border-ik-rule">
+                    <td className="py-1 pr-2"><input type="date" value={l.serviceDate} onChange={(e) => setLine(idx, { serviceDate: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1" /></td>
                     <td className="py-1 pr-2"><input value={l.description} onChange={(e) => setLine(idx, { description: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1" /></td>
                     <td className="py-1 pr-2"><input value={l.hsnSac} onChange={(e) => setLine(idx, { hsnSac: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 font-mono" /></td>
                     <td className="py-1 pr-2"><input type="number" step="any" min="0.001" value={l.quantity} onChange={(e) => setLine(idx, { quantity: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
                     <td className="py-1 pr-2"><input value={l.unit} onChange={(e) => setLine(idx, { unit: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1" /></td>
                     <td className="py-1 pr-2"><input type="number" step="0.01" min="0" value={l.unitPrice} onChange={(e) => setLine(idx, { unitPrice: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
+                    <td className="py-1 pr-2"><input type="number" step="1" min="1" value={l.days} onChange={(e) => setLine(idx, { days: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
                     <td className="py-1 pr-2"><input type="number" step="0.01" min="0" value={l.discountPct} onChange={(e) => setLine(idx, { discountPct: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
                     <td className="py-1 pr-2"><input type="number" step="0.01" min="0" value={l.gstRatePct} onChange={(e) => setLine(idx, { gstRatePct: e.target.value })} className="h-8 w-full rounded border border-ik-rule bg-ik-card px-1 text-right font-mono" /></td>
                     <td className="py-1 pr-2 text-right font-mono">{sub.plus(tax).toDecimalPlaces(2).toString()}</td>
@@ -335,9 +351,9 @@ export function InvoiceLineEditor(props: Props) {
               })}
             </tbody>
             <tfoot className="font-mono">
-              <tr><td colSpan={7} className="py-1 pr-2 text-right text-ik-ink-3">Subtotal</td><td className="py-1 pr-2 text-right">{totals.subtotal.toString()}</td><td></td></tr>
-              <tr><td colSpan={7} className="py-1 pr-2 text-right text-ik-ink-3">GST</td><td className="py-1 pr-2 text-right">{totals.tax.toString()}</td><td></td></tr>
-              <tr className="font-medium"><td colSpan={7} className="py-1 pr-2 text-right">Grand total</td><td className="py-1 pr-2 text-right">{formatINR(totals.grand)}</td><td></td></tr>
+              <tr><td colSpan={9} className="py-1 pr-2 text-right text-ik-ink-3">Subtotal</td><td className="py-1 pr-2 text-right">{totals.subtotal.toString()}</td><td></td></tr>
+              <tr><td colSpan={9} className="py-1 pr-2 text-right text-ik-ink-3">GST</td><td className="py-1 pr-2 text-right">{totals.tax.toString()}</td><td></td></tr>
+              <tr className="font-medium"><td colSpan={9} className="py-1 pr-2 text-right">Grand total</td><td className="py-1 pr-2 text-right">{formatINR(totals.grand)}</td><td></td></tr>
             </tfoot>
           </table>
         </div>

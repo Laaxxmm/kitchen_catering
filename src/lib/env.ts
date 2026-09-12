@@ -49,6 +49,11 @@ const schema = z.object({
   INDEFINE_BANK_DETAILS: z.string().optional(),
   INDEFINE_LOGO_URL: z.string().optional(),
   INDEFINE_COMPANY_NAME: z.string().optional(),
+  // Contact lines on the invoice head; Admin → Settings → Invoice company
+  // details overrides them when filled in.
+  INDEFINE_EMAIL: z.string().optional(),
+  INDEFINE_PHONE: z.string().optional(),
+  INDEFINE_MOBILE: z.string().optional(),
 
   // ─── Storage (S3 optional) ───────────────────────────────────────
   STORAGE_S3_BUCKET: z.string().optional(),
