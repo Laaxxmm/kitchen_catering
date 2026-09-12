@@ -59,7 +59,7 @@ describe("applying a stock count", () => {
     expect((await db.ingredient.findUniqueOrThrow({ where: { id: fold.id } })).active).toBe(true);
 
     const result = await applyStockCountPlan(count, desk("admin").id);
-    expect(result).toEqual({ merged: 1, created: 1, quantitiesChanged: 3, costsSet: 2, unitsChanged: 1 });
+    expect(result).toEqual({ merged: 1, created: 1, quantitiesChanged: 3, costsSet: 2, unitsChanged: 1, converted: 0 });
 
     const [scarce, plentiful, kept, folded, created, twins] = await Promise.all([
       db.ingredient.findUniqueOrThrow({ where: { id: ingredients.scarce } }),
@@ -115,14 +115,77 @@ describe("applying a stock count", () => {
     expect(await db.auditLog.count({ where: { entityId: "2099-01-02" } })).toBe(0);
   });
 
-  it("the real count file plans clean against the imported catalogue", async () => {
+  it("moves a packet item to kilos with its history, value unchanged", async () => {
+    await asAdmin();
+    const admin = desk("admin").id;
+    // 7.5 packets of 200 g at ₹102.86 a packet, two of them already issued.
+    const made = mustOk(
+      await createIngredient({ name: "Count Probe Masala 200gm", unit: "pct", openingQty: "7.5", openingAvgCost: "102.86" }),
+      "masala",
+    );
+    const code = await sku(made.id);
+    await db.ingredientIssue.create({
+      data: { ingredientId: made.id, qty: "2", unitCostAtIssue: "102.86", issuedById: admin, issuedAt: new Date() },
+    });
+    const valueBefore = 7.5 * 102.86;
+
+    const count: StockCountFile = {
+      id: "2099-01-04", takenOn: "2099-01-04", source: "kg", merges: [],
+      rows: [{ row: 2, code, name: "Count Probe Masala 200gm", unit: "kg", setUnit: "kg", unitFactor: "0.2" }],
+    };
+    const plan = await planStockCount(count);
+    expect(plan.problems).toEqual([]);
+    expect(plan.update).toEqual([
+      expect.objectContaining({ code, qtyFrom: "7.5", qtyTo: "1.5", costFrom: "102.86", costTo: "514.3", unitFrom: "pct", unitTo: "kg", unitFactor: "0.2" }),
+    ]);
+
+    const result = await applyStockCountPlan(count, admin);
+    expect(result).toEqual({ merged: 0, created: 0, quantitiesChanged: 0, costsSet: 0, unitsChanged: 0, converted: 1 });
+
+    const item = await db.ingredient.findUniqueOrThrow({ where: { id: made.id } });
+    expect(item.unit).toBe("kg");
+    expect(item.onHandQty.toString()).toBe("1.5");
+    expect(item.avgUnitCost.toString()).toBe("514.3");
+    expect(item.onHandQty.times(item.avgUnitCost).toNumber()).toBeCloseTo(valueBefore, 2);
+    // History followed: 2 packets became 0.4 kg at the kilo price; the
+    // issue is worth exactly what it was.
+    const issue = await db.ingredientIssue.findFirstOrThrow({ where: { ingredientId: made.id, qty: { gt: 0 } }, orderBy: { createdAt: "desc" } });
+    expect(issue.qty.toString()).toBe("0.4");
+    expect(issue.unitCostAtIssue.toString()).toBe("514.3");
+    expect(issue.qty.times(issue.unitCostAtIssue).toNumber()).toBeCloseTo(2 * 102.86, 2);
+    // A file that asks again finds it already in kilos and has nothing to do.
+    const again = await planStockCount({ ...count, id: "2099-01-05" });
+    expect(again.update).toEqual([]);
+    expect(again.problems).toEqual([]);
+  });
+
+  it("refuses a row with neither a quantity nor a conversion", async () => {
+    await asAdmin();
+    const code = await sku(seeded().ingredients.plentiful);
+    const plan = await planStockCount({
+      id: "2099-01-06", takenOn: "2099-01-06", source: "blank", merges: [],
+      rows: [{ row: 2, code, name: "Maida", unit: "kg" }],
+    });
+    expect(plan.problems).toEqual([expect.stringMatching(/no quantity/)]);
+  });
+
+  it("the real count files plan clean against the imported catalogue", async () => {
     await asAdmin();
     const { readFileSync } = await import("node:fs");
-    const count = JSON.parse(readFileSync("data/stock-counts/2026-09-11.json", "utf8")) as StockCountFile;
-    const plan = await planStockCount(count);
+    const sept11 = JSON.parse(readFileSync("data/stock-counts/2026-09-11.json", "utf8")) as StockCountFile;
+    const plan = await planStockCount(sept11);
     expect(plan.problems).toEqual([]);
     expect(plan.merges).toHaveLength(1);
     expect(plan.create).toHaveLength(4);
-    expect(plan.update.length + plan.create.length).toBe(count.rows.length);
+    expect(plan.update.length + plan.create.length).toBe(sept11.rows.length);
+
+    // 12 Sep: 38 packet items back to kilos, one recount. Every convert row
+    // must find its item still in packets in the catalogue as imported.
+    const sept12 = JSON.parse(readFileSync("data/stock-counts/2026-09-12.json", "utf8")) as StockCountFile;
+    const plan12 = await planStockCount(sept12);
+    expect(plan12.problems).toEqual([]);
+    expect(plan12.update).toHaveLength(sept12.rows.length);
+    expect(plan12.update.filter((u) => u.unitFactor)).toHaveLength(38);
+    for (const u of plan12.update.filter((u) => u.unitFactor)) expect(u.unitTo).toBe("kg");
   });
 });

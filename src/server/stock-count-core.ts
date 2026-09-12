@@ -31,10 +31,18 @@ export interface StockCountRow {
   unit: string;
   /** Change the catalogue unit to this before posting the quantity. */
   setUnit?: string;
-  /** Counted quantity, already in the catalogue unit. */
-  qty: string;
-  /** Price per catalogue unit, or null to leave avg cost alone. */
-  cost: string | null;
+  /**
+   * Convert instead of count. One old unit equals this many `setUnit`s
+   * (0.2 turns a 200 g packet into kilos): the item's on-hand, avg cost,
+   * reorder level and every historical quantity and unit price are scaled
+   * so stock value and past costs are unchanged. `qty` and `cost` are not
+   * read — the figures come from the item itself.
+   */
+  unitFactor?: string;
+  /** Counted quantity, already in the catalogue unit. Absent on a convert row. */
+  qty?: string;
+  /** Price per catalogue unit, or null to leave avg cost alone. Absent on a convert row. */
+  cost?: string | null;
 }
 
 export interface StockCountFile {
@@ -62,6 +70,8 @@ export interface StockCountPlan {
     costTo: string | null;
     unitFrom: string;
     unitTo: string | null;
+    /** Set on a convert row: qtyTo and costTo are the current figures scaled by it. */
+    unitFactor: string | null;
   }>;
   /** Rows that cannot be applied, with the reason. Any of these blocks the run. */
   problems: string[];
@@ -106,6 +116,10 @@ export async function planStockCount(count: StockCountFile): Promise<StockCountP
   }
 
   for (const r of count.rows) {
+    if (r.unitFactor === undefined && r.qty === undefined) {
+      plan.problems.push(`row ${r.row} ${r.name}: no quantity`);
+      continue;
+    }
     if (r.new) {
       const twin = await db.ingredient.findFirst({
         where: { name: { equals: r.name.trim(), mode: "insensitive" } },
@@ -123,14 +137,15 @@ export async function planStockCount(count: StockCountFile): Promise<StockCountP
           code: twin.sku,
           name: twin.name,
           qtyFrom: toDecimal(twin.onHandQty).toString(),
-          qtyTo: r.qty,
+          qtyTo: r.qty!,
           costFrom: toDecimal(twin.avgUnitCost).toString(),
-          costTo: r.cost,
+          costTo: r.cost ?? null,
           unitFrom: twin.unit,
           unitTo: r.unit !== twin.unit ? r.unit : null,
+          unitFactor: null,
         });
       } else {
-        plan.create.push({ row: r.row, name: r.name, unit: r.unit, qty: r.qty, cost: r.cost });
+        plan.create.push({ row: r.row, name: r.name, unit: r.unit, qty: r.qty!, cost: r.cost ?? null });
       }
       continue;
     }
@@ -150,19 +165,109 @@ export async function planStockCount(count: StockCountFile): Promise<StockCountP
       plan.problems.push(`row ${r.row} ${r.name}: ${item.sku} is already counted on row ${twice.row}`);
       continue;
     }
+    if (r.unitFactor !== undefined) {
+      const f = toDecimal(r.unitFactor);
+      if (!r.setUnit || !f.gt(0)) {
+        plan.problems.push(`row ${r.row} ${r.name}: a convert row needs setUnit and a unitFactor above 0`);
+        continue;
+      }
+      // Already in the target unit — converted on an earlier pass, or never
+      // needed it. Nothing to scale.
+      if (r.setUnit === item.unit) continue;
+      const avg = toDecimal(item.avgUnitCost);
+      plan.update.push({
+        row: r.row,
+        code: item.sku,
+        name: item.name,
+        qtyFrom: toDecimal(item.onHandQty).toString(),
+        qtyTo: toDecimal(item.onHandQty).times(f).toDecimalPlaces(3).toString(),
+        costFrom: avg.toString(),
+        costTo: avg.eq(0) ? "0" : avg.div(f).toDecimalPlaces(4).toString(),
+        unitFrom: item.unit,
+        unitTo: r.setUnit,
+        unitFactor: r.unitFactor,
+      });
+      continue;
+    }
     plan.update.push({
       row: r.row,
       code: item.sku,
       name: item.name,
       qtyFrom: toDecimal(item.onHandQty).toString(),
-      qtyTo: r.qty,
+      qtyTo: r.qty!,
       costFrom: toDecimal(item.avgUnitCost).toString(),
-      costTo: r.cost,
+      costTo: r.cost ?? null,
       unitFrom: item.unit,
       unitTo: r.setUnit && r.setUnit !== item.unit ? r.setUnit : null,
+      unitFactor: null,
     });
   }
   return plan;
+}
+
+/**
+ * Move an item to another unit and carry its whole history with it, value
+ * intact: quantities multiply by the factor, unit prices divide by it, so
+ * on-hand value, every past issue's cost and every PO line's total stay
+ * what they were — only the number they are counted in changes. One
+ * transaction, one audit row. A re-run finds the unit already changed and
+ * does nothing.
+ */
+async function convertIngredientUnit(
+  u: StockCountPlan["update"][number],
+  actorId: string,
+  countId: string,
+): Promise<boolean> {
+  const f = toDecimal(u.unitFactor!).toString();
+  return db.$transaction(async (tx) => {
+    const item = await tx.ingredient.findUniqueOrThrow({ where: { sku: u.code }, select: { id: true, unit: true } });
+    if (item.unit === u.unitTo) return false;
+    const id = item.id;
+    await tx.$executeRaw`UPDATE "Ingredient" SET "unit" = ${u.unitTo},
+      "onHandQty" = "onHandQty" * ${f}::numeric, "avgUnitCost" = "avgUnitCost" / ${f}::numeric,
+      "openingQty" = "openingQty" * ${f}::numeric, "openingAvgCost" = "openingAvgCost" / ${f}::numeric,
+      "reorderLevel" = "reorderLevel" * ${f}::numeric
+      WHERE "id" = ${id}`;
+    await tx.$executeRaw`UPDATE "IngredientIssue" SET "qty" = "qty" * ${f}::numeric,
+      "unitCostAtIssue" = "unitCostAtIssue" / ${f}::numeric
+      WHERE "ingredientId" = ${id}`;
+    await tx.$executeRaw`UPDATE "IngredientReturnLine" SET "quantity" = "quantity" * ${f}::numeric,
+      "declaredQuantity" = "declaredQuantity" * ${f}::numeric, "unitCost" = "unitCost" / ${f}::numeric
+      WHERE "issueId" IN (SELECT "id" FROM "IngredientIssue" WHERE "ingredientId" = ${id})`;
+    await tx.$executeRaw`UPDATE "IngredientReceipt" SET "qty" = "qty" * ${f}::numeric,
+      "unitCost" = "unitCost" / ${f}::numeric
+      WHERE "ingredientId" = ${id}`;
+    await tx.$executeRaw`UPDATE "IngredientAdjustment" SET "delta" = "delta" * ${f}::numeric,
+      "beforeQty" = "beforeQty" * ${f}::numeric, "afterQty" = "afterQty" * ${f}::numeric
+      WHERE "ingredientId" = ${id}`;
+    await tx.$executeRaw`UPDATE "ChefRequisitionLine" SET "requestedQty" = "requestedQty" * ${f}::numeric,
+      "issuedQty" = "issuedQty" * ${f}::numeric, "unitCostSnapshot" = "unitCostSnapshot" / ${f}::numeric
+      WHERE "ingredientId" = ${id}`;
+    await tx.$executeRaw`UPDATE "PurchaseRequisitionLine" SET "requestedQty" = "requestedQty" * ${f}::numeric,
+      "issuedQty" = "issuedQty" * ${f}::numeric, "unitCostSnapshot" = "unitCostSnapshot" / ${f}::numeric
+      WHERE "ingredientId" = ${id}`;
+    await tx.$executeRaw`UPDATE "RecipeIngredient" SET "qty" = "qty" * ${f}::numeric
+      WHERE "ingredientId" = ${id}`;
+    await tx.$executeRaw`UPDATE "VendorPOLine" SET "quantity" = "quantity" * ${f}::numeric,
+      "receivedQty" = "receivedQty" * ${f}::numeric, "unitPrice" = "unitPrice" / ${f}::numeric
+      WHERE "ingredientId" = ${id}`;
+    await tx.$executeRaw`UPDATE "GRNLine" SET "orderedQty" = "orderedQty" * ${f}::numeric,
+      "acceptedQty" = "acceptedQty" * ${f}::numeric, "rejectedQty" = "rejectedQty" * ${f}::numeric
+      WHERE "poLineId" IN (SELECT "id" FROM "VendorPOLine" WHERE "ingredientId" = ${id})`;
+    await tx.$executeRaw`UPDATE "OrderBudgetLine" SET "quantity" = "quantity" * ${f}::numeric,
+      "unitCost" = "unitCost" / ${f}::numeric
+      WHERE "ingredientId" = ${id}`;
+    await tx.auditLog.create({
+      data: {
+        userId: actorId,
+        action: "INGREDIENT_UNIT_CONVERTED",
+        entity: "Ingredient",
+        entityId: id,
+        payloadHash: sha256Json({ from: u.unitFrom, to: u.unitTo, factor: f, countId }),
+      },
+    });
+    return true;
+  });
 }
 
 export interface StockCountResult {
@@ -171,6 +276,8 @@ export interface StockCountResult {
   quantitiesChanged: number;
   costsSet: number;
   unitsChanged: number;
+  /** Items moved to another unit with their history, not recounted. */
+  converted: number;
 }
 
 /**
@@ -193,7 +300,7 @@ export async function applyStockCountPlan(
     throw new Error(`Fix the count file first:\n${plan.problems.join("\n")}`);
   }
 
-  const result: StockCountResult = { merged: 0, created: 0, quantitiesChanged: 0, costsSet: 0, unitsChanged: 0 };
+  const result: StockCountResult = { merged: 0, created: 0, quantitiesChanged: 0, costsSet: 0, unitsChanged: 0, converted: 0 };
 
   for (const m of plan.merges) {
     const [from, into] = await Promise.all([
@@ -217,7 +324,14 @@ export async function applyStockCountPlan(
     result.created++;
   }
 
-  const unitChanges = plan.update.filter((u) => u.unitTo);
+  // Conversions carry their own quantity and cost; they take no part in the
+  // count posting or the cost pass below.
+  for (const u of plan.update.filter((u) => u.unitFactor)) {
+    if (await convertIngredientUnit(u, actorId, count.id)) result.converted++;
+  }
+  const counted = plan.update.filter((u) => !u.unitFactor);
+
+  const unitChanges = counted.filter((u) => u.unitTo);
   for (const u of unitChanges) {
     await db.$transaction(async (tx) => {
       const item = await tx.ingredient.findUniqueOrThrow({ where: { sku: u.code }, select: { id: true } });
@@ -236,7 +350,7 @@ export async function applyStockCountPlan(
   }
 
   const lines = [];
-  for (const u of plan.update) {
+  for (const u of counted) {
     const item = await db.ingredient.findUniqueOrThrow({ where: { sku: u.code }, select: { id: true } });
     lines.push({ ingredientId: item.id, physicalCount: u.qtyTo });
   }
@@ -246,7 +360,7 @@ export async function applyStockCountPlan(
     result.quantitiesChanged = posted.changes.length;
   }
 
-  for (const u of plan.update) {
+  for (const u of counted) {
     if (u.costTo === null || toDecimal(u.costTo).eq(toDecimal(u.costFrom))) continue;
     await db.$transaction(async (tx) => {
       const item = await tx.ingredient.findUniqueOrThrow({ where: { sku: u.code }, select: { id: true } });

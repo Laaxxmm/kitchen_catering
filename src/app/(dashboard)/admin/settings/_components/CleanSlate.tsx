@@ -88,7 +88,8 @@ function ApplyStockCount({ count }: { count: { id: string; source: string; rows:
         }
         toast.success(
           `Count ${count.id} applied — ${res.quantitiesChanged} quantities, ${res.costsSet} prices, ` +
-            `${res.created} new items, ${res.merged} merged, ${res.unitsChanged} units.`,
+            `${res.created} new items, ${res.merged} merged, ${res.unitsChanged} units, ` +
+            `${res.converted} moved to a new unit with their history.`,
         );
         setPlan(null);
         router.refresh();
