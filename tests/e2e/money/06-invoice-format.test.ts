@@ -90,6 +90,8 @@ describe("the client's tax-invoice format", () => {
     const view = await buildInvoiceView(edited!);
     expect(view.title).toBe("Tax Invoice");
     expect(view.displayNo).toMatch(/^\d+\/20\d\d-\d\d$/);
+    // A draft has no issue date yet; the bill still carries a date.
+    expect(view.dateStr).toMatch(/^\d\d\.\d\d\.20\d\d$/);
     expect(view.rows).toEqual([
       { sl: 1, date: "07.09.2026", particular: "Hi tea", pax: "85", rate: "200.00", days: 2, taxable: "34,000.00" },
     ]);

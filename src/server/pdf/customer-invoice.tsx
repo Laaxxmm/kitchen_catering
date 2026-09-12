@@ -9,11 +9,7 @@ import {
 import { formatIST } from "@/lib/time";
 import { amountInWords } from "@/lib/amount-in-words";
 import { getSetting } from "@/lib/settings";
-import {
-  indefineAddress,
-  indefineCompanyName,
-  indefineGstin,
-} from "@/lib/org";
+import { indefineCompanyName } from "@/lib/org";
 import type { InvoiceBankDetailsT, InvoiceCompanyDetailsT } from "@/lib/validators";
 
 /**
@@ -68,7 +64,9 @@ type Money = string | number | { toString(): string };
 export interface PrintableInvoice {
   invoiceNo: string;
   kind?: string | null;
+  /** Set at issue. A draft prints its creation date instead — never blank. */
   issuedAt?: Date | null;
+  createdAt?: Date | null;
   /** Pax the bill was raised for — the printed rate is subtotal ÷ this. */
   finalHeadcount?: number | null;
   subtotal: Money;
@@ -134,7 +132,7 @@ export async function buildInvoiceView(inv: PrintableInvoice): Promise<InvoiceVi
   ]);
 
   const fmt = (d: Date | null | undefined) => (d ? formatIST(d, "dd.MM.yyyy") : "");
-  const dateStr = fmt(inv.issuedAt);
+  const dateStr = fmt(inv.issuedAt ?? inv.createdAt);
   const subtotal = Number(String(inv.subtotal));
   const cgst = Number(String(inv.cgst));
   const sgst = Number(String(inv.sgst));
@@ -195,10 +193,13 @@ export async function buildInvoiceView(inv: PrintableInvoice): Promise<InvoiceVi
   return {
     title: inv.kind === "PROFORMA" ? "Proforma Invoice" : "Tax Invoice",
     proforma: inv.kind === "PROFORMA",
+    // Settings card first, then env. No placeholder GSTIN or address: a
+    // made-up GSTIN on a tax invoice is worse than a blank one, and the
+    // blank is what tells the desk the card is still empty.
     seller: {
       name: company?.name || indefineCompanyName(),
-      gstin: company?.gstin || indefineGstin(),
-      addressLines: nonEmptyLines(company?.address || indefineAddress()),
+      gstin: company?.gstin || process.env.INDEFINE_GSTIN || "",
+      addressLines: nonEmptyLines(company?.address || process.env.INDEFINE_ADDRESS || ""),
       email: company?.email || process.env.INDEFINE_EMAIL || null,
       phoneLine:
         [phone && `Ph: ${phone}`, mobile && `Mob: ${mobile}`].filter(Boolean).join(", ") || null,
