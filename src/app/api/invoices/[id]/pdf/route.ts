@@ -14,52 +14,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const inv = await getCustomerInvoice(id);
   if (!inv) notFound();
 
-  const buf = await renderCustomerInvoicePDF({
-    invoiceNo: inv.invoiceNo,
-    kind: inv.kind,
-    issuedAt: inv.issuedAt,
-    dueAt: inv.dueAt,
-    orderCode: inv.order?.code ?? null,
-    // Pax off the INVOICE, not the live order — the order can be edited to
-    // 120 after this bill was raised for 100, and the printed rate is
-    // subtotal ÷ pax. Legacy invoices predate finalHeadcount and fall back
-    // to the order, i.e. exactly what they printed before.
-    order: inv.order
-      ? { headcount: inv.finalHeadcount ?? inv.order.headcount, mealType: inv.order.mealType, eventDate: inv.order.eventDate }
-      : null,
-    placeOfSupplyStateCode: inv.placeOfSupplyStateCode,
-    irn: inv.irn,
-    ackNo: inv.ackNo,
-    ackDate: inv.ackDate,
-    customer: {
-      name: inv.customer.billingCompanyName || inv.customer.name,
-      gstin: inv.customer.gstin,
-      billingAddress: inv.customer.billingAddress,
-      stateCode: inv.customer.stateCode,
-      vendorCode: inv.customer.vendorCode,
-      creditDays: inv.customer.creditDays,
-    },
-    lines: inv.lines.map((l) => ({
-      description: l.description,
-      quantity: l.quantity.toString(),
-      unit: l.unit,
-      unitPrice: l.unitPrice.toString(),
-      gstRatePct: l.gstRatePct.toString(),
-      days: l.days,
-      serviceDate: l.serviceDate,
-      lineSubtotal: l.lineSubtotal.toString(),
-      lineTotal: l.lineTotal.toString(),
-    })),
-    subtotal: inv.subtotal.toString(),
-    cgst: inv.cgst.toString(),
-    sgst: inv.sgst.toString(),
-    igst: inv.igst.toString(),
-    taxTotal: inv.taxTotal.toString(),
-    grandTotal: inv.grandTotal.toString(),
-    amountPaid: inv.amountPaid.toString(),
-    notes: inv.notes,
-    terms: inv.termsMd,
-  });
+  // The read carries customer, lines and order; the view builder takes pax
+  // off the INVOICE's own finalHeadcount, never the live order.
+  const buf = await renderCustomerInvoicePDF(inv);
 
   return new Response(new Uint8Array(buf), {
     headers: {

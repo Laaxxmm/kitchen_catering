@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import NextAuth from "next-auth";
 import authConfig from "@/server/auth.config";
-import { routeAllows, type Role } from "@/lib/route-access";
+import { isPublicPath, routeAllows, type Role } from "@/lib/route-access";
 
 // Edge-safe NextAuth instance. We intentionally do NOT import `@/server/auth`
 // here — that file pulls in `@prisma/client` and `bcryptjs`, which would
@@ -13,24 +13,11 @@ export default auth((req) => {
   const { nextUrl } = req;
   const pathname = nextUrl.pathname;
 
-  // Public paths (no auth required)
-  if (
-    pathname === "/login" ||
-    pathname === "/api/health" ||
-    pathname.startsWith("/api/auth") ||
-    pathname.startsWith("/api/cron/") ||
-    pathname.startsWith("/api/mobile/") ||
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/icons") ||
-    pathname === "/manifest.webmanifest" ||
-    pathname === "/favicon.ico" ||
-    // /q/<token> is the customer's quote link. It is the ONLY unauthenticated
-    // app route; a prefix listed here for a path that does not exist yet is
-    // an open door the day someone creates it, which is why /i/, /f/ and
-    // /api/pdf/public/ came out.
-    pathname.startsWith("/q/") ||
-    pathname === "/forbidden"
-  ) {
+  // Public paths (no auth required) — the list lives in route-access.ts so
+  // it is unit-tested: the customer's invoice link (/i/<token>) was once
+  // dropped from here as "dead" and every emailed invoice bounced to the
+  // login page for a week.
+  if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 

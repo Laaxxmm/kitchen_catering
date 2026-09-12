@@ -4,18 +4,23 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/server/db";
 import { createCustomer } from "@/server/actions/customers";
 import {
+  approveCustomerInvoiceForRelease,
   createStandaloneCustomerInvoice,
   getCustomerInvoice,
+  getCustomerInvoiceByToken,
+  issueCustomerInvoice,
   updateDraftInvoice,
 } from "@/server/actions/customer-invoices";
-import { renderCustomerInvoicePDF } from "@/server/pdf/customer-invoice";
-import { asAdmin, ensureSeeded, mustOk } from "../harness";
+import { buildInvoiceView, renderCustomerInvoicePDF } from "@/server/pdf/customer-invoice";
+import { GET as publicInvoicePdf } from "@/app/(public)/i/[token]/pdf/route";
+import { asAdmin, asManager, ensureSeeded, flushDeferred, mustOk } from "../harness";
 
 /**
  * The client's tax invoice, as they bill it today in Excel: "No of Pax ×
  * Rate × No Of Days" per line, a service date per line when the bill spans
  * dates, and the buyer's own references (GST, vendor code, pay terms) in
- * the TO block. Everything here must survive create, edit and print.
+ * the TO block. Everything here must survive create, edit and print — and
+ * the customer's share link must hand out the same document, login-free.
  */
 
 beforeAll(async () => {
@@ -79,46 +84,53 @@ describe("the client's tax-invoice format", () => {
     );
     const edited = await getCustomerInvoice(inv.id);
     expect(edited!.lines[0].days).toBe(2);
-    expect(edited!.lines[0].serviceDate?.toISOString().slice(0, 10)).toBe("2026-09-07");
     expect(edited!.subtotal.toString()).toBe("34000");
 
-    // And the printed document builds with every new field on it.
-    const e = edited!;
-    const pdf = await renderCustomerInvoicePDF({
-      invoiceNo: e.invoiceNo,
-      kind: e.kind,
-      issuedAt: new Date(),
-      orderCode: null,
-      order: null,
-      placeOfSupplyStateCode: e.placeOfSupplyStateCode,
-      customer: {
-        name: e.customer.name,
-        gstin: e.customer.gstin,
-        billingAddress: e.customer.billingAddress,
-        stateCode: e.customer.stateCode,
-        vendorCode: e.customer.vendorCode,
-        creditDays: e.customer.creditDays,
-      },
-      lines: e.lines.map((l) => ({
-        description: l.description,
-        quantity: l.quantity.toString(),
-        unit: l.unit,
-        unitPrice: l.unitPrice.toString(),
-        gstRatePct: l.gstRatePct.toString(),
-        days: l.days,
-        serviceDate: l.serviceDate,
-        lineSubtotal: l.lineSubtotal.toString(),
-        lineTotal: l.lineTotal.toString(),
-      })),
-      subtotal: e.subtotal.toString(),
-      cgst: e.cgst.toString(),
-      sgst: e.sgst.toString(),
-      igst: e.igst.toString(),
-      taxTotal: e.taxTotal.toString(),
-      grandTotal: e.grandTotal.toString(),
-      amountPaid: e.amountPaid.toString(),
-    });
+    // The printed figures, exactly as the Excel sheet lays them out.
+    const view = await buildInvoiceView(edited!);
+    expect(view.title).toBe("Tax Invoice");
+    expect(view.displayNo).toMatch(/^\d+\/20\d\d-\d\d$/);
+    expect(view.rows).toEqual([
+      { sl: 1, date: "07.09.2026", particular: "Hi tea", pax: "85", rate: "200.00", days: 2, taxable: "34,000.00" },
+    ]);
+    expect(view.customer.metaLines).toEqual(["GST: 29AAATI1501J2ZV", "Vendor Code: 2000010609", "Pay Terms : 45 Days"]);
+    expect(view.totals.map((t) => t.label)).toEqual(["Total", "Cgst @2.5%", "Sgst @2.5%", "Grand Total"]);
+    expect(view.totals.at(-1)!.value).toBe("35,700.00");
+    expect(view.words).toMatch(/^Rupees Thirty[- ]Five Thousand Seven Hundred Only$/i);
+
+    const pdf = await renderCustomerInvoicePDF(edited!);
     expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
     expect(pdf.length).toBeGreaterThan(2000);
+  });
+
+  it("the customer's share link serves the page and the PDF only once issued", async () => {
+    await asAdmin();
+    const customerId = (await db.customer.findFirstOrThrow({ select: { id: true } })).id;
+    const inv = mustOk(
+      await createStandaloneCustomerInvoice({
+        customerId,
+        placeOfSupplyStateCode: "29",
+        lines: [{ description: "Packed Lunch", quantity: "10", unit: "pax", unitPrice: "250", gstRatePct: "5" }],
+      }),
+      "invoice",
+    );
+    const token = (await db.customerInvoice.findUniqueOrThrow({ where: { id: inv.id }, select: { shareToken: true } })).shareToken;
+    const params = Promise.resolve({ token });
+
+    // A draft is nobody's business yet: no page, no PDF.
+    expect(await getCustomerInvoiceByToken(token)).toBeNull();
+    expect((await publicInvoicePdf(new Request("http://test/i/x/pdf"), { params })).status).toBe(404);
+
+    await asManager();
+    mustOk(await approveCustomerInvoiceForRelease(inv.id), "approve");
+    mustOk(await issueCustomerInvoice(inv.id), "issue");
+    await flushDeferred();
+
+    const issued = await getCustomerInvoiceByToken(token);
+    expect(issued?.customer.vendorCode).toBeDefined();
+    const res = await publicInvoicePdf(new Request("http://test/i/x/pdf"), { params });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/pdf");
+    expect(Buffer.from(await res.arrayBuffer()).subarray(0, 5).toString()).toBe("%PDF-");
   });
 });

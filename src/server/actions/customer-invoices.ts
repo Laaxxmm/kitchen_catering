@@ -1764,9 +1764,14 @@ export async function getCustomerInvoiceByToken(token: string) {
   const invoice = await db.customerInvoice.findUnique({
     where: { shareToken: token },
     include: {
-      customer: { select: { name: true, billingAddress: true, gstin: true, stateCode: true } },
+      customer: {
+        select: {
+          name: true, billingCompanyName: true, billingAddress: true, gstin: true, stateCode: true,
+          vendorCode: true, creditDays: true,
+        },
+      },
       lines: { orderBy: { sortOrder: "asc" } },
-      order: { select: { code: true, eventDate: true } },
+      order: { select: { code: true, eventDate: true, headcount: true, mealType: true } },
     },
   });
   if (!invoice || !mayReachCustomer(invoice.status)) return null;

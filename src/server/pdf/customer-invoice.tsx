@@ -16,6 +16,14 @@ import {
 } from "@/lib/org";
 import type { InvoiceBankDetailsT, InvoiceCompanyDetailsT } from "@/lib/validators";
 
+/**
+ * The customer's tax invoice, as the client bills it: one document, two
+ * renderings. `buildInvoiceView` turns an invoice row into the printed
+ * figures (rows, totals, words, seller and buyer blocks); the PDF below and
+ * the shared /i/<token> page both draw from that one view, so they can
+ * never disagree.
+ */
+
 const INK = "#000";
 const RULE = "#000";
 const HEAD_FILL = "#EFEFEF";
@@ -33,8 +41,8 @@ const pct = (v: number) => String(Number(v.toFixed(2)));
 // MealType enum → printed label. BREAKFAST → "Breakfast", HIGH_TEA → "High tea".
 const mealLabel = (m: string) => m.charAt(0) + m.slice(1).toLowerCase().replaceAll("_", " ");
 // Pax prints whole; anything else (2.5 kg of cookies) keeps its decimals.
-const qty = (v: string | number) => {
-  const n = Number(v);
+const qty = (v: Money) => {
+  const n = Number(String(v));
   return Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/\.?0+$/, "");
 };
 
@@ -48,6 +56,169 @@ export function displayInvoiceNo(stored: string): string {
   if (!m) return stored;
   const [, fy1, fy2, serial] = m;
   return `${parseInt(serial, 10)}/20${fy1}-${fy2}`;
+}
+
+type Money = string | number | { toString(): string };
+
+/**
+ * What a render needs off an invoice. Every read of CustomerInvoice that
+ * includes `customer`, `lines` and `order` satisfies this as-is (Prisma
+ * Decimals go through String()); the proforma mailer assembles it by hand.
+ */
+export interface PrintableInvoice {
+  invoiceNo: string;
+  kind?: string | null;
+  issuedAt?: Date | null;
+  /** Pax the bill was raised for — the printed rate is subtotal ÷ this. */
+  finalHeadcount?: number | null;
+  subtotal: Money;
+  cgst: Money;
+  sgst: Money;
+  igst: Money;
+  grandTotal: Money;
+  customer: {
+    name: string;
+    billingCompanyName?: string | null;
+    gstin?: string | null;
+    billingAddress: string;
+    vendorCode?: string | null;
+    creditDays?: number | null;
+  };
+  /**
+   * The billed event, for order-linked invoices. Those print as ONE line —
+   * the customer bought a meal for N pax, not a list of dishes — with pax
+   * from the invoice's own headcount (the live order moves after billing)
+   * and the event day in the Date column. Null for ad-hoc invoices.
+   */
+  order?: { code: string; headcount: number | null; mealType: string; eventDate?: Date | null } | null;
+  lines: Array<{
+    description: string;
+    quantity: Money;
+    unitPrice: Money;
+    days?: number | null;
+    serviceDate?: Date | null;
+    /** Stored taxable value; preferred so the column sums to the Total. */
+    lineSubtotal?: Money | null;
+  }>;
+}
+
+export interface InvoiceView {
+  title: string;
+  proforma: boolean;
+  seller: { name: string; gstin: string; addressLines: string[]; email: string | null; phoneLine: string | null };
+  dateStr: string;
+  displayNo: string;
+  customer: { name: string; addressLines: string[]; metaLines: string[] };
+  rows: Array<{ sl: number; date: string; particular: string; pax: string; rate: string; days: number; taxable: string }>;
+  totals: Array<{ label: string; value: string; grand: boolean }>;
+  words: string;
+  bank: { rows: Array<[string, string]>; freeLines: string[] } | null;
+}
+
+function nonEmptyLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The printed figures. Seller block and bank details come from Admin →
+ * Settings ("invoice.company", "invoice.bankDetails"); a blank setting falls
+ * back to the INDEFINE_* env, and an empty bank block is omitted entirely.
+ */
+export async function buildInvoiceView(inv: PrintableInvoice): Promise<InvoiceView> {
+  const [bankSetting, company] = await Promise.all([
+    getSetting<InvoiceBankDetailsT>("invoice.bankDetails"),
+    getSetting<InvoiceCompanyDetailsT>("invoice.company"),
+  ]);
+
+  const fmt = (d: Date | null | undefined) => (d ? formatIST(d, "dd.MM.yyyy") : "");
+  const dateStr = fmt(inv.issuedAt);
+  const subtotal = Number(String(inv.subtotal));
+  const cgst = Number(String(inv.cgst));
+  const sgst = Number(String(inv.sgst));
+  const igst = Number(String(inv.igst));
+  const rateOf = (tax: number) => (subtotal > 0 ? (tax / subtotal) * 100 : 0);
+
+  const pax = inv.order ? (inv.finalHeadcount ?? inv.order.headcount ?? 0) : 0;
+  const rows: InvoiceView["rows"] = inv.order
+    ? [{
+        sl: 1,
+        date: fmt(inv.order.eventDate) || dateStr,
+        particular: `${mealLabel(inv.order.mealType)} catering — ${inv.order.code}`,
+        pax: pax > 0 ? String(pax) : "",
+        rate: money(pax > 0 ? subtotal / pax : subtotal),
+        days: 1,
+        taxable: money(subtotal),
+      }]
+    : inv.lines.map((l, i) => {
+        const days = l.days ?? 1;
+        const taxable =
+          l.lineSubtotal != null
+            ? Number(String(l.lineSubtotal))
+            : Number(String(l.quantity)) * days * Number(String(l.unitPrice));
+        return {
+          sl: i + 1,
+          date: fmt(l.serviceDate),
+          particular: l.description,
+          pax: qty(l.quantity),
+          rate: money(String(l.unitPrice)),
+          days,
+          taxable: money(taxable),
+        };
+      });
+
+  const totals: InvoiceView["totals"] = [{ label: "Total", value: money(subtotal), grand: false }];
+  if (cgst > 0 || sgst > 0) {
+    totals.push({ label: `Cgst @${pct(rateOf(cgst))}%`, value: money(cgst), grand: false });
+    totals.push({ label: `Sgst @${pct(rateOf(sgst))}%`, value: money(sgst), grand: false });
+  } else if (igst > 0) {
+    totals.push({ label: `Igst @${pct(rateOf(igst))}%`, value: money(igst), grand: false });
+  }
+  totals.push({ label: "Grand Total", value: money(String(inv.grandTotal)), grand: true });
+
+  const bankRows = (
+    [
+      ["Bank Name", bankSetting?.bankBranch],
+      ["Account Name", bankSetting?.accountName],
+      ["Account No", bankSetting?.accountNumber],
+      ["IFSC Code", bankSetting?.ifsc],
+    ] as Array<[string, string | undefined]>
+  ).filter((r): r is [string, string] => Boolean(r[1]));
+  const bankFree = bankRows.length === 0 ? nonEmptyLines(process.env.INDEFINE_BANK_DETAILS ?? "") : [];
+
+  const phone = company?.phone || process.env.INDEFINE_PHONE || "";
+  const mobile = company?.mobile || process.env.INDEFINE_MOBILE || "";
+  const payTerms = inv.customer.creditDays ?? 0;
+
+  return {
+    title: inv.kind === "PROFORMA" ? "Proforma Invoice" : "Tax Invoice",
+    proforma: inv.kind === "PROFORMA",
+    seller: {
+      name: company?.name || indefineCompanyName(),
+      gstin: company?.gstin || indefineGstin(),
+      addressLines: nonEmptyLines(company?.address || indefineAddress()),
+      email: company?.email || process.env.INDEFINE_EMAIL || null,
+      phoneLine:
+        [phone && `Ph: ${phone}`, mobile && `Mob: ${mobile}`].filter(Boolean).join(", ") || null,
+    },
+    dateStr,
+    displayNo: displayInvoiceNo(inv.invoiceNo),
+    customer: {
+      name: inv.customer.billingCompanyName || inv.customer.name,
+      addressLines: nonEmptyLines(inv.customer.billingAddress),
+      metaLines: [
+        inv.customer.gstin && `GST: ${inv.customer.gstin}`,
+        inv.customer.vendorCode && `Vendor Code: ${inv.customer.vendorCode}`,
+        payTerms > 0 && `Pay Terms : ${payTerms} Days`,
+      ].filter((s): s is string => Boolean(s)),
+    },
+    rows,
+    totals,
+    words: amountInWords(String(inv.grandTotal)),
+    bank: bankRows.length > 0 || bankFree.length > 0 ? { rows: bankRows, freeLines: bankFree } : null,
+  };
 }
 
 const s = StyleSheet.create({
@@ -178,166 +349,40 @@ const s = StyleSheet.create({
   signName: { fontSize: 9, fontFamily: "Helvetica-Bold", textAlign: "right" },
 });
 
-interface InvoiceLine {
-  description: string;
-  quantity: string | number;
-  unit: string;
-  unitPrice: string | number;
-  gstRatePct: string | number;
-  /** "No Of Days" — pax × rate × days. */
-  days?: number | null;
-  /** Printed in the line's Date column; null prints blank. */
-  serviceDate?: Date | null;
-  /** The stored taxable value (post-discount, ex-tax). Preferred over
-   *  recomputing from qty × rate so the column sums to the printed Total. */
-  lineSubtotal?: string | number | null;
-  lineTotal: string | number;
-}
-
-interface BankFields {
-  bankName?: string;
-  accountName?: string;
-  accountNumber?: string;
-  ifsc?: string;
-  freeText?: string; // legacy INDEFINE_BANK_DETAILS fallback
-}
-
-interface InvoicePDFData {
-  invoiceNo: string;
-  kind?: string | null;
-  issuedAt?: Date | null;
-  orderCode?: string | null;
-
-  seller: { name: string; gstin: string; address: string; bank: BankFields };
-  contact: { email?: string; phone?: string; mobile?: string };
-  customer: {
-    name: string;
-    address: string;
-    gstin?: string | null;
-    vendorCode?: string | null;
-    /** Credit days; printed as "Pay Terms : N Days" when above zero. */
-    payTermsDays?: number | null;
-  };
-
-  /**
-   * The billed event (null for adhoc / consolidated folio invoices, which
-   * have no single order). When present the bill prints as ONE consolidated
-   * event line. `headcount` must be the INVOICE's own finalHeadcount — the
-   * live order moves after invoicing (100 booked, 120 fed) and the printed
-   * rate is subtotal ÷ headcount, so taking it from anywhere but the
-   * invoice makes the rate disagree with the invoice's own total.
-   */
-  order?: { headcount: number | null; mealType: string; eventDate?: Date | null } | null;
-
-  lines: InvoiceLine[];
-  subtotal: string | number;
-  cgst: string | number;
-  sgst: string | number;
-  igst: string | number;
-  grandTotal: string | number;
-}
-
-function nonEmptyLines(addr: string): string[] {
-  return addr
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-}
-
-function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
-  const isProforma = data.kind === "PROFORMA";
-  const subtotal = Number(data.subtotal);
-  const cgst = Number(data.cgst);
-  const sgst = Number(data.sgst);
-  const igst = Number(data.igst);
-  const isIntraState = cgst > 0 || sgst > 0;
-  // Effective (blended across rates) tax percentage, derived from amounts.
-  const rateOf = (tax: number) => (subtotal > 0 ? (tax / subtotal) * 100 : 0);
-
-  const fmt = (d: Date | null | undefined) => (d ? formatIST(d, "dd.MM.yyyy") : "");
-  const dateStr = fmt(data.issuedAt);
-
-  // An order-linked bill is ONE line — the customer bought a meal for N pax,
-  // not a list of dishes. Pax comes from the invoice's own final headcount
-  // and the rate is the per-head share of the taxable amount on this same
-  // document, so the two can never contradict each other. Its Date is the
-  // event day. Ad-hoc lines print what was keyed: date, pax, rate, days.
-  const eventPax = data.order?.headcount ?? 0;
-  const rows = data.order
-    ? [{
-        date: fmt(data.order.eventDate) || dateStr,
-        particular: [`${mealLabel(data.order.mealType)} catering`, data.orderCode]
-          .filter(Boolean)
-          .join(" — "),
-        pax: eventPax > 0 ? String(eventPax) : "",
-        rate: eventPax > 0 ? subtotal / eventPax : subtotal,
-        days: 1,
-        taxable: subtotal,
-      }]
-    : data.lines.map((l) => ({
-        date: fmt(l.serviceDate),
-        particular: l.description,
-        pax: qty(l.quantity),
-        rate: Number(l.unitPrice),
-        days: l.days ?? 1,
-        taxable:
-          l.lineSubtotal != null
-            ? Number(l.lineSubtotal)
-            : Number(l.quantity) * (l.days ?? 1) * Number(l.unitPrice),
-      }));
-  const b = data.seller.bank;
-  const bankRows = [
-    ["Bank Name", b.bankName],
-    ["Account Name", b.accountName],
-    ["Account No", b.accountNumber],
-    ["IFSC Code", b.ifsc],
-  ].filter(([, v]) => Boolean(v)) as [string, string][];
-  const hasBank = bankRows.length > 0 || Boolean(b.freeText);
-  const payTerms = data.customer.payTermsDays ?? 0;
-
+function CustomerInvoiceDocument({ view }: { view: InvoiceView }) {
   return (
-    <Document title={`${isProforma ? "Proforma" : "Tax"} Invoice ${data.invoiceNo}`} author={data.seller.name}>
+    <Document title={`${view.title} ${view.displayNo}`} author={view.seller.name}>
       <Page size="A4" style={s.page}>
         <View style={s.frame}>
           {/* Title + centered company block */}
-          <Text style={s.title}>{isProforma ? "Proforma Invoice" : "Tax Invoice"}</Text>
-          {isProforma && (
-            <Text style={s.proformaNote}>PROFORMA — not a tax invoice</Text>
-          )}
-          <Text style={s.company}>{data.seller.name}</Text>
-          {nonEmptyLines(data.seller.address).map((l, i) => (
+          <Text style={s.title}>{view.title}</Text>
+          {view.proforma && <Text style={s.proformaNote}>PROFORMA — not a tax invoice</Text>}
+          <Text style={s.company}>{view.seller.name}</Text>
+          {view.seller.addressLines.map((l, i) => (
             <Text key={i} style={s.companyLine}>{l}</Text>
           ))}
-          {data.contact.email && (
-            <Text style={s.companyLine}>Email : {data.contact.email}</Text>
-          )}
-          {(data.contact.phone || data.contact.mobile) && (
-            <Text style={s.companyLine}>
-              {[data.contact.phone && `Ph: ${data.contact.phone}`, data.contact.mobile && `Mob: ${data.contact.mobile}`]
-                .filter(Boolean)
-                .join(", ")}
-            </Text>
-          )}
+          {view.seller.email && <Text style={s.companyLine}>Email : {view.seller.email}</Text>}
+          {view.seller.phoneLine && <Text style={s.companyLine}>{view.seller.phoneLine}</Text>}
 
           {/* GSTIN / Date / Inv No strip */}
           <View style={s.strip}>
-            <Text style={s.stripLeft}>GSTIN : {data.seller.gstin}</Text>
+            <Text style={s.stripLeft}>GSTIN : {view.seller.gstin}</Text>
             <View style={s.stripRight}>
-              <Text style={s.stripMeta}>Date : {dateStr}</Text>
-              <Text style={s.stripMeta}>Inv No: {displayInvoiceNo(data.invoiceNo)}</Text>
+              <Text style={s.stripMeta}>Date : {view.dateStr}</Text>
+              <Text style={s.stripMeta}>Inv No: {view.displayNo}</Text>
             </View>
           </View>
 
           {/* TO block — name, address, then the buyer's own references */}
           <View style={s.toBlock}>
             <Text style={s.toLabel}>TO</Text>
-            <Text style={s.toName}>{data.customer.name}</Text>
-            {nonEmptyLines(data.customer.address).map((l, i) => (
+            <Text style={s.toName}>{view.customer.name}</Text>
+            {view.customer.addressLines.map((l, i) => (
               <Text key={i} style={s.toLine}>{l}</Text>
             ))}
-            {data.customer.gstin && <Text style={s.toMeta}>GST: {data.customer.gstin}</Text>}
-            {data.customer.vendorCode && <Text style={s.toMeta}>Vendor Code: {data.customer.vendorCode}</Text>}
-            {payTerms > 0 && <Text style={s.toMeta}>Pay Terms : {payTerms} Days</Text>}
+            {view.customer.metaLines.map((l) => (
+              <Text key={l} style={s.toMeta}>{l}</Text>
+            ))}
           </View>
 
           {/* Line-items table */}
@@ -351,15 +396,15 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
               <Text style={[s.cell, s.cDays, s.headText, s.right]}>No Of Days</Text>
               <Text style={[s.cell, s.cAmt, s.cellLast, s.headText, s.right]}>Taxable Amt</Text>
             </View>
-            {rows.map((r, i) => (
-              <View key={i} style={s.row}>
-                <Text style={[s.cell, s.cSl]}>{i + 1}</Text>
+            {view.rows.map((r) => (
+              <View key={r.sl} style={s.row}>
+                <Text style={[s.cell, s.cSl]}>{r.sl}</Text>
                 <Text style={[s.cell, s.cDate]}>{r.date}</Text>
                 <Text style={[s.cell, s.cParticular]}>{r.particular}</Text>
                 <Text style={[s.cell, s.cPax, s.right]}>{r.pax}</Text>
-                <Text style={[s.cell, s.cRate, s.right]}>{money(r.rate)}</Text>
+                <Text style={[s.cell, s.cRate, s.right]}>{r.rate}</Text>
                 <Text style={[s.cell, s.cDays, s.right]}>{r.days}</Text>
-                <Text style={[s.cell, s.cAmt, s.cellLast, s.right]}>{money(r.taxable)}</Text>
+                <Text style={[s.cell, s.cAmt, s.cellLast, s.right]}>{r.taxable}</Text>
               </View>
             ))}
           </View>
@@ -367,60 +412,36 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
           {/* Totals (right-aligned) */}
           <View style={s.totalsWrap}>
             <View style={s.totalsBox}>
-              <View style={s.totalRow}>
-                <Text style={s.totalLabel}>Total</Text>
-                <Text style={s.totalValue}>{money(subtotal)}</Text>
-              </View>
-              {isIntraState ? (
-                <>
-                  <View style={s.totalRow}>
-                    <Text style={s.totalLabel}>Cgst @{pct(rateOf(cgst))}%</Text>
-                    <Text style={s.totalValue}>{money(cgst)}</Text>
-                  </View>
-                  <View style={s.totalRow}>
-                    <Text style={s.totalLabel}>Sgst @{pct(rateOf(sgst))}%</Text>
-                    <Text style={s.totalValue}>{money(sgst)}</Text>
-                  </View>
-                </>
-              ) : (
-                igst > 0 && (
-                  <View style={s.totalRow}>
-                    <Text style={s.totalLabel}>Igst @{pct(rateOf(igst))}%</Text>
-                    <Text style={s.totalValue}>{money(igst)}</Text>
-                  </View>
-                )
-              )}
-              <View style={s.totalRow}>
-                <Text style={s.grandLabel}>Grand Total</Text>
-                <Text style={s.grandValue}>{money(data.grandTotal)}</Text>
-              </View>
+              {view.totals.map((t) => (
+                <View key={t.label} style={s.totalRow}>
+                  <Text style={t.grand ? s.grandLabel : s.totalLabel}>{t.label}</Text>
+                  <Text style={t.grand ? s.grandValue : s.totalValue}>{t.value}</Text>
+                </View>
+              ))}
             </View>
           </View>
 
           {/* Amount in words */}
           <Text style={s.words}>
             <Text style={s.wordsLabel}>Rupees in Words: </Text>
-            {amountInWords(data.grandTotal)}
+            {view.words}
           </Text>
 
           {/* Bank details — omitted entirely when nothing is configured */}
-          {hasBank && (
+          {view.bank && (
             <View style={s.bankWrap} wrap={false}>
               <Text style={s.bankHeading}>For Online payment details furnished below</Text>
-              {bankRows.length > 0 ? (
+              {view.bank.rows.length > 0 ? (
                 <View style={s.bankTable}>
-                  {bankRows.map(([k, v], i) => (
-                    <View
-                      key={k}
-                      style={[s.bankRow, i === bankRows.length - 1 ? s.bankRowLast : {}]}
-                    >
+                  {view.bank.rows.map(([k, v], i) => (
+                    <View key={k} style={[s.bankRow, i === view.bank!.rows.length - 1 ? s.bankRowLast : {}]}>
                       <Text style={s.bankKey}>{k}</Text>
                       <Text style={s.bankVal}>{v}</Text>
                     </View>
                   ))}
                 </View>
               ) : (
-                nonEmptyLines(b.freeText ?? "").map((l, i) => (
+                view.bank.freeLines.map((l, i) => (
                   <Text key={i} style={s.bankFree}>{l}</Text>
                 ))
               )}
@@ -431,7 +452,7 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
           <View style={s.footer}>
             <Text style={s.footerText}>Thanking You</Text>
             <View style={s.signSpace} />
-            <Text style={s.signName}>{data.seller.name.toUpperCase()}</Text>
+            <Text style={s.signName}>{view.seller.name.toUpperCase()}</Text>
           </View>
         </View>
       </Page>
@@ -439,104 +460,8 @@ function CustomerInvoiceDocument({ data }: { data: InvoicePDFData }) {
   );
 }
 
-/**
- * Render a CustomerInvoice (with its lines) to a PDF Buffer.
- * Seller block and bank details come from Admin → Settings ("invoice.company",
- * "invoice.bankDetails"); a blank setting falls back to the INDEFINE_* env.
- */
-export async function renderCustomerInvoicePDF(input: {
-  invoiceNo: string;
-  kind?: string | null;
-  issuedAt?: Date | null;
-  dueAt?: Date | null;
-  orderCode?: string | null;
-  /**
-   * The billed event — pass `headcount: invoice.finalHeadcount` (never the
-   * live order's), plus the meal, for every order-linked invoice. Omit for
-   * adhoc / consolidated invoices (they print their own lines).
-   */
-  order?: { headcount: number | null; mealType: string; eventDate?: Date | null } | null;
-  placeOfSupplyStateCode: string;
-  irn?: string | null;
-  ackNo?: string | null;
-  ackDate?: Date | null;
-
-  customer: {
-    name: string;
-    gstin?: string | null;
-    billingAddress: string;
-    stateCode: string;
-    vendorCode?: string | null;
-    creditDays?: number | null;
-  };
-
-  lines: Array<{
-    description: string;
-    quantity: string | number;
-    unit: string;
-    unitPrice: string | number;
-    gstRatePct: string | number;
-    days?: number | null;
-    serviceDate?: Date | null;
-    lineSubtotal?: string | number | null;
-    lineTotal: string | number;
-  }>;
-  subtotal: string | number;
-  cgst: string | number;
-  sgst: string | number;
-  igst: string | number;
-  taxTotal: string | number;
-  grandTotal: string | number;
-  amountPaid: string | number;
-  notes?: string | null;
-  terms?: string | null;
-}): Promise<Buffer> {
-  // Structured bank details (Admin → Settings → Invoice bank details). Legacy
-  // free-text INDEFINE_BANK_DETAILS is still honoured as a fallback. When
-  // neither is set the whole bank block is omitted — no placeholder rows.
-  const [bankSetting, company] = await Promise.all([
-    getSetting<InvoiceBankDetailsT>("invoice.bankDetails"),
-    getSetting<InvoiceCompanyDetailsT>("invoice.company"),
-  ]);
-  const bank: BankFields = {
-    bankName: bankSetting?.bankBranch || undefined,
-    accountName: bankSetting?.accountName || undefined,
-    accountNumber: bankSetting?.accountNumber || undefined,
-    ifsc: bankSetting?.ifsc || undefined,
-    freeText: process.env.INDEFINE_BANK_DETAILS || undefined,
-  };
-
-  const data: InvoicePDFData = {
-    invoiceNo: input.invoiceNo,
-    kind: input.kind,
-    issuedAt: input.issuedAt,
-    orderCode: input.orderCode,
-    order: input.order ?? null,
-    // Admin → Settings → Invoice company details, else the env config.
-    seller: {
-      name: company?.name || indefineCompanyName(),
-      gstin: company?.gstin || indefineGstin(),
-      address: company?.address || indefineAddress(),
-      bank,
-    },
-    contact: {
-      email: company?.email || process.env.INDEFINE_EMAIL || undefined,
-      phone: company?.phone || process.env.INDEFINE_PHONE || undefined,
-      mobile: company?.mobile || process.env.INDEFINE_MOBILE || undefined,
-    },
-    customer: {
-      name: input.customer.name,
-      address: input.customer.billingAddress,
-      gstin: input.customer.gstin,
-      vendorCode: input.customer.vendorCode,
-      payTermsDays: input.customer.creditDays,
-    },
-    lines: input.lines,
-    subtotal: input.subtotal,
-    cgst: input.cgst,
-    sgst: input.sgst,
-    igst: input.igst,
-    grandTotal: input.grandTotal,
-  };
-  return renderToBuffer(<CustomerInvoiceDocument data={data} />);
+/** Render a CustomerInvoice (with customer, lines and order) to a PDF Buffer. */
+export async function renderCustomerInvoicePDF(inv: PrintableInvoice): Promise<Buffer> {
+  const view = await buildInvoiceView(inv);
+  return renderToBuffer(<CustomerInvoiceDocument view={view} />);
 }

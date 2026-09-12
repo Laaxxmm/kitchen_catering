@@ -192,3 +192,29 @@ export function routeAllows(pathname: string, role: Role): boolean {
   return rule ? rule.allow.includes(role) : true;
 }
 
+/**
+ * Paths reachable with no login at all. The customer-facing token links
+ * live here: /i/<token> is the invoice (and its PDF), /f/<token> the
+ * feedback form, /q/<token> the quote. Each page 404s on an unknown token,
+ * so a listed prefix opens nothing by itself — but a prefix for a page
+ * that does not exist is an open door the day someone creates one, so
+ * this list stays exactly what ships. Pinned by tests/unit/public-paths.
+ */
+export function isPublicPath(pathname: string): boolean {
+  return (
+    pathname === "/login" ||
+    pathname === "/api/health" ||
+    pathname === "/manifest.webmanifest" ||
+    pathname === "/favicon.ico" ||
+    pathname === "/forbidden" ||
+    pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/api/cron/") ||
+    pathname.startsWith("/api/mobile/") ||
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/icons") ||
+    pathname.startsWith("/q/") ||
+    pathname.startsWith("/i/") ||
+    pathname.startsWith("/f/")
+  );
+}
+

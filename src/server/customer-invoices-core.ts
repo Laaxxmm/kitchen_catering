@@ -176,47 +176,12 @@ export async function createProformaInvoiceForOrderCore(orderId: string) {
         include: { lines: { orderBy: { sortOrder: "asc" } }, order: { select: { code: true, eventDate: true } } },
       });
       if (!fullInvoice) throw new Error("Just-created proforma vanished");
+      // Pax comes off the invoice we just wrote (finalHeadcount), not the
+      // live order — the view builder applies that rule itself.
       const pdf = await renderCustomerInvoicePDF({
-        invoiceNo: fullInvoice.invoiceNo,
-        kind: fullInvoice.kind,
-        issuedAt: fullInvoice.issuedAt,
-        dueAt: fullInvoice.dueAt,
-        orderCode: fullInvoice.order?.code ?? null,
-        // Pax off the invoice we just wrote, not the live order — same
-        // snapshot rule as every other render of this document.
-        order: { headcount: fullInvoice.finalHeadcount ?? order.headcount, mealType: order.mealType, eventDate: order.eventDate },
-        placeOfSupplyStateCode: fullInvoice.placeOfSupplyStateCode,
-        irn: fullInvoice.irn,
-        ackNo: fullInvoice.ackNo,
-        ackDate: fullInvoice.ackDate,
-        customer: {
-          name: order.customer.billingCompanyName || order.customer.name,
-          gstin: order.customer.gstin,
-          billingAddress: order.customer.billingAddress,
-          stateCode: order.customer.stateCode,
-          vendorCode: order.customer.vendorCode,
-          creditDays: order.customer.creditDays,
-        },
-        lines: fullInvoice.lines.map((l) => ({
-          description: l.description,
-          quantity: l.quantity.toString(),
-          unit: l.unit,
-          unitPrice: l.unitPrice.toString(),
-          gstRatePct: l.gstRatePct.toString(),
-          days: l.days,
-          serviceDate: l.serviceDate,
-          lineSubtotal: l.lineSubtotal.toString(),
-          lineTotal: l.lineTotal.toString(),
-        })),
-        subtotal: fullInvoice.subtotal.toString(),
-        cgst: fullInvoice.cgst.toString(),
-        sgst: fullInvoice.sgst.toString(),
-        igst: fullInvoice.igst.toString(),
-        taxTotal: fullInvoice.taxTotal.toString(),
-        grandTotal: fullInvoice.grandTotal.toString(),
-        amountPaid: fullInvoice.amountPaid.toString(),
-        notes: fullInvoice.notes,
-        terms: fullInvoice.termsMd,
+        ...fullInvoice,
+        customer: order.customer,
+        order: { code: order.code, headcount: order.headcount, mealType: order.mealType, eventDate: order.eventDate },
       });
       const publicBase = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
       const composed = buildInvoiceEmail({

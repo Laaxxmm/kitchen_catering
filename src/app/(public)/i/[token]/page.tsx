@@ -1,27 +1,30 @@
 import { notFound } from "next/navigation";
-import { getCustomerInvoiceByToken } from "@/server/actions/customer-invoices";
-import { formatINR } from "@/lib/money";
-import { formatIST } from "@/lib/time";
-import { buildUPILink } from "@/lib/upi";
 import { Decimal } from "decimal.js";
+import { getCustomerInvoiceByToken } from "@/server/actions/customer-invoices";
+import { buildInvoiceView } from "@/server/pdf/customer-invoice";
+import { SHARE_LINK_MAX_AGE_DAYS, shareLinkExpired } from "@/lib/customer-invoice-gates";
+import { buildUPILink } from "@/lib/upi";
 
 export const dynamic = "force-dynamic";
 
 // Token-gated public view. No auth required. Token is unguessable
 // (24 bytes base64url). Per SECURITY.md §6, no PII appears in the URL
 // query string; everything is in the response body.
+//
+// The page is the same document as the PDF — one view, drawn in HTML — so
+// what the customer sees on the link is what prints. The Download PDF
+// button gives them the file.
 
-// Share links stop working this long after issue — an old forwarded link
-// shouldn't expose the customer's billing details forever.
-const SHARE_LINK_MAX_AGE_DAYS = 90;
+const COLUMNS = ["Sl.No", "Date", "Particular", "No of Pax", "Rate", "No Of Days", "Taxable Amt"];
+const cell = "border-b border-r border-black px-2 py-1.5 last:border-r-0";
+const num = `${cell} text-right tabular-nums`;
 
 export default async function PublicInvoicePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const invoice = await getCustomerInvoiceByToken(token);
   if (!invoice) notFound();
 
-  const issuedAt = invoice.issuedAt ?? invoice.createdAt;
-  if (issuedAt && Date.now() - issuedAt.getTime() > SHARE_LINK_MAX_AGE_DAYS * 24 * 3600 * 1000) {
+  if (shareLinkExpired(invoice.issuedAt ?? invoice.createdAt)) {
     return (
       <main className="mx-auto max-w-xl bg-ik-paper px-6 py-16 text-center font-ik-sans text-ik-ink">
         <h1 className="text-[18px] font-medium">This invoice link has expired</h1>
@@ -33,117 +36,138 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
     );
   }
 
+  const view = await buildInvoiceView(invoice);
+  const outstanding = new Decimal(invoice.grandTotal.toString()).minus(new Decimal(invoice.amountPaid.toString()));
+  const upiLink = outstanding.gt(0)
+    ? buildUPILink({ amount: outstanding.toDecimalPlaces(2).toString(), invoiceNo: invoice.invoiceNo })
+    : null;
+
   return (
-    <main className="mx-auto max-w-3xl bg-ik-paper px-6 py-10 font-ik-sans text-ik-ink">
-      <header className="mb-8 flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-brand-500">
-              {/* Chef toque — matches the brand mark. */}
-              <svg width="20" height="20" viewBox="0 0 40 40">
-                <circle cx="14" cy="20" r="5" fill="#fff" />
-                <circle cx="20" cy="17" r="6" fill="#fff" />
-                <circle cx="26" cy="20" r="5" fill="#fff" />
-                <rect x="10" y="25" width="20" height="6.5" rx="1.6" fill="#fff" />
-              </svg>
-            </span>
-            <div>
-              <div className="text-[15px] font-medium">Greenpath</div>
-              <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Catering operations</div>
-            </div>
+    <main className="mx-auto max-w-3xl bg-ik-paper px-3 py-6 font-ik-sans text-ik-ink sm:px-6 sm:py-10">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="text-[12.5px] text-ik-ink-2">
+          {view.title} <span className="font-mono">{view.displayNo}</span>
+        </div>
+        <a
+          href={`/i/${token}/pdf`}
+          className="inline-flex rounded-md bg-brand-500 px-4 py-2 text-[13px] font-medium text-white"
+        >
+          Download PDF
+        </a>
+      </div>
+
+      {/* The document — the printed layout, in HTML */}
+      <article className="border border-black bg-white text-[12.5px] leading-snug text-black">
+        <h1 className="mt-3 text-center text-[19px] font-semibold">{view.title}</h1>
+        {view.proforma && <p className="text-center text-[11px] italic">PROFORMA — not a tax invoice</p>}
+        <div className="mt-1 text-center text-[15px] font-semibold">{view.seller.name}</div>
+        {view.seller.addressLines.map((l, i) => (
+          <div key={i} className="text-center">{l}</div>
+        ))}
+        {view.seller.email && <div className="text-center">Email : {view.seller.email}</div>}
+        {view.seller.phoneLine && <div className="text-center">{view.seller.phoneLine}</div>}
+
+        <div className="mt-2 flex items-start justify-between border-y border-black px-3 py-1.5">
+          <div className="font-semibold">GSTIN : {view.seller.gstin}</div>
+          <div className="text-right">
+            <div>Date : {view.dateStr}</div>
+            <div>Inv No: {view.displayNo}</div>
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Tax invoice</div>
-          <div className="font-mono text-[16px] font-medium">{invoice.invoiceNo}</div>
-          {invoice.issuedAt && <div className="text-[12px] text-ik-ink-3">Issued {formatIST(invoice.issuedAt, "dd MMM yyyy")}</div>}
-          {invoice.dueAt && <div className="text-[12px] text-ik-ink-3">Due {formatIST(invoice.dueAt, "dd MMM yyyy")}</div>}
-        </div>
-      </header>
 
-      <section className="mb-6 grid gap-4 text-[13px] sm:grid-cols-2">
-        <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
-          <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Bill to</div>
-          <div className="mt-1 font-medium">{invoice.customer.name}</div>
-          {invoice.customer.gstin && <div className="font-mono text-[12px] text-ik-ink-2">GSTIN {invoice.customer.gstin}</div>}
-          <p className="mt-1 whitespace-pre-line text-ik-ink-2">{invoice.customer.billingAddress}</p>
-          <div className="mt-1 text-[11.5px] text-ik-ink-3">State {invoice.customer.stateCode}</div>
-        </div>
-        <div className="rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
-          <div className="text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Place of supply</div>
-          <div className="mt-1 font-mono">{invoice.placeOfSupplyStateCode}</div>
-          {invoice.order && (
-            <>
-              <div className="mt-3 text-[11px] uppercase tracking-[0.12em] text-ik-ink-3">Linked order</div>
-              <div className="mt-1 font-mono">{invoice.order.code}</div>
-              <div className="text-[11.5px] text-ik-ink-3">Event {formatIST(invoice.order.eventDate, "dd MMM yyyy")}</div>
-            </>
-          )}
-        </div>
-      </section>
-
-      <table className="w-full border-collapse text-[12.5px]">
-        <thead className="border-b border-ik-rule text-left text-ik-ink-3">
-          <tr>
-            <th className="py-2 pr-2">Description</th>
-            <th className="w-16 py-2 pr-2 text-right">Qty</th>
-            <th className="w-16">Unit</th>
-            <th className="w-12 py-2 pr-2 text-right">Days</th>
-            <th className="w-20 py-2 pr-2 text-right">Rate ₹</th>
-            <th className="w-16 py-2 pr-2 text-right">GST %</th>
-            <th className="w-24 py-2 pr-2 text-right">Amount ₹</th>
-          </tr>
-        </thead>
-        <tbody className="font-mono">
-          {invoice.lines.map((l) => (
-            <tr key={l.id} className="border-b border-ik-rule">
-              <td className="py-2 pr-2 font-sans">
-                {l.description}
-                {l.serviceDate && (
-                  <span className="ml-2 text-[11.5px] text-ik-ink-3">{l.serviceDate.toISOString().slice(0, 10)}</span>
-                )}
-              </td>
-              <td className="py-2 pr-2 text-right">{l.quantity.toString()}</td>
-              <td className="py-2 pr-2 text-ik-ink-2">{l.unit}</td>
-              <td className="py-2 pr-2 text-right">{l.days}</td>
-              <td className="py-2 pr-2 text-right">{l.unitPrice.toString()}</td>
-              <td className="py-2 pr-2 text-right">{l.gstRatePct.toString()}</td>
-              <td className="py-2 pr-2 text-right">{l.lineTotal.toString()}</td>
-            </tr>
+        <div className="px-3 py-2">
+          <div className="text-[11px] font-semibold">TO</div>
+          <div className="text-[13.5px] font-semibold">{view.customer.name}</div>
+          {view.customer.addressLines.map((l, i) => (
+            <div key={i}>{l}</div>
           ))}
-        </tbody>
-      </table>
+          {view.customer.metaLines.map((l) => (
+            <div key={l} className="mt-0.5 font-semibold">{l}</div>
+          ))}
+        </div>
 
-      <section className="mt-4 grid gap-1 text-right font-mono text-[13px]">
-        <div><span className="text-ik-ink-3">Subtotal</span> <span className="ml-3">{invoice.subtotal.toString()}</span></div>
-        {Number(invoice.cgst) > 0 && <div><span className="text-ik-ink-3">CGST</span> <span className="ml-3">{invoice.cgst.toString()}</span></div>}
-        {Number(invoice.sgst) > 0 && <div><span className="text-ik-ink-3">SGST</span> <span className="ml-3">{invoice.sgst.toString()}</span></div>}
-        {Number(invoice.igst) > 0 && <div><span className="text-ik-ink-3">IGST</span> <span className="ml-3">{invoice.igst.toString()}</span></div>}
-        <div className="text-[15px] font-medium"><span className="text-ik-ink-3">Grand total</span> <span className="ml-3">{formatINR(invoice.grandTotal)}</span></div>
-        {Number(invoice.amountPaid) > 0 && <div className="text-positive"><span className="text-ik-ink-3">Paid</span> <span className="ml-3">{formatINR(invoice.amountPaid)}</span></div>}
-      </section>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse border-t border-black">
+            <thead className="bg-[#EFEFEF]">
+              <tr>
+                {COLUMNS.map((c, i) => (
+                  <th key={c} className={`${cell} text-[11.5px] font-semibold ${i >= 3 ? "text-right" : "text-left"}`}>{c}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {view.rows.map((r) => (
+                <tr key={r.sl}>
+                  <td className={cell}>{r.sl}</td>
+                  <td className={`${cell} whitespace-nowrap`}>{r.date}</td>
+                  <td className={cell}>{r.particular}</td>
+                  <td className={num}>{r.pax}</td>
+                  <td className={num}>{r.rate}</td>
+                  <td className={num}>{r.days}</td>
+                  <td className={num}>{r.taxable}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-      {(() => {
-        const outstanding = new Decimal(invoice.grandTotal.toString()).minus(new Decimal(invoice.amountPaid.toString()));
-        if (outstanding.lte(0)) return null;
-        const upiLink = buildUPILink({
-          amount: outstanding.toDecimalPlaces(2).toString(),
-          invoiceNo: invoice.invoiceNo,
-        });
-        if (!upiLink) return null;
-        return (
-          <section className="mt-6 rounded-md border border-brand-200 bg-brand-50 p-4 text-[12.5px]">
-            <div className="font-medium text-brand-700">Pay via UPI</div>
-            <p className="mt-1 text-ik-ink-2">
-              Tap the link below on your phone, or scan the QR with any UPI app to pay
-              ₹{outstanding.toDecimalPlaces(2).toString()} for this invoice.
-            </p>
-            <a href={upiLink} className="mt-3 inline-flex rounded-md bg-brand-500 px-4 py-2 font-medium text-white">
-              Pay ₹{outstanding.toDecimalPlaces(2).toString()} via UPI
-            </a>
-          </section>
-        );
-      })()}
+        <div className="flex justify-end">
+          <table className="w-full border-collapse sm:w-[45%]">
+            <tbody>
+              {view.totals.map((t) => (
+                <tr key={t.label} className={t.grand ? "text-[13.5px] font-semibold" : ""}>
+                  <td className="border-b border-black px-3 py-1">{t.label}</td>
+                  <td className="border-b border-black px-3 py-1 text-right tabular-nums">{t.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="border-b border-black px-3 py-2">
+          <span className="font-semibold">Rupees in Words: </span>
+          {view.words}
+        </div>
+
+        {view.bank && (
+          <div className="px-3 py-2">
+            <div className="mb-1 font-semibold">For Online payment details furnished below</div>
+            {view.bank.rows.length > 0 ? (
+              <table className="w-full border-collapse border border-black sm:w-[70%]">
+                <tbody>
+                  {view.bank.rows.map(([k, v]) => (
+                    <tr key={k}>
+                      <td className="w-[40%] border-b border-r border-black px-2 py-1 font-semibold">{k}</td>
+                      <td className="border-b border-black px-2 py-1">{v}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              view.bank.freeLines.map((l, i) => <div key={i}>{l}</div>)
+            )}
+          </div>
+        )}
+
+        <div className="px-3 pb-5 pt-3">
+          <div>Thanking You</div>
+          <div className="h-10" />
+          <div className="text-right font-semibold">{view.seller.name.toUpperCase()}</div>
+        </div>
+      </article>
+
+      {upiLink && (
+        <section className="mt-6 rounded-md border border-brand-200 bg-brand-50 p-4 text-[12.5px]">
+          <div className="font-medium text-brand-700">Pay via UPI</div>
+          <p className="mt-1 text-ik-ink-2">
+            Tap the link below on your phone, or scan the QR with any UPI app to pay
+            ₹{outstanding.toDecimalPlaces(2).toString()} for this invoice.
+          </p>
+          <a href={upiLink} className="mt-3 inline-flex rounded-md bg-brand-500 px-4 py-2 font-medium text-white">
+            Pay ₹{outstanding.toDecimalPlaces(2).toString()} via UPI
+          </a>
+        </section>
+      )}
 
       {invoice.irn && (
         <section className="mt-6 rounded-md border border-ik-rule bg-ik-paper-alt p-4 text-[11.5px] font-mono">
@@ -153,9 +177,8 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
         </section>
       )}
 
-      <footer className="mt-10 border-t border-ik-rule pt-4 text-[11px] text-ik-ink-3">
-        Greenpath · This invoice was generated by Greenpath catering operations software. Visit
-        the link this page came from for the latest copy.
+      <footer className="mt-8 text-[11px] text-ik-ink-3">
+        Generated by {view.seller.name}. Visit the link this page came from for the latest copy.
       </footer>
     </main>
   );

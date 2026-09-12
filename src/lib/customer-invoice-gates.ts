@@ -48,6 +48,17 @@ export function mayReachCustomer(status: CustomerInvoiceStatus): boolean {
 }
 
 /**
+ * Share links stop working this long after issue — an old forwarded link
+ * shouldn't expose the customer's billing details forever. Both the
+ * /i/<token> page and its PDF apply it.
+ */
+export const SHARE_LINK_MAX_AGE_DAYS = 90;
+
+export function shareLinkExpired(issuedOrCreatedAt: Date, now = Date.now()): boolean {
+  return now - issuedOrCreatedAt.getTime() > SHARE_LINK_MAX_AGE_DAYS * 24 * 3600 * 1000;
+}
+
+/**
  * Why money must not be recorded against this document.
  *
  * A PROFORMA is born ISSUED, carries the full order value and names the
