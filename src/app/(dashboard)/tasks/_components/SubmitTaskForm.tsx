@@ -1,4 +1,5 @@
 "use client";
+import { localInputAt } from "@/lib/datetime-local";
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -19,7 +20,7 @@ function defaultCompleted(): string {
   // Now, rounded to nearest minute, as ISO local for datetime-local input.
   const d = new Date();
   d.setSeconds(0, 0);
-  return d.toISOString().slice(0, 16);
+  return localInputAt(d);
 }
 
 export function SubmitTaskForm({

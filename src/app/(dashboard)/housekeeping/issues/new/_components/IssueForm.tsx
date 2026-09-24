@@ -1,4 +1,5 @@
 "use client";
+import { localInputAt } from "@/lib/datetime-local";
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -33,7 +34,7 @@ interface Line {
 function nowLocal(): string {
   const d = new Date();
   d.setSeconds(0, 0);
-  return d.toISOString().slice(0, 16);
+  return localInputAt(d);
 }
 
 export function IssueForm({

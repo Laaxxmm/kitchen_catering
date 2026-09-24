@@ -1,4 +1,5 @@
 "use client";
+import { nowLocalInput } from "@/lib/datetime-local";
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -26,7 +27,7 @@ export function PayForm({ amountLabel, onPay }: Props) {
   const [pending, startTransition] = useTransition();
   const [method, setMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
   const [reference, setReference] = useState("");
-  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 16));
+  const [paidAt, setPaidAt] = useState(nowLocalInput());
 
   function submit(e: React.FormEvent) {
     e.preventDefault();

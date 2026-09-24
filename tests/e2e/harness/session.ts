@@ -18,14 +18,16 @@ export interface HarnessUser {
   sessionVersion: number;
 }
 
-/** The six seeded desks, by the name the tests use. */
+/** The eight seeded desks, by the name the tests use. */
 export type DeskName =
   | "admin"
   | "manager"
   | "chef"
   | "store"
   | "delivery"
-  | "accounts";
+  | "accounts"
+  | "housekeeping"
+  | "maintenance";
 
 export const DESK_ROLES: Record<DeskName, Role> = {
   admin: Role.ADMIN,
@@ -34,6 +36,8 @@ export const DESK_ROLES: Record<DeskName, Role> = {
   store: Role.STORE_KEEPER,
   delivery: Role.DELIVERY,
   accounts: Role.ACCOUNTS,
+  housekeeping: Role.HOUSEKEEPING_MANAGER,
+  maintenance: Role.MAINTENANCE_MANAGER,
 };
 
 export const DESK_EMAILS: Record<DeskName, string> = {
@@ -43,6 +47,8 @@ export const DESK_EMAILS: Record<DeskName, string> = {
   store: "e2e.store@greenpath.test",
   delivery: "e2e.delivery@greenpath.test",
   accounts: "e2e.accounts@greenpath.test",
+  housekeeping: "e2e.housekeeping@greenpath.test",
+  maintenance: "e2e.maintenance@greenpath.test",
 };
 
 const desks = new Map<DeskName, HarnessUser>();
@@ -78,6 +84,8 @@ export const asManager = () => become("manager");
 export const asChef = () => become("chef");
 export const asStore = () => become("store");
 export const asDelivery = () => become("delivery");
+export const asHousekeeping = () => become("housekeeping");
+export const asMaintenance = () => become("maintenance");
 export const asAccounts = () => become("accounts");
 
 /** Sign in as any User row — for the lifecycle tests, where the desk's own

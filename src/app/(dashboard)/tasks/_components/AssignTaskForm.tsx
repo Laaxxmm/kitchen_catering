@@ -1,4 +1,5 @@
 "use client";
+import { localInputAt } from "@/lib/datetime-local";
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -46,7 +47,7 @@ function defaultTarget(): string {
   d.setHours(18, 0, 0, 0);
   d.setDate(d.getDate() + 1);
   // Strip seconds/ms for the input.
-  return d.toISOString().slice(0, 16);
+  return localInputAt(d);
 }
 
 export function AssignTaskForm({ users, templates }: Props) {

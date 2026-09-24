@@ -411,6 +411,8 @@ model User {
   ingredientReturnsConfirmed      IngredientReturn[]       @relation("IngredientReturnConfirmedBy")
   ingredientReturnsRejected       IngredientReturn[]       @relation("IngredientReturnRejectedBy")
   ingredientAdjustmentsRecorded   IngredientAdjustment[]   @relation("IngredientAdjustmentAdjustedBy")
+  housekeepingAdjustmentsRecorded HousekeepingAdjustment[] @relation("HousekeepingAdjustmentBy")
+  maintenanceAdjustmentsRecorded  MaintenanceAdjustment[]  @relation("MaintenanceAdjustmentBy")
   stockTransfersRecorded          StockTransfer[]          @relation("StockTransferRecordedBy")
   quotesCreated                   Quote[]                  @relation("QuoteCreatedBy")
   quoteEvents                     QuoteEvent[]             @relation("QuoteEventActor")
@@ -2414,6 +2416,7 @@ model HousekeepingItem {
 
   receiptLines HousekeepingReceiptLine[]
   issueLines   HousekeepingIssueLine[]
+  adjustments  HousekeepingAdjustment[]
 
   @@unique([name])
   @@index([active])
@@ -2481,6 +2484,9 @@ model HousekeepingIssueLine {
   itemId   String
   item     HousekeepingItem  @relation(fields: [itemId], references: [id])
   quantity Decimal           @db.Decimal(14, 3)
+  // Whether the item was reusable when issued. The flag on the item can be
+  // toggled later; this is what keeps inCirculation rebuildable.
+  reusable Boolean           @default(false)
 
   @@index([issueId])
   @@index([itemId])
@@ -2538,6 +2544,7 @@ model MaintenanceItem {
 
   receiptLines  MaintenanceReceiptLine[]
   activityLines MaintenanceActivityLine[]
+  adjustments   MaintenanceAdjustment[]
 
   @@unique([name])
   @@index([active])
@@ -2589,6 +2596,10 @@ model MaintenanceActivity {
   issueReported String // "AC not cooling", "tap dripping"
   workDone      String? // "replaced capacitor", "tightened washer"
   notes         String?
+  // Set by updateMaintenanceActivityStatus; a job is COMPLETED or CANCELLED
+  // once, and a cancel puts its spares back on the shelf.
+  completedAt   DateTime?
+  cancelledAt   DateTime?
   createdAt     DateTime                  @default(now())
 
   lines MaintenanceActivityLine[]
@@ -2610,6 +2621,60 @@ model MaintenanceActivityLine {
 
   @@index([activityId])
   @@index([itemId])
+}
+
+// Why a store item's on-hand moved outside a receipt or an issue. The
+// housekeeping and maintenance stores had only an audit hash for these, so
+// on-hand could not be rebuilt from the rows and a write-off kept no
+// quantity. Mirrors IngredientAdjustment for the kitchen.
+enum StoreAdjustmentKind {
+  ADJUSTED // opening balance, physical-count fix, damage
+  RETURNED // reusable linen back from a room (housekeeping)
+  LOST // reusable linen written off (housekeeping)
+  RESTORED // spares put back when a maintenance job is cancelled
+}
+
+model HousekeepingAdjustment {
+  id               String              @id @default(cuid())
+  itemId           String
+  item             HousekeepingItem    @relation(fields: [itemId], references: [id])
+  kind             StoreAdjustmentKind
+  /** Change to clean / available stock. */
+  delta            Decimal             @db.Decimal(14, 3)
+  /** Change to stock out in rooms (reusables only). */
+  circulationDelta Decimal             @default(0) @db.Decimal(14, 3)
+  beforeQty        Decimal             @db.Decimal(14, 3)
+  afterQty         Decimal             @db.Decimal(14, 3)
+  reason           String
+  note             String?
+  roomId           String?
+  staffId          String?
+  byId             String
+  by               User                @relation("HousekeepingAdjustmentBy", fields: [byId], references: [id])
+  at               DateTime            @default(now())
+
+  @@index([itemId, at])
+  @@index([kind, at])
+}
+
+model MaintenanceAdjustment {
+  id         String              @id @default(cuid())
+  itemId     String
+  item       MaintenanceItem     @relation(fields: [itemId], references: [id])
+  kind       StoreAdjustmentKind
+  delta      Decimal             @db.Decimal(14, 3)
+  beforeQty  Decimal             @db.Decimal(14, 3)
+  afterQty   Decimal             @db.Decimal(14, 3)
+  reason     String
+  note       String?
+  /** The job whose cancel put these spares back. */
+  activityId String?
+  byId       String
+  by         User                @relation("MaintenanceAdjustmentBy", fields: [byId], references: [id])
+  at         DateTime            @default(now())
+
+  @@index([itemId, at])
+  @@index([kind, at])
 }
 
 // =====================================================================

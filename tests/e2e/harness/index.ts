@@ -62,6 +62,8 @@ export {
   asStore,
   asDelivery,
   asAccounts,
+  asHousekeeping,
+  asMaintenance,
   asNobody,
   asUser,
   actingAs,

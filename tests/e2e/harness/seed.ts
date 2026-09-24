@@ -182,7 +182,7 @@ async function ensureDesks(): Promise<void> {
   registerDesk("admin", admin);
   asAdmin();
 
-  for (const name of ["manager", "chef", "store", "delivery", "accounts"] as DeskName[]) {
+  for (const name of ["manager", "chef", "store", "delivery", "accounts", "housekeeping", "maintenance"] as DeskName[]) {
     const email = DESK_EMAILS[name];
     let user = await db.user.findUnique({ where: { email } });
     if (!user) {

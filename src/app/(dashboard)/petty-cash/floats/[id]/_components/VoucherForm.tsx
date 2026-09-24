@@ -1,4 +1,5 @@
 "use client";
+import { nowLocalInput } from "@/lib/datetime-local";
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -19,12 +20,6 @@ interface Props {
   }) => Promise<ActionResultWith<{ warning?: string }>>;
 }
 
-/** Current local clock as a `datetime-local` input value (YYYY-MM-DDTHH:mm). */
-function nowLocalInput() {
-  const d = new Date();
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 16);
-}
 
 /**
  * Record-voucher form for a petty-cash float. Calls the page's bound

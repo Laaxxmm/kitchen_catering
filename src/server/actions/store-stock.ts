@@ -7,6 +7,8 @@ import { requireRole } from "@/server/rbac";
 import { STOCK_EDIT_ROLES } from "@/lib/stock-movement";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
+import { deferAfterResponse } from "@/server/defer";
+import { notifyRoles } from "@/server/notification-core";
 import {
   ActionError,
   actionFailure,
@@ -175,12 +177,16 @@ async function adjustStoreStockInner(input: {
   note?: string;
 }): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES_BY_STORE[input.store]);
-  if (!input.reason?.trim()) throw new ActionError("A reason is required");
-  const amount = toDecimal(input.qty || "0");
+  const reason = input.reason?.trim();
+  if (!reason) throw new ActionError("A reason is required");
+  if (input.mode !== "set" && input.mode !== "delta") throw new ActionError("Unknown adjustment mode");
+  const qtyText = (input.qty ?? "").trim();
+  if (!qtyText || Number.isNaN(Number(qtyText))) throw new ActionError("Enter a quantity");
+  const amount = toDecimal(qtyText);
 
-  await db.$transaction(async (tx) => {
+  const outcome = await db.$transaction(async (tx) => {
     await lockStoreItemRow(tx, input.store, input.itemId);
-    const find = { where: { id: input.itemId }, select: { currentStock: true, name: true } };
+    const find = { where: { id: input.itemId }, select: { currentStock: true, name: true, unit: true, active: true } };
     const item =
       input.store === "housekeeping"
         ? await tx.housekeepingItem.findUnique(find)
@@ -188,16 +194,34 @@ async function adjustStoreStockInner(input: {
           ? await tx.maintenanceItem.findUnique(find)
           : await tx.banquetItem.findUnique(find);
     if (!item) throw new ActionError("Item not found");
+    if (!item.active) throw new ActionError(`${item.name} is hidden — unhide it before adjusting its stock`);
 
     const before = toDecimal(item.currentStock);
-    const after = input.mode === "set" ? amount : before.plus(amount);
+    const after = (input.mode === "set" ? amount : before.plus(amount)).toDecimalPlaces(3);
     if (after.lt(0)) throw new ActionError("Adjusted on-hand cannot be negative");
     if (after.eq(before)) throw new ActionError("No change — the quantity matches current on-hand");
-    const next = after.toDecimalPlaces(3).toString();
+    const next = after.toString();
+    const delta = after.minus(before);
 
     if (input.store === "housekeeping") await tx.housekeepingItem.update({ where: { id: input.itemId }, data: { currentStock: next } });
     else if (input.store === "maintenance") await tx.maintenanceItem.update({ where: { id: input.itemId }, data: { currentStock: next } });
     else await tx.banquetItem.update({ where: { id: input.itemId }, data: { currentStock: next } });
+
+    // The readable record: before, after, reason, who. The audit row's hash
+    // alone could never be read back, so on-hand could not be rebuilt and
+    // a manager could not see why a figure moved.
+    const record = {
+      itemId: input.itemId,
+      kind: "ADJUSTED" as const,
+      delta: delta.toString(),
+      beforeQty: before.toString(),
+      afterQty: next,
+      reason,
+      note: input.note?.trim() || null,
+      byId: session.user.id,
+    };
+    if (input.store === "housekeeping") await tx.housekeepingAdjustment.create({ data: record });
+    else if (input.store === "maintenance") await tx.maintenanceAdjustment.create({ data: record });
 
     await tx.auditLog.create({
       data: {
@@ -208,14 +232,29 @@ async function adjustStoreStockInner(input: {
         payloadHash: sha256Json({
           store: input.store,
           before: before.toString(),
-          after: after.toString(),
-          delta: after.minus(before).toString(),
-          reason: input.reason,
+          after: next,
+          delta: delta.toString(),
+          reason,
           note: input.note ?? null,
         }),
       },
     });
+    return { name: item.name, unit: item.unit, before: before.toString(), after: next };
   });
+
+  // A department manager correcting their own on-hand is the one stock
+  // movement with no document behind it, so the manager hears about it.
+  if (session.user.role !== Role.ADMIN && session.user.role !== Role.MANAGER) {
+    deferAfterResponse("store-stock:adjust:notify", () =>
+      notifyRoles([Role.MANAGER], {
+        kind: "GENERIC",
+        title: `${input.store === "housekeeping" ? "Housekeeping" : input.store === "maintenance" ? "Maintenance" : "F&B"} stock adjusted by hand`,
+        body: `${outcome.name}: ${outcome.before} → ${outcome.after} ${outcome.unit} · ${reason}${input.note?.trim() ? ` · ${input.note.trim()}` : ""} — by ${session.user.name ?? session.user.email}`,
+        link: `/${input.store}/items`,
+        dedupeKey: `store-adjust:${input.store}:${input.itemId}:${Date.now()}`,
+      }),
+    );
+  }
 
   revalidatePath(`/${input.store}`);
   revalidatePath(`/${input.store}/items`);

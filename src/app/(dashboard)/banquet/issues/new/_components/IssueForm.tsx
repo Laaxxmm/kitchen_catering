@@ -1,4 +1,5 @@
 "use client";
+import { localInputAt } from "@/lib/datetime-local";
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
@@ -26,7 +27,7 @@ interface Line { itemId: string; quantity: string; }
 function nowLocal(): string {
   const d = new Date();
   d.setSeconds(0, 0);
-  return d.toISOString().slice(0, 16);
+  return localInputAt(d);
 }
 
 export function IssueForm({ items, events }: { items: Item[]; events: EventOption[] }) {
