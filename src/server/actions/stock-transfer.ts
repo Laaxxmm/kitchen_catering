@@ -12,6 +12,8 @@ import { unitsEquivalent } from "@/lib/units";
 import { istToUtc } from "@/lib/time";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
+import { deferAfterResponse } from "@/server/defer";
+import { notifyRoles } from "@/server/notification-core";
 import {
   ActionError,
   actionFailure,
@@ -266,6 +268,22 @@ async function recordStockTransferInner(raw: unknown): Promise<{ ok: true; id: s
   revalidatePath("/inventory/ingredients");
   revalidatePath("/banquet/items");
   revalidatePath("/housekeeping/items");
+
+  // The housekeeping manager cannot open /inventory/transfers, so a move
+  // touching their shelf is the one stock movement they would otherwise
+  // never hear about. Best-effort, after the response, like every notify.
+  if (input.fromStore === StockStore.HOUSEKEEPING || input.toStore === StockStore.HOUSEKEEPING) {
+    const into = input.toStore === StockStore.HOUSEKEEPING;
+    deferAfterResponse("transfer:notify-hk", () =>
+      notifyRoles([Role.HOUSEKEEPING_MANAGER], {
+        kind: "GENERIC",
+        title: `Stock moved ${into ? "into" : "out of"} the housekeeping store`,
+        body: `${into ? transfer.toItemName : transfer.fromItemName} ${toDecimal(transfer.quantity).toString()} ${into ? transfer.toUnit : transfer.fromUnit} — by ${session.user.name ?? session.user.email}`,
+        link: "/housekeeping/items",
+        dedupeKey: `transfer:${transfer.id}`,
+      }),
+    );
+  }
   return { ok: true, id: transfer.id };
 }
 
