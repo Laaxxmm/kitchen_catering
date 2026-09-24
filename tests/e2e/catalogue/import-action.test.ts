@@ -34,6 +34,14 @@ describe("import catalogue action", () => {
   it("is safe to press twice — updates, never re-posts opening stock", async () => {
     const before = await db.banquetReceipt.count({ where: { sourceNote: OPENING_NOTE } });
     await asAdmin();
+    // A demo twin merged into its GP item and hidden keeps its name. That is
+    // exactly what production holds (STR-0002 "Masoor Dal" beside GP-005),
+    // and it refused the whole import once. Not a clash.
+    await db.ingredient.upsert({
+      where: { sku: "STR-0002" },
+      create: { sku: "STR-0002", name: "Masoor Dal", unit: "kg", active: false },
+      update: { name: "Masoor Dal", active: false },
+    });
     const res = mustOk(await importCatalogueFromFiles(), "import catalogue");
     expect({
       kitchenCreated: res.kitchenCreated,
@@ -91,6 +99,16 @@ describe("go-live: erase, then import from the button", () => {
     mustOk(await resetEverythingKeepParties("ERASE EVERYTHING"), "erase everything");
     expect(await db.ingredient.count()).toBe(0);
     expect(await db.banquetItem.count()).toBe(0);
+
+    // A LIVE row holding a catalogue name under another code, with no row
+    // for the incoming code yet, is the real clash: refused by name, and
+    // nothing written.
+    const ghost = await db.ingredient.create({ data: { sku: "STR-0003", name: "Toor dal", unit: "kg" } });
+    const refused = await importCatalogueFromFiles();
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error).toMatch(/Toor dal.*STR-0003.*GP-006/);
+    expect(await db.ingredient.count()).toBe(1);
+    await db.ingredient.delete({ where: { id: ghost.id } });
 
     const res = mustOk(await importCatalogueFromFiles(), "import catalogue");
     expect({ kitchen: res.kitchenCreated, fnb: res.fnbCreated }).toEqual({

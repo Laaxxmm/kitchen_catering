@@ -185,11 +185,20 @@ export async function importCatalogue(
       // update: silently rewriting its code would strand every printed
       // label and stock sheet that carries the old one.
       const existingKitchen = await tx.ingredient.findMany({
-        select: { sku: true, name: true },
+        select: { sku: true, name: true, active: true },
       });
-      const kitchenSkuByName = new Map(existingKitchen.map((i) => [i.name, i.sku]));
+      const knownSkus = new Set(existingKitchen.map((i) => i.sku));
+      // A retired twin — a demo STR- row merged into its GP item and hidden —
+      // keeps its name and is not a clash. Only a LIVE row under another code
+      // is, and only when the incoming code has no row of its own yet: when
+      // it has, the update lands there and a live duplicate is the sample
+      // clean-up's job, not a reason to refuse the whole catalogue.
+      const liveSkuByName = new Map(
+        existingKitchen.filter((i) => i.active).map((i) => [i.name, i.sku]),
+      );
       for (const row of kitchen) {
-        const sku = kitchenSkuByName.get(row.name);
+        if (knownSkus.has(row.code)) continue;
+        const sku = liveSkuByName.get(row.name);
         if (sku !== undefined && sku !== row.code) {
           throw new Error(
             `Kitchen collision: "${row.name}" already exists as ${sku}, incoming code is ${row.code}.`,
