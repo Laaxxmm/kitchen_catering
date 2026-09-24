@@ -16,6 +16,7 @@ const REPORTS: ReportDef[] = [
   { key: "order-timeline", title: "Order timeline", desc: "Per order: taken, accepted, kitchen, store, cooking, handover, F&B, delivery — and on time or late.", ranged: true },
   { key: "gst", title: "GST / tax summary", desc: "Output GST (sales invoices) + input GST (purchases), for filing.", ranged: true },
   { key: "stock", title: "Stock & procurement", desc: "Stock valuation + purchase orders + vendor bills.", ranged: true },
+  { key: "hk-maint", title: "Housekeeping & maintenance", desc: "Both stores' stock, issues to rooms, the work-log and every hand adjustment.", ranged: true },
   { key: "payments", title: "Payments (AR / AP)", desc: "Everything outstanding — receivables and payables.", ranged: false },
   { key: "orders", title: "Orders", desc: "Every order — customer, event date, value, status.", ranged: false },
   { key: "requisitions", title: "Requisitions", desc: "Chef → store ingredient requisitions with fulfilment status.", ranged: false },
@@ -54,7 +55,7 @@ export function ReportDownloads() {
             className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]" />
         </div>
         <p className="text-[11.5px] text-ik-ink-3">
-          Applies to the ranged reports (Sales, GST, Stock). Leave blank for the last 90 days.
+          Applies to the ranged reports (Sales, GST, Stock, Housekeeping &amp; maintenance). Leave blank for the last 90 days.
           Payments, Orders, Requisitions, Purchase orders and Deliveries are full snapshots.
         </p>
       </div>
