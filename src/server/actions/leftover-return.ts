@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { OrderChannel, Role } from "@prisma/client";
+import { Role } from "@prisma/client";
+import { isLeftoverChannel } from "@/lib/order-channels";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
 import {
@@ -50,8 +51,8 @@ async function addOrderLeftoverInner(raw: unknown): Promise<{ ok: true; id: stri
   if (!order) throw new ActionError("Order not found");
   // Returns only make sense for the walk-up counter and outdoor catering —
   // those are the channels where surplus food comes back after the event.
-  if (order.channel !== OrderChannel.COUNTER_SALE && order.channel !== OrderChannel.ODC) {
-    throw new ActionError("Leftover returns apply only to counter-sale and ODC orders.");
+  if (!isLeftoverChannel(order.channel)) {
+    throw new ActionError("Leftover returns apply only to counter-sale, Ramaiah Cafe and ODC orders.");
   }
 
   const itemName = input.itemName.trim();

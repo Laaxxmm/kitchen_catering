@@ -34,6 +34,7 @@ const CHANNELS: Array<{ value: OrderChannel; label: string }> = [
   { value: OrderChannel.ODC, label: "ODC (outdoor catering)" },
   { value: OrderChannel.PACKET, label: "Packed meals" },
   { value: OrderChannel.COUNTER_SALE, label: "Counter sale (bulk)" },
+  { value: OrderChannel.RAMAIAH_CAFE, label: "Ramaiah Cafe (bulk)" },
 ];
 const MEALS: Array<{ value: MealType; label: string }> = [
   { value: MealType.BREAKFAST, label: "Breakfast" },

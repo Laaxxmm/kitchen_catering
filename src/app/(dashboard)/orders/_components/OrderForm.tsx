@@ -358,6 +358,7 @@ export function OrderForm({ customers, dishes, defaults, onSubmit, submitLabel =
               {!inHouseOnly && <option value={OrderChannel.ODC}>ODC (outdoor catering)</option>}
               {!inHouseOnly && <option value={OrderChannel.PACKET}>Packet food / take-away</option>}
               {!inHouseOnly && <option value={OrderChannel.COUNTER_SALE}>Counter sale (bulk)</option>}
+              {!inHouseOnly && <option value={OrderChannel.RAMAIAH_CAFE}>Ramaiah Cafe (bulk)</option>}
               <option value={OrderChannel.ROOM_SERVICE}>Room service</option>
               <option value={OrderChannel.ALACARTE}>À la carte (dine-in)</option>
               <option value={OrderChannel.MANAGEMENT}>Management (internal)</option>

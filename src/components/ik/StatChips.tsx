@@ -1,7 +1,8 @@
 import Link from "next/link";
-import type { PillTone } from "@/components/ik/StatusPill";
+/** The chip tones — the four semantic pill tones plus plain ink. */
+export type ChipTone = "red" | "amber" | "green" | "grey" | "ink";
 
-const VALUE_TONE: Record<PillTone | "ink", string> = {
+const VALUE_TONE: Record<ChipTone, string> = {
   red: "text-alert",
   amber: "text-amber-700",
   green: "text-positive",
@@ -12,7 +13,7 @@ const VALUE_TONE: Record<PillTone | "ink", string> = {
 export interface StatChipDef {
   label: string;
   value: string | number;
-  tone?: PillTone | "ink";
+  tone?: ChipTone;
   href?: string;
 }
 

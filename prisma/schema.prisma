@@ -88,6 +88,7 @@ enum OrderChannel {
   ODC
   PACKET
   COUNTER_SALE
+  RAMAIAH_CAFE // the Ramaiah campus café counter — same rules as COUNTER_SALE
   ROOM_SERVICE
   ALACARTE
   MANAGEMENT

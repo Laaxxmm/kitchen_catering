@@ -1,4 +1,5 @@
 import { OrderStatus } from "@prisma/client";
+import type { PillTone } from "@/components/ik/StatusPill";
 
 /**
  * Orders in a terminal state — cancelled, rejected, or completed. A chef
@@ -163,6 +164,39 @@ export const STATUS_TONE: Record<OrderStatus, "neutral" | "pending" | "positive"
   PENDING_MANAGER_APPROVAL: "neutral",
   REJECTED_BY_STORE: "alert",
   APPROVED: "neutral",
+};
+
+/**
+ * One hue per order status for the list pills and the detail badge. The
+ * four-tone STATUS_TONE above put "Delivered", "Invoiced", "Paid" and
+ * "Completed" all in green and every production stage in amber, and the
+ * team could not tell rows apart at a glance. Stopped / rejected states are
+ * red, cancelled and draft grey; everything in between walks the spectrum
+ * in workflow order.
+ */
+export const ORDER_STATUS_PILL: Record<OrderStatus, PillTone> = {
+  DRAFT: "grey",
+  PENDING_ADMIN_APPROVAL: "red",
+  PENDING_CHEF_APPROVAL: "amber",
+  CHANGES_PROPOSED_BY_CHEF: "gold",
+  CHEF_APPROVED: "lime",
+  CHEF_REQUISITION_PENDING: "orange",
+  ISSUING: "sky",
+  READY_FOR_PRODUCTION: "indigo",
+  IN_PREP: "violet",
+  READY: "teal",
+  OUT_FOR_DELIVERY: "fuchsia",
+  DELIVERED: "green",
+  INVOICED: "cyan",
+  PAID: "emerald",
+  COMPLETED: "ink",
+  CANCELLED: "grey",
+  REJECTED_BY_ADMIN: "red",
+  REJECTED_BY_MANAGER: "red",
+  REJECTED_BY_STORE: "red",
+  PENDING_STORE_APPROVAL: "grey",
+  PENDING_MANAGER_APPROVAL: "grey",
+  APPROVED: "grey",
 };
 
 /**

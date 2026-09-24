@@ -2,7 +2,8 @@ import * as React from "react";
 import { OrderStatus } from "@prisma/client";
 import type { TimeEntryStatus } from "@prisma/client";
 import { cn } from "@/lib/utils";
-import { STATUS_LABEL, STATUS_TONE } from "@/lib/order-status";
+import { ORDER_STATUS_PILL, STATUS_LABEL } from "@/lib/order-status";
+import { PILL_DOT, type PillTone } from "@/components/ik/StatusPill";
 
 type Status =
   | OrderStatus
@@ -29,6 +30,26 @@ const TONE_TO_CSS: Record<"neutral" | "pending" | "positive" | "alert", { dot: s
   alert:    { dot: "var(--ik-alert)",    fg: "text-[color:var(--ik-alert)]" },
 };
 
+// Text colour per pill tone (the pill's own classes are wash + ink; a dot
+// badge wants ink only).
+const PILL_FG: Record<PillTone, string> = {
+  red: "text-[color:var(--ik-alert)]",
+  amber: "text-[color:var(--ik-amber)]",
+  green: "text-[color:var(--ik-positive)]",
+  grey: "text-[color:var(--ik-ink3)]",
+  gold: "text-yellow-700",
+  lime: "text-lime-700",
+  orange: "text-orange-700",
+  sky: "text-sky-700",
+  indigo: "text-indigo-700",
+  violet: "text-violet-700",
+  teal: "text-teal-700",
+  fuchsia: "text-fuchsia-700",
+  cyan: "text-cyan-700",
+  emerald: "text-emerald-700",
+  ink: "text-ik-ink",
+};
+
 const GENERIC_MAP: Record<string, { dot: string; fg: string; label: string }> = {
   ACTIVE:    { ...TONE_TO_CSS.positive, label: "Active" },
   ON_HOLD:   { ...TONE_TO_CSS.pending,  label: "On hold" },
@@ -45,9 +66,10 @@ const GENERIC_MAP: Record<string, { dot: string; fg: string; label: string }> = 
 function resolve(status: string): { dot: string; fg: string; label: string } {
   // Prefer OrderStatus (friendly labels live in lib/order-status.ts).
   if (status in STATUS_LABEL) {
+    // Same hue as the list pill, so a row and its detail page agree.
     const orderStatus = status as OrderStatus;
-    const tone = STATUS_TONE[orderStatus] ?? "neutral";
-    return { ...TONE_TO_CSS[tone], label: STATUS_LABEL[orderStatus] };
+    const pill = ORDER_STATUS_PILL[orderStatus];
+    return { dot: PILL_DOT[pill], fg: PILL_FG[pill], label: STATUS_LABEL[orderStatus] };
   }
   if (status in GENERIC_MAP) return GENERIC_MAP[status];
   // Fallback: humanise the raw enum.

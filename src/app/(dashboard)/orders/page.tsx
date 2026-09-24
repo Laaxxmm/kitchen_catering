@@ -7,7 +7,8 @@ import { getOrderStatusCounts, listOrders } from "@/server/actions/orders";
 import { auth } from "@/server/auth";
 import { formatINRWhole } from "@/lib/money";
 import { formatIST } from "@/lib/time";
-import { StatusPill, type PillTone } from "@/components/ik/StatusPill";
+import { StatusPill } from "@/components/ik/StatusPill";
+import { ORDER_STATUS_PILL } from "@/lib/order-status";
 
 export const dynamic = "force-dynamic";
 
@@ -94,14 +95,6 @@ function groupOf(status: OrderStatus): Group {
       return "other";
   }
 }
-
-const GROUP_TONE: Record<Group, PillTone> = {
-  approval: "red",
-  production: "amber",
-  payment: "grey",
-  done: "green",
-  other: "grey",
-};
 
 const GROUP_ORDER: { key: Group; label: string }[] = [
   { key: "approval", label: "Needs approval" },
@@ -273,9 +266,7 @@ function OrdersTable({ rows, showValue = true }: { rows: OrderRow[]; showValue?:
       </TableHeader>
       <TableBody>
         {rows.map((o) => {
-          const tone = o.status === OrderStatus.CANCELLED || o.status.startsWith("REJECTED")
-            ? "grey"
-            : GROUP_TONE[groupOf(o.status)];
+          const tone = ORDER_STATUS_PILL[o.status];
           return (
             <TableRow key={o.id}>
               <TableCell>

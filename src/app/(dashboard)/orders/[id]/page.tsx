@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ChefRequisitionStatus, IngredientReturnStatus, ManpowerRequestStatus, OrderChannel, OrderStatus, ProductionJobItemStatus, Role } from "@prisma/client";
+import { ChefRequisitionStatus, IngredientReturnStatus, ManpowerRequestStatus, OrderStatus, ProductionJobItemStatus, Role } from "@prisma/client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -23,7 +23,7 @@ import { getOrderBanquetLedger } from "@/server/actions/banquet";
 import { listDishes } from "@/server/actions/dishes";
 import { listAssignableUsers } from "@/server/actions/users";
 import { listManpowerRequests } from "@/server/actions/manpower";
-import { isEventDeliveryChannel, isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
+import { isEventDeliveryChannel, isImmediateChannel, isLeftoverChannel, isPackagePricedChannel } from "@/lib/order-channels";
 import { effectiveFigures, estimatedCost } from "@/lib/manpower";
 import { computeRevisionBand, type RevisionBand } from "@/lib/order-revision";
 import {
@@ -219,7 +219,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const canOpenManpower = can(role, MANPOWER_VIEW_ROLES);
   // Leftover returns only apply to walk-up counter sales and outdoor catering.
   const showLeftovers =
-    order.channel === OrderChannel.COUNTER_SALE || order.channel === OrderChannel.ODC;
+    isLeftoverChannel(order.channel);
   // Accountability timeline: every handed dish, in handover order.
   const handedTimeline = (productionJob?.items ?? [])
     .filter((it) => it.handedOverAt != null)
