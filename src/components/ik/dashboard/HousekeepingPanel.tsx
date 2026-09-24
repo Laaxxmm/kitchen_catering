@@ -13,7 +13,7 @@ export async function HousekeepingPanel({ compact = false }: { compact?: boolean
     <section className="rounded-md border border-ik-rule bg-ik-card">
       <header className="flex items-center justify-between border-b border-ik-rule p-3">
         <div className="text-[12px] font-medium text-ik-ink-2">
-          Housekeeping{compact ? "" : " — today"}
+          Housekeeping{compact ? "" : " — last 7 days"}
         </div>
         <Link
           href="/housekeeping"
