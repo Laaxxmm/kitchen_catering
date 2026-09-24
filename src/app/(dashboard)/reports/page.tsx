@@ -39,5 +39,7 @@ const ONSCREEN: { href: string; title: string; desc: string }[] = [
   { href: "/reports/stock-ledger", title: "Stock ledger", desc: "Per item, per store — opening, in, out, adjustments and closing balance for a date range." },
   { href: "/inventory/ingredients", title: "Kitchen stock", desc: "Every ingredient (incl. veg, frozen, non-veg) — on-hand qty, value, and per-item movement history." },
   { href: "/banquet/reports", title: "Banquet / F&B consumption", desc: "Cutlery, disposables and event equipment — receipts, issues and returns." },
+  { href: "/housekeeping/reports", title: "Housekeeping", desc: "Linen, amenities and cleaning stock — issues to rooms by item, room and staff, and what is out in circulation." },
+  { href: "/maintenance/reports", title: "Maintenance", desc: "Electrical / mechanical work-log by room, staff and category, and the spares each job consumed." },
   { href: "/admin/audit", title: "Audit log", desc: "Who did what, when — every recorded action across the system." },
 ];

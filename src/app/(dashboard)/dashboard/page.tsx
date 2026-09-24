@@ -34,6 +34,7 @@ import { effectiveFigures, estimatedCost } from "@/lib/manpower";
 import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
 import { listHousekeepingIssues } from "@/server/actions/housekeeping";
 import { listMaintenanceActivities } from "@/server/actions/maintenance";
+import { getStoreStock } from "@/server/actions/store-stock";
 import { toDecimal, formatINRWhole } from "@/lib/money";
 import { isPayable } from "@/lib/vendor-bill-gates";
 import { formatIST, istDayWindow, istScopeWindow, istWeekWindow, type EventDateScope } from "@/lib/time";
@@ -523,11 +524,19 @@ export default async function DashboardPage({
   // work-log live here; nothing else from the operational dashboard applies.
   if (isMaintenance) {
     const activities = await listMaintenanceActivities({ limit: 100 });
+    // ELECTRICAL → Electrical, IN_PROGRESS → In progress.
+    const human = (s: string) => s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ");
     const rows = activities.map((a) => ({
       id: a.id,
       bucket: logBucket(a.performedAt),
-      primary: a.room ? `Room ${a.room.number}${a.room.name ? ` · ${a.room.name}` : ""}` : a.category,
-      secondary: [a.category, a.notes].filter(Boolean).join(" · ") || null,
+      // The reported fault is what the manager scans for; room and status
+      // sit under it so an open job reads as open at a glance.
+      primary: a.issueReported,
+      secondary: [
+        a.room ? `Room ${a.room.number}${a.room.name ? ` · ${a.room.name}` : ""}` : null,
+        human(a.category),
+        human(a.status),
+      ].filter(Boolean).join(" · ") || null,
       time: a.performedAt.toISOString(),
       person: a.staff?.name ?? a.recordedBy?.name ?? null,
       items: a.lines.map((l) => `${l.item.name} · ${l.quantity.toString()} ${l.item.unit}`),
@@ -740,7 +749,15 @@ export default async function DashboardPage({
   const needPOApproval = proc?.poPendingApproval ?? 0;
   const needMatch = proc?.billsPendingMatch ?? 0;
   const needPay = proc?.billsPendingPayment ?? 0;
-  const needReorder = summary.lowStockCount;
+  // The two hotel-side stores, same Out / Low split their landing pages
+  // show. The banner counts them; the Stock card below stays the kitchen's,
+  // since that is where its link lands.
+  const [hkStock, mtStock] = isManagerScope
+    ? await Promise.all([getStoreStock("housekeeping"), getStoreStock("maintenance")])
+    : [null, null];
+  const kitchenReorder = summary.lowStockCount;
+  const storesReorder = [hkStock, mtStock].reduce((n, s) => n + (s ? s.out + s.low : 0), 0);
+  const needReorder = kitchenReorder + storesReorder;
   const attnCount = needApproval + needPOApproval + needMatch + needPay + needReorder;
   const attnBreakdown = [
     needApproval ? `${needApproval} order${needApproval === 1 ? "" : "s"} to approve` : null,
@@ -787,7 +804,7 @@ export default async function DashboardPage({
       ],
     },
     { key: "kitchen", icon: "kitchen", label: "Kitchen", href: "/kitchen", hero: kWait, heroSub: "waiting on stock", heroTone: kWait > 0 ? "amber" : "muted" },
-    { key: "stock", icon: "stock", label: "Stock", href: "/inventory/ingredients", hero: needReorder, heroSub: "to reorder", heroTone: needReorder > 0 ? "red" : "muted" },
+    { key: "stock", icon: "stock", label: "Stock", href: "/inventory/ingredients", hero: kitchenReorder, heroSub: "to reorder", heroTone: kitchenReorder > 0 ? "red" : "muted" },
     { key: "bills", icon: "bills", label: "Bills & pay", href: "/payments", hero: billsToAction, heroSub: "to action", heroTone: billsToAction > 0 ? "amber" : "muted" },
     { key: "deliveries", icon: "deliveries", label: "Deliveries", href: "/deliveries", hero: summary.deliveredToday, heroSub: "delivered today" },
     { key: "customers", icon: "customers", label: "Customers", href: "/customers", heroSub: "Quotes & contacts" },
@@ -910,6 +927,16 @@ export default async function DashboardPage({
 
         {/* 5 ─ Stores strip — lighter reference row */}
         <StoresStrip />
+
+        {/* 5a ─ Hotel-side stores, compact: the same summaries the two
+            department heads see on their own home, so management is not
+            blind to a bare linen shelf or an open electrical job. */}
+        {isManagerScope && (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <HousekeepingPanel compact />
+            <MaintenancePanel compact />
+          </div>
+        )}
 
         {/* 6 ─ Money this month — three big figures */}
         <section className="rounded-2xl border border-ik-rule bg-ik-card p-5">

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/server/db";
 import { kitchenStockCounts } from "@/server/reports/stock-health";
+import { getStoreStock } from "@/server/actions/store-stock";
 
 interface StoreMini {
   key: string;
@@ -13,14 +14,6 @@ interface StoreMini {
   inUse?: number;
 }
 
-function countLow(
-  rows: Array<{ currentStock: { toString(): string } | number; minStock: { toString(): string } | number | null }>,
-): number {
-  return rows.filter((r) => {
-    if (r.minStock == null) return false;
-    return Number(r.currentStock.toString()) <= Number(r.minStock.toString());
-  }).length;
-}
 
 /**
  * Lighter reference row for the launcher — item count + what needs ordering
@@ -32,22 +25,19 @@ function countLow(
  * classifier, so this strip, the attention bar and the stock page all say
  * the same thing — and the kitchen card also shows how many items are in
  * regular use, which is the honest denominator for a 421-item catalogue.
+ *
+ * The other three stores come from getStoreStock — the Out / Low split
+ * their own landing pages show. This strip used to count only items with a
+ * threshold, so a shelf with nothing on it and no minStock read "nothing to
+ * order" here while the store page said Out.
  */
 export async function StoresStrip() {
-  const [
-    kitchenCount, kitchenStock,
-    hkCount, hkLowAll,
-    maintCount, maintLowAll,
-    banquetCount, banquetLowAll,
-  ] = await Promise.all([
+  const [kitchenCount, kitchenStock, hk, maint, banquet] = await Promise.all([
     db.ingredient.count({ where: { active: true } }),
     kitchenStockCounts(),
-    db.housekeepingItem.count({ where: { active: true } }),
-    db.housekeepingItem.findMany({ where: { active: true, minStock: { not: null } }, select: { currentStock: true, minStock: true } }),
-    db.maintenanceItem.count({ where: { active: true } }),
-    db.maintenanceItem.findMany({ where: { active: true, minStock: { not: null } }, select: { currentStock: true, minStock: true } }),
-    db.banquetItem.count({ where: { active: true } }),
-    db.banquetItem.findMany({ where: { active: true, minStock: { not: null } }, select: { currentStock: true, minStock: true } }),
+    getStoreStock("housekeeping"),
+    getStoreStock("maintenance"),
+    getStoreStock("banquet"),
   ]);
 
   const cards: StoreMini[] = [
@@ -59,9 +49,9 @@ export async function StoresStrip() {
       low: kitchenStock.toOrder,
       inUse: kitchenStock.inRegularUse,
     },
-    { key: "housekeeping", label: "Housekeeping", href: "/housekeeping", itemCount: hkCount, low: countLow(hkLowAll) },
-    { key: "maintenance", label: "Maintenance", href: "/maintenance", itemCount: maintCount, low: countLow(maintLowAll) },
-    { key: "banquet", label: "Banquet", href: "/banquet", itemCount: banquetCount, low: countLow(banquetLowAll) },
+    { key: "housekeeping", label: "Housekeeping", href: "/housekeeping", itemCount: hk.itemCount, low: hk.out + hk.low },
+    { key: "maintenance", label: "Maintenance", href: "/maintenance", itemCount: maint.itemCount, low: maint.out + maint.low },
+    { key: "banquet", label: "Banquet", href: "/banquet", itemCount: banquet.itemCount, low: banquet.out + banquet.low },
   ];
 
   if (cards.every((c) => c.itemCount === 0 && c.low === 0)) return null;

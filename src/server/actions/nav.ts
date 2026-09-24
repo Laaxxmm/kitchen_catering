@@ -14,6 +14,7 @@ import { hasRole, requireSession } from "@/server/rbac";
 import { INACTIVE_ORDER_STATUSES } from "@/lib/order-status";
 import { EXCLUDE_PROFORMA } from "@/lib/invoice-kinds";
 import { kitchenStockCounts } from "@/server/reports/stock-health";
+import { getStoreStock } from "@/server/actions/store-stock";
 import type { NavBadges } from "@/lib/nav-config";
 
 /**
@@ -29,7 +30,20 @@ import type { NavBadges } from "@/lib/nav-config";
 export async function getNavBadges(): Promise<NavBadges> {
   const session = await requireSession();
   if (!hasRole(session, [Role.ADMIN, Role.MANAGER])) return {};
-  return computeNavBadges();
+  // The hotel-side stores are counted outside the cache: getStoreStock
+  // re-checks the session, and there is no request scope inside
+  // unstable_cache. Two small tables, so it is a couple of cheap reads per
+  // navigation — and the badge stops saying "nothing to order" while the
+  // housekeeping shelf is bare.
+  const [cached, hk, mt] = await Promise.all([
+    computeNavBadges(),
+    getStoreStock("housekeeping"),
+    getStoreStock("maintenance"),
+  ]);
+  const badges: NavBadges = { ...cached };
+  const stores = (cached.stores?.count ?? 0) + hk.out + hk.low + mt.out + mt.low;
+  if (stores > 0) badges.stores = { count: stores, tone: "red" };
+  return badges;
 }
 
 const computeNavBadges = unstable_cache(

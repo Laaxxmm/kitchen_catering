@@ -429,6 +429,16 @@ async function closeOrderInner(id: string): Promise<{ ok: true }> {
 }
 
 /**
+ * Who may be handed a feedback task: the roles the /orders pages admit
+ * (src/lib/route-access.ts). The two hotel-side desks cannot open the
+ * order, so a task in their tray would be a dead link.
+ */
+const FEEDBACK_ASSIGNEE_ROLES: Role[] = [
+  Role.ADMIN, Role.MANAGER, Role.SALES, Role.STORE_KEEPER, Role.KITCHEN_HEAD,
+  Role.FNB_SERVICE, Role.DELIVERY, Role.ACCOUNTS,
+];
+
+/**
  * Allocate a staff member to collect the customer's feedback for an order.
  * The manager picks who's responsible; that person gets a tracked task + a
  * notification, and the assignment is stamped on the order so it's visible.
@@ -457,10 +467,15 @@ async function allocateOrderFeedbackInner(
       where: { id: orderId },
       select: { id: true, code: true, status: true, customer: { select: { name: true } } },
     }),
-    db.user.findUnique({ where: { id: assigneeId }, select: { id: true, active: true, name: true } }),
+    db.user.findUnique({ where: { id: assigneeId }, select: { id: true, active: true, name: true, role: true } }),
   ]);
   if (!order) throw new ActionError("Order not found");
   if (!assignee || !assignee.active) throw new ActionError("Pick an active staff member.");
+  if (!FEEDBACK_ASSIGNEE_ROLES.includes(assignee.role)) {
+    throw new ActionError(
+      `${assignee.name} cannot open orders — pick someone from sales, accounts, kitchen, store, F&B or management.`,
+    );
+  }
   const eligible: OrderStatus[] = [
     OrderStatus.DELIVERED,
     OrderStatus.INVOICED,

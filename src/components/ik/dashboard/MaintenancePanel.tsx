@@ -19,7 +19,7 @@ export async function MaintenancePanel({ compact = false }: { compact?: boolean 
     <section className="rounded-md border border-ik-rule bg-ik-card">
       <header className="flex items-center justify-between border-b border-ik-rule p-3">
         <div className="text-[12px] font-medium text-ik-ink-2">
-          Maintenance{compact ? "" : " — today"}
+          Maintenance{compact ? "" : " — last 7 days"}
         </div>
         <Link href="/maintenance" className="text-[11px] text-ik-ink-3 hover:text-brand">
           Module →

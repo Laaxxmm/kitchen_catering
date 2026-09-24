@@ -11,6 +11,18 @@ export const dynamic = "force-dynamic";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Where a row's entity lives on screen — the id becomes a link into that
+ *  module's list. Anything unmapped stays the plain id. */
+const ENTITY_HREF: Record<string, string> = {
+  HousekeepingIssue: "/housekeeping/issues",
+  HousekeepingItem: "/housekeeping/items",
+  HousekeepingReceipt: "/housekeeping/receipts",
+  Room: "/housekeeping/rooms",
+  MaintenanceActivity: "/maintenance/activities",
+  MaintenanceItem: "/maintenance/items",
+  MaintenanceReceipt: "/maintenance/receipts",
+};
+
 export default async function AuditPage({
   searchParams,
 }: {
@@ -98,7 +110,13 @@ export default async function AuditPage({
               <TableCell className="text-[12.5px]">{r.user?.name ?? "—"}</TableCell>
               <TableCell className="font-mono text-[12px]">{r.action}</TableCell>
               <TableCell>{r.entity}</TableCell>
-              <TableCell className="font-mono text-[11px] text-ik-ink-3">{r.entityId}</TableCell>
+              <TableCell className="font-mono text-[11px] text-ik-ink-3">
+                {ENTITY_HREF[r.entity] ? (
+                  <Link href={ENTITY_HREF[r.entity]} className="hover:text-brand hover:underline">{r.entityId}</Link>
+                ) : (
+                  r.entityId
+                )}
+              </TableCell>
               <TableCell className="font-mono text-[10px] text-ik-ink-3 truncate max-w-[140px]" title={r.payloadHash ?? ""}>
                 {r.payloadHash ? r.payloadHash.slice(0, 12) + "…" : "—"}
               </TableCell>
