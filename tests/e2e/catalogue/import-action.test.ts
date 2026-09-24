@@ -52,6 +52,28 @@ describe("import catalogue action", () => {
     expect(after).toBe(before);
   });
 
+  it("puts every item on its shelf, and never overrides the store's own choice or a live unit", async () => {
+    await asAdmin();
+    // The catalogue file names the shelf; the seeded rows started as OTHER.
+    const shelf = async (sku: string) =>
+      (await db.ingredient.findUniqueOrThrow({ where: { sku }, select: { subStore: true } })).subStore;
+    expect(await shelf("GP-001")).toBe("MILK"); // Paneer
+    expect(await shelf("GP-005")).toBe("GROCERY"); // Masoor Dal
+    expect(await shelf("GP-186")).toBe("VEGETABLE"); // Cabbage
+    expect(await shelf("GP-267")).toBe("FROZEN"); // Samosa
+    expect(await shelf("GP-522")).toBe("OTHER"); // Soap
+
+    // A shelf the store keeper set by hand, and a unit a stock count
+    // converted, both survive the button being pressed again.
+    await db.ingredient.update({ where: { sku: "GP-097" }, data: { subStore: "WATER" } });
+    await db.ingredient.update({ where: { sku: "GP-098" }, data: { unit: "bag" } });
+    mustOk(await importCatalogueFromFiles(), "import catalogue");
+    expect(await shelf("GP-097")).toBe("WATER");
+    expect((await db.ingredient.findUniqueOrThrow({ where: { sku: "GP-098" }, select: { unit: true } })).unit).toBe("bag");
+    await db.ingredient.update({ where: { sku: "GP-097" }, data: { subStore: "GROCERY" } });
+    await db.ingredient.update({ where: { sku: "GP-098" }, data: { unit: "kg" } });
+  });
+
   it("records who ran it", async () => {
     const admin = await asAdmin();
     mustOk(await importCatalogueFromFiles(), "import catalogue");
@@ -82,6 +104,13 @@ describe("go-live: erase, then import from the button", () => {
       db.banquetItem.count({ where: { source: BanquetItemSource.HIRED } }),
     ]);
     expect({ kitchen, inhouse, hired }).toEqual({ kitchen: 405, inhouse: 154, hired: 42 });
+
+    // Every kitchen item lands on a shelf from the file: only the nine
+    // non-food consumables (gas, soap, scrubbers) are left as "other".
+    const byShelf = await db.ingredient.groupBy({ by: ["subStore"], _count: { _all: true } });
+    expect(Object.fromEntries(byShelf.map((r) => [r.subStore, r._count._all]))).toEqual({
+      GROCERY: 156, FROZEN: 137, VEGETABLE: 89, MILK: 12, WATER: 2, OTHER: 9,
+    });
 
     // The F&B opening count is a document, not a bare number on the item row
     // — that is what keeps the stock ledger agreeing with the shelf. It is

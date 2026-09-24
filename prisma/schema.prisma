@@ -688,9 +688,10 @@ model RecipeSubRecipe {
 // approval rules. We keep one Ingredient table (so Recipe + OrderItem
 // links stay untouched) and route requisition approvals on this enum.
 enum IngredientSubStore {
-  VEGETABLE // chef-side produce
+  VEGETABLE // chef-side produce and fruit
   GROCERY // chef-side staples (dals, rice, flours, spices, oils)
   MILK // milk, curd, dairy
+  FROZEN // frozen, meat, and bought-in ready-made (bakery, sweets, snacks)
   WATER // packaged water bottles, cans
   OTHER // anything that doesn't fit; default for backfills
 }

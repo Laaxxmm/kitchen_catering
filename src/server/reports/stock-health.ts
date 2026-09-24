@@ -1,3 +1,4 @@
+import type { IngredientSubStore } from "@prisma/client";
 import { db } from "@/server/db";
 import { toDecimal } from "@/lib/money";
 import { classifyStock, type StockBucket } from "@/lib/stock-health";
@@ -23,6 +24,8 @@ export interface StockHealthRow {
   sku: string;
   name: string;
   unit: string;
+  /** Which shelf: grocery, vegetable, dairy, frozen, water, other. */
+  subStore: IngredientSubStore;
   onHand: string;
   reorderLevel: string;
   avgCost: string;
@@ -44,6 +47,7 @@ export async function stockHealthRows(now: Date = new Date()): Promise<StockHeal
         sku: true,
         name: true,
         unit: true,
+        subStore: true,
         onHandQty: true,
         reorderLevel: true,
         avgUnitCost: true,
@@ -94,6 +98,7 @@ export async function stockHealthRows(now: Date = new Date()): Promise<StockHeal
       sku: i.sku,
       name: i.name,
       unit: i.unit,
+      subStore: i.subStore,
       onHand: toDecimal(i.onHandQty).toString(),
       reorderLevel: toDecimal(i.reorderLevel).toString(),
       avgCost: toDecimal(i.avgUnitCost).toString(),

@@ -129,7 +129,7 @@ export const IngredientInput = z.object({
   // approval rules from the Workflow doc matrix. See
   // IngredientSubStore enum in schema.prisma.
   subStore: z
-    .enum(["VEGETABLE", "GROCERY", "MILK", "WATER", "OTHER"])
+    .enum(["VEGETABLE", "GROCERY", "MILK", "FROZEN", "WATER", "OTHER"])
     .optional(),
   unit: z.string().min(1).max(20),
   openingQty: decimalString.optional(),

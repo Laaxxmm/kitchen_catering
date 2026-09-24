@@ -92,9 +92,10 @@ export function IngredientForm({ defaults, code, onSubmit, submitLabel = "Save",
             {...register("subStore")}
             className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]"
           >
-            <option value="VEGETABLE">Vegetable</option>
             <option value="GROCERY">Grocery</option>
-            <option value="MILK">Milk / dairy</option>
+            <option value="VEGETABLE">Vegetable &amp; fruit</option>
+            <option value="MILK">Dairy</option>
+            <option value="FROZEN">Frozen &amp; ready-made</option>
             <option value="WATER">Water bottles</option>
             <option value="OTHER">Other</option>
           </select>

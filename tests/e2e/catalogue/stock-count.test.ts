@@ -179,13 +179,14 @@ describe("applying a stock count", () => {
     expect(plan.create).toHaveLength(4);
     expect(plan.update.length + plan.create.length).toBe(sept11.rows.length);
 
-    // 12 Sep: 38 packet items back to kilos, one recount. Every convert row
-    // must find its item still in packets in the catalogue as imported.
+    // 12 Sep: 38 packet items back to kilos, one recount. The catalogue file
+    // has said kilos for those 38 since, so against a fresh import every
+    // convert row finds nothing to do and only the recount is left — the
+    // conversion never runs twice.
     const sept12 = JSON.parse(readFileSync("data/stock-counts/2026-09-12.json", "utf8")) as StockCountFile;
+    expect(sept12.rows.filter((r) => r.unitFactor)).toHaveLength(38);
     const plan12 = await planStockCount(sept12);
     expect(plan12.problems).toEqual([]);
-    expect(plan12.update).toHaveLength(sept12.rows.length);
-    expect(plan12.update.filter((u) => u.unitFactor)).toHaveLength(38);
-    for (const u of plan12.update.filter((u) => u.unitFactor)) expect(u.unitTo).toBe("kg");
+    expect(plan12.update.map((u) => u.code)).toEqual(["GP-114"]);
   });
 });

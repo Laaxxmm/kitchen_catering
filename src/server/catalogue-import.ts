@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { BanquetItemSource, Prisma, type PrismaClient, Role } from "@prisma/client";
+import { BanquetItemSource, type IngredientSubStore, Prisma, type PrismaClient, Role } from "@prisma/client";
 
 /**
  * Seeds the client's three replacement catalogues from data/catalogue/:
@@ -36,6 +36,10 @@ interface KitchenRow {
   name: string;
   unit: string;
   openingQty: string | null;
+  /** Which shelf it lives on — GROCERY, VEGETABLE, MILK, FROZEN, WATER,
+   *  OTHER. Applied on create, and on update only while the row is still
+   *  OTHER, so a store keeper's own choice is never overwritten. */
+  subStore?: IngredientSubStore;
 }
 
 interface FnbRow {
@@ -222,12 +226,19 @@ export async function importCatalogue(
         const opening = dec(row.openingQty, `${row.code} openingQty`);
         const existing = await tx.ingredient.findUnique({
           where: { sku: row.code },
-          select: { id: true },
+          select: { id: true, subStore: true },
         });
         if (existing) {
+          // Not `unit`: a live item's unit is changed only through a stock
+          // count's conversion (which rescales its history). Writing the
+          // file's unit here would turn a 1.5 kg row back into "1.5 pct".
           await tx.ingredient.update({
             where: { sku: row.code },
-            data: { name: row.name, unit: row.unit, openingQty: opening },
+            data: {
+              name: row.name,
+              openingQty: opening,
+              ...(row.subStore && existing.subStore === "OTHER" ? { subStore: row.subStore } : {}),
+            },
           });
         } else {
           await tx.ingredient.create({
@@ -237,6 +248,7 @@ export async function importCatalogue(
               unit: row.unit,
               openingQty: opening,
               onHandQty: opening,
+              ...(row.subStore ? { subStore: row.subStore } : {}),
             },
           });
           kitchenCreated++;

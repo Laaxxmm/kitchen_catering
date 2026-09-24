@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import type { ActionResultWith } from "@/lib/action-result";
 import { isNextNavigationError } from "@/lib/next-error";
 
-export const SUB_STORES = ["VEGETABLE", "GROCERY", "MILK", "WATER", "OTHER"] as const;
+export const SUB_STORES = ["VEGETABLE", "GROCERY", "MILK", "FROZEN", "WATER", "OTHER"] as const;
 export type SubStore = (typeof SUB_STORES)[number];
 
 export interface QuickIngredientInput {
