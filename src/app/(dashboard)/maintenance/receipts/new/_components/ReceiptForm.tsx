@@ -50,6 +50,15 @@ export function ReceiptForm({ items }: { items: Item[] }) {
   }
 
   function submit() {
+    // A line with something typed but not both item + quantity is a
+    // mistake, not noise — refuse rather than drop it on the floor.
+    const half = lines.findIndex(
+      (l) => (l.itemId || l.quantity.trim() || l.costPerUnit.trim()) && !(l.itemId && l.quantity.trim()),
+    );
+    if (half >= 0) {
+      toast.error(`Line ${half + 1} needs both an item and a quantity — fill it in or remove it`);
+      return;
+    }
     const cleanLines = lines
       .filter((l) => l.itemId && l.quantity.trim())
       .map((l) => ({

@@ -25,6 +25,7 @@ export default async function MaintenanceLandingPage() {
       tabs={[
         { label: "Items", href: "/maintenance/items", active: true },
         { label: "Staff", href: "/maintenance/staff" },
+        { label: "Rooms", href: "/housekeeping/rooms" },
         { label: "Receipts", href: "/maintenance/receipts" },
         { label: "Activities", href: "/maintenance/activities" },
         { label: "Adjust stock", href: "/maintenance/adjust" },

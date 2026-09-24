@@ -19,6 +19,7 @@ import {
 } from "@/server/actions/maintenance";
 import { listRooms } from "@/server/actions/housekeeping";
 import { formatIST } from "@/lib/time";
+import { ActivityRowActions } from "./_components/ActivityRowActions";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,11 @@ const CAT_LABEL: Record<MaintenanceCategory, string> = {
   MECHANICAL: "Mechanical",
   GENERAL: "General",
 };
+
+/** Whole days since the job was logged — how long it has sat open. */
+function ageDays(performedAt: Date): number {
+  return Math.max(0, Math.floor((Date.now() - performedAt.getTime()) / 86_400_000));
+}
 
 export default async function ActivitiesListPage({
   searchParams,
@@ -39,6 +45,7 @@ export default async function ActivitiesListPage({
     item?: string;
     category?: string;
     status?: string;
+    open?: string;
   }>;
 }) {
   await gateRolePage([Role.ADMIN, Role.MANAGER, Role.MAINTENANCE_MANAGER]);
@@ -50,6 +57,7 @@ export default async function ActivitiesListPage({
   const stat = sp.status && (Object.values(MaintenanceActivityStatus) as string[]).includes(sp.status)
     ? (sp.status as MaintenanceActivityStatus)
     : undefined;
+  const open = sp.open === "1";
 
   const [activities, rooms, staff, items] = await Promise.all([
     listMaintenanceActivities({
@@ -60,6 +68,7 @@ export default async function ActivitiesListPage({
       itemId: sp.item || undefined,
       category: cat,
       status: stat,
+      open,
       limit: 300,
     }),
     listRooms({ activeOnly: false }),
@@ -80,6 +89,27 @@ export default async function ActivitiesListPage({
           </div>
         }
       />
+
+      <div className="mb-3 flex gap-2">
+        <Link
+          href="/maintenance/activities?open=1"
+          className={
+            "rounded-full px-3 py-1 text-[12px] " +
+            (open ? "bg-brand-500 text-white" : "bg-ik-paper-alt text-ik-ink-2 hover:bg-brand-50 hover:text-brand-700")
+          }
+        >
+          Open jobs
+        </Link>
+        <Link
+          href="/maintenance/activities"
+          className={
+            "rounded-full px-3 py-1 text-[12px] " +
+            (!open && !sp.status ? "bg-brand-500 text-white" : "bg-ik-paper-alt text-ik-ink-2 hover:bg-brand-50 hover:text-brand-700")
+          }
+        >
+          All
+        </Link>
+      </div>
 
       <form className="mb-4 flex flex-wrap items-end gap-2" action="/maintenance/activities">
         <div className="grid gap-1">
@@ -126,7 +156,7 @@ export default async function ActivitiesListPage({
           </select>
         </div>
         <Button type="submit" variant="outline" size="sm">Apply</Button>
-        {(sp.from || sp.to || sp.room || sp.staff || sp.item || sp.category || sp.status) && (
+        {(sp.from || sp.to || sp.room || sp.staff || sp.item || sp.category || sp.status || open) && (
           <Link href="/maintenance/activities" className="text-[12px] text-ik-ink-3 hover:text-brand">Clear</Link>
         )}
       </form>
@@ -144,6 +174,8 @@ export default async function ActivitiesListPage({
               <TableHead>Issue / work</TableHead>
               <TableHead>Items used</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead className="text-right">Age</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -185,6 +217,10 @@ export default async function ActivitiesListPage({
                   )}
                 </TableCell>
                 <TableCell><StatusBadge status={a.status} /></TableCell>
+                <TableCell className="text-right font-mono text-[12px]">
+                  {a.status === "PENDING" || a.status === "IN_PROGRESS" ? `${ageDays(a.performedAt)}d` : "—"}
+                </TableCell>
+                <TableCell><ActivityRowActions id={a.id} status={a.status} /></TableCell>
               </TableRow>
             ))}
           </TableBody>

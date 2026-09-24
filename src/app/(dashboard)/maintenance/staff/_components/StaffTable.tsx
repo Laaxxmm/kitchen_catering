@@ -89,7 +89,11 @@ export function StaffTable({ staff }: { staff: Staff[] }) {
     if (!confirm("Deactivate this staff member?")) return;
     startTransition(async () => {
       try {
-        await deactivateMaintenanceStaff(id);
+        const res = await deactivateMaintenanceStaff(id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Deactivated");
         router.refresh();
       } catch (err) {

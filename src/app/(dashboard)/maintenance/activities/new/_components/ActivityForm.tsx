@@ -35,14 +35,22 @@ function nowLocal(): string {
   return localInputAt(d);
 }
 
+// A job is logged open or done; cancelling is a later step on the list.
+const CREATE_STATUSES: MaintenanceActivityStatus[] = ["PENDING", "IN_PROGRESS", "COMPLETED"];
+
 export function ActivityForm({
   items,
   rooms,
   staff,
+  reportOnly = false,
+  doneHref = "/maintenance/activities",
 }: {
   items: Item[];
   rooms: Room[];
   staff: Staff[];
+  /** Housekeeping: status fixed at PENDING, no spares section. */
+  reportOnly?: boolean;
+  doneHref?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -50,7 +58,9 @@ export function ActivityForm({
   const [staffId, setStaffId] = useState("");
   const [roomId, setRoomId] = useState("");
   const [category, setCategory] = useState<MaintenanceCategory>(MaintenanceCategory.GENERAL);
-  const [status, setStatus] = useState<MaintenanceActivityStatus>(MaintenanceActivityStatus.COMPLETED);
+  const [status, setStatus] = useState<MaintenanceActivityStatus>(
+    reportOnly ? MaintenanceActivityStatus.PENDING : MaintenanceActivityStatus.COMPLETED,
+  );
   const [issueReported, setIssueReported] = useState("");
   const [workDone, setWorkDone] = useState("");
   const [notes, setNotes] = useState("");
@@ -70,10 +80,23 @@ export function ActivityForm({
     setLines((l) => l.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
   }
 
+  // Two lines naming the same spare are one draw on it — flag the total.
+  const wanted = new Map<string, number>();
+  for (const l of lines) {
+    if (l.itemId && l.quantity.trim() !== "") wanted.set(l.itemId, (wanted.get(l.itemId) ?? 0) + Number(l.quantity));
+  }
+
   function submit() {
     if (!staffId) { toast.error("Pick a staff member"); return; }
     if (!roomId) { toast.error("Pick a room"); return; }
     if (issueReported.trim().length < 2) { toast.error("Describe the issue reported"); return; }
+    // A line with one half typed is a mistake, not noise — refuse rather
+    // than drop it; a wholly blank line is just an unused "+ Add item".
+    const half = lines.findIndex((l) => (l.itemId || l.quantity.trim()) && !(l.itemId && l.quantity.trim()));
+    if (half >= 0) {
+      toast.error(`Spares line ${half + 1} needs both an item and a quantity — fill it in or remove it`);
+      return;
+    }
 
     const cleanLines = lines
       .filter((l) => l.itemId && l.quantity.trim())
@@ -96,8 +119,8 @@ export function ActivityForm({
           toast.error(res.error);
           return;
         }
-        toast.success("Activity recorded");
-        router.push("/maintenance/activities");
+        toast.success(reportOnly ? "Job reported to maintenance" : "Activity recorded");
+        router.push(doneHref);
         router.refresh();
       } catch (err) {
         if (isNextNavigationError(err)) throw err;
@@ -138,12 +161,14 @@ export function ActivityForm({
             </select>
             <p className="text-[11px] text-ik-ink-3">Auto-set from staff. Override if needed.</p>
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="status">Status</Label>
-            <select id="status" value={status} onChange={(e) => setStatus(e.target.value as MaintenanceActivityStatus)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
-              {Object.values(MaintenanceActivityStatus).map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
+          {!reportOnly && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="status">Status</Label>
+              <select id="status" value={status} onChange={(e) => setStatus(e.target.value as MaintenanceActivityStatus)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
+                {CREATE_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
         </div>
 
         <div className="grid gap-1.5">
@@ -160,7 +185,7 @@ export function ActivityForm({
         </div>
       </section>
 
-      <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
+      {!reportOnly && <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="flex items-center justify-between">
           <div className="text-[12px] font-medium text-ik-ink-2">Spares used (optional)</div>
           <Button size="sm" variant="outline" onClick={addLine}>+ Add item</Button>
@@ -171,7 +196,7 @@ export function ActivityForm({
           <div className="grid gap-2">
             {lines.map((line, i) => {
               const it = items.find((x) => x.id === line.itemId);
-              const overdraw = it && line.quantity.trim() !== "" && Number(line.quantity) > Number(it.currentStock);
+              const overdraw = it && line.quantity.trim() !== "" && (wanted.get(it.id) ?? 0) > Number(it.currentStock);
               return (
                 <div key={i} className="grid items-end gap-2 sm:grid-cols-[1fr,160px,80px]">
                   <div className="grid gap-1.5">
@@ -195,7 +220,7 @@ export function ActivityForm({
                       onChange={(e) => updateLine(i, { quantity: e.target.value })}
                       className={overdraw ? "border-alert" : ""}
                     />
-                    {overdraw && <span className="text-[10.5px] text-alert">Exceeds available</span>}
+                    {overdraw && <span className="text-[10.5px] text-alert">Exceeds available (all lines for this item)</span>}
                   </div>
                   <div><Button size="sm" variant="outline" onClick={() => removeLine(i)}>Remove</Button></div>
                 </div>
@@ -203,10 +228,10 @@ export function ActivityForm({
             })}
           </div>
         )}
-      </section>
+      </section>}
 
       <div className="flex gap-2">
-        <Button onClick={submit} disabled={pending}>{pending ? "Saving…" : "Save activity"}</Button>
+        <Button onClick={submit} disabled={pending}>{pending ? "Saving…" : reportOnly ? "Report job" : "Save activity"}</Button>
         <Button variant="outline" onClick={() => router.back()} disabled={pending}>Cancel</Button>
       </div>
     </div>
