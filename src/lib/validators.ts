@@ -940,32 +940,39 @@ export const RoomInput = z.object({
 });
 
 export const HousekeepingStaffInput = z.object({
-  name: z.string().min(2).max(120),
+  name: z.string().trim().min(2).max(120),
   phone: z.string().max(20).nullable().optional(),
   notes: z.string().max(500).nullable().optional(),
   active: z.boolean().optional(),
 });
 
+// A blank quantity would reach `new Decimal("")` and throw; a negative one
+// would be a silent write-off. Both refused here, by name.
+const hkQuantity = decimalString
+  .refine((s) => s !== "", "Enter a quantity")
+  .refine((s) => !s.startsWith("-"), "Can't be negative");
+const hkNonNegative = decimalString.refine((s) => !s.startsWith("-"), "Can't be negative");
+
 export const HousekeepingItemInput = z.object({
-  name: z.string().min(2).max(160),
+  name: z.string().trim().min(2).max(160),
   sku: z.string().max(60).nullable().optional(),
-  unit: z.string().min(1).max(20).default("piece"),
+  unit: z.string().trim().min(1).max(20).default("piece"),
   // Reusable (towels / linens) vs consumable (soap / tissue). Reusable items
   // are issued, washed, and returned to stock rather than used up.
   reusable: z.boolean().optional(),
-  minStock: decimalString.nullable().optional(),
+  minStock: hkNonNegative.nullable().optional(),
   // Opening balance — applied only on CREATE. Server records an internal
   // "Opening balance" receipt for the audit trail and bumps currentStock.
   // Ignored on UPDATE (use the regular receipt flow to correct stock).
-  openingStock: decimalString.nullable().optional(),
+  openingStock: hkNonNegative.nullable().optional(),
   notes: z.string().max(500).nullable().optional(),
   active: z.boolean().optional(),
 });
 
 const ReceiptLineInput = z.object({
   itemId: z.string().min(1),
-  quantity: decimalString,
-  costPerUnit: decimalString.nullable().optional(),
+  quantity: hkQuantity,
+  costPerUnit: hkNonNegative.nullable().optional(),
 });
 
 export const HousekeepingReceiptInput = z.object({
@@ -977,7 +984,7 @@ export const HousekeepingReceiptInput = z.object({
 
 const IssueLineInput = z.object({
   itemId: z.string().min(1),
-  quantity: decimalString,
+  quantity: hkQuantity,
 });
 
 export const HousekeepingIssueInput = z.object({
@@ -988,6 +995,18 @@ export const HousekeepingIssueInput = z.object({
   notes: z.string().max(500).nullable().optional(),
   lines: z.array(IssueLineInput).min(1, "Add at least one item"),
 });
+
+// Closing the reusable loop: linen back from a room (RETURNED) or written
+// off (LOST). Room / staff are optional context for the adjustment record.
+export const HousekeepingReturnInput = z.object({
+  itemId: z.string().min(1, "Pick an item"),
+  qty: hkQuantity,
+  outcome: z.enum(["returned", "lost"]),
+  roomId: z.string().max(60).nullable().optional(),
+  staffId: z.string().max(60).nullable().optional(),
+  note: z.string().max(500).nullable().optional(),
+});
+export type HousekeepingReturnInputT = z.infer<typeof HousekeepingReturnInput>;
 
 // =====================================================================
 // MAINTENANCE

@@ -111,7 +111,11 @@ export function ItemsTable({ items }: { items: Item[] }) {
     if (!confirm("Deactivate this item?")) return;
     startTransition(async () => {
       try {
-        await deactivateHousekeepingItem(id);
+        const res = await deactivateHousekeepingItem(id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Deactivated");
         router.refresh();
       } catch (err) {
