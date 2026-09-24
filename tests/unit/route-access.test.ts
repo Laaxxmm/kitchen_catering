@@ -67,6 +67,35 @@ describe("a narrower rule still restricts the one below it", () => {
   });
 });
 
+describe("the housekeeping and maintenance desks", () => {
+  it("lets housekeeping report a room defect without opening the maintenance module", () => {
+    expect(routeAllows("/maintenance/activities/new", "HOUSEKEEPING_MANAGER")).toBe(true);
+    expect(routeAllows("/maintenance/activities", "HOUSEKEEPING_MANAGER")).toBe(false);
+    expect(routeAllows("/maintenance", "HOUSEKEEPING_MANAGER")).toBe(false);
+  });
+
+  it("lets maintenance read the shared room master and nothing else of housekeeping", () => {
+    expect(routeAllows("/housekeeping/rooms", "MAINTENANCE_MANAGER")).toBe(true);
+    expect(routeAllows("/housekeeping/items", "MAINTENANCE_MANAGER")).toBe(false);
+    expect(routeAllows("/housekeeping", "MAINTENANCE_MANAGER")).toBe(false);
+  });
+
+  it("keeps both desks out of the rest of the business", () => {
+    for (const role of ["HOUSEKEEPING_MANAGER", "MAINTENANCE_MANAGER"] as const) {
+      for (const p of ["/inventory", "/orders", "/invoices", "/admin", "/reports", "/banquet", "/tasks/admin"]) {
+        expect({ role, p, allowed: routeAllows(p, role) }).toEqual({ role, p, allowed: false });
+      }
+    }
+  });
+
+  it("keeps the store and the chef out of the hotel-side modules", () => {
+    for (const role of ["STORE_KEEPER", "KITCHEN_HEAD"] as const) {
+      expect(routeAllows("/housekeeping", role)).toBe(false);
+      expect(routeAllows("/maintenance", role)).toBe(false);
+    }
+  });
+});
+
 describe("everything else", () => {
   it("passes admin, and lets any signed-in role onto role-neutral paths", () => {
     expect(routeAllows("/admin/settings", "ADMIN")).toBe(true);

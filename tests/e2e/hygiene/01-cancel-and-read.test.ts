@@ -1,7 +1,7 @@
 import "../harness/database-url";
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { CustomerInvoiceStatus, OrderStatus, Role } from "@prisma/client";
+import { CustomerInvoiceStatus, OrderStatus } from "@prisma/client";
 import { db } from "@/server/db";
 import {
   approveCustomerInvoiceForRelease,
@@ -15,10 +15,11 @@ import {
   asAdmin,
   asChef,
   asDelivery,
+  asHousekeeping,
+  asMaintenance,
   asManager,
   asStore,
   chefAccepts,
-  desk,
   driveOrderToDelivered,
   ensureSeeded,
   expectRefused,
@@ -26,7 +27,6 @@ import {
   mustOk,
   placeCateringOrder,
   read,
-  asUser,
 } from "../harness";
 
 /**
@@ -125,36 +125,10 @@ describe("reading one order by id", () => {
     orderId = order.id;
   });
 
-  /**
-   * Act as a role that has no seeded desk of its own. `requireSession` now
-   * takes the role from the User ROW, not the session object — a re-badged
-   * session would just be overwritten. So the row is what changes, and the
-   * session carries the row's new version; both go back afterwards.
-   */
-  async function asRole<T>(role: Role, fn: () => Promise<T>): Promise<T> {
-    const user = desk("store");
-    const before = await db.user.findUniqueOrThrow({ where: { id: user.id } });
-    const changed = await db.user.update({
-      where: { id: user.id },
-      data: { role, sessionVersion: { increment: 1 } },
-    });
-    asUser({ ...user, role, sessionVersion: changed.sessionVersion });
-    try {
-      return await fn();
-    } finally {
-      const restored = await db.user.update({
-        where: { id: user.id },
-        data: { role: before.role, sessionVersion: { increment: 1 } },
-      });
-      // The desk's cached session must match the row again for later tests.
-      user.sessionVersion = restored.sessionVersion;
-      asStore();
-    }
-  }
-
   it("is refused for a role the orders module never admits", async () => {
-    for (const role of [Role.HOUSEKEEPING_MANAGER, Role.MAINTENANCE_MANAGER]) {
-      const message = await asRole(role, () => expectRefused(() => getOrder(orderId)));
+    for (const become of [asHousekeeping, asMaintenance]) {
+      become();
+      const message = await expectRefused(() => getOrder(orderId));
       expect(message).toMatch(/^Requires one of/);
     }
   });

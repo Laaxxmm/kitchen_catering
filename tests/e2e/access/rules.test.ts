@@ -34,6 +34,8 @@ import {
   scheduleDelivery,
 } from "@/server/actions/deliveries";
 import { uploadDocument } from "@/server/actions/documents";
+import { recordHousekeepingReceipt } from "@/server/actions/housekeeping";
+import { recordMaintenanceReceipt } from "@/server/actions/maintenance";
 import {
   adjustIngredientStock,
   confirmIngredientReturn,
@@ -45,7 +47,7 @@ import {
   updateIngredient,
 } from "@/server/actions/inventory";
 import { postInventoryAudit } from "@/server/actions/inventory-audit";
-import { listOrders, reviseOrder } from "@/server/actions/orders";
+import { getOrder, listOrders, reviseOrder } from "@/server/actions/orders";
 import { createPettyCashFloat, topUpPettyCash } from "@/server/actions/petty-cash";
 import { recordVendorBillPayment } from "@/server/actions/payments";
 import {
@@ -64,7 +66,7 @@ import { markOrderCooked, startCookingOrder } from "@/server/actions/production-
 import { markIngredientsAvailable } from "@/server/actions/chef-requisitions";
 import { runVendorPaymentRemindersInternal } from "@/server/actions/reminders";
 import { upsertSetting } from "@/server/actions/settings";
-import { adjustStoreStock } from "@/server/actions/store-stock";
+import { adjustStoreStock, getStoreStock, listStoreItems } from "@/server/actions/store-stock";
 import { createUser, listUsers } from "@/server/actions/users";
 import {
   actingAs,
@@ -72,6 +74,8 @@ import {
   asAdmin,
   asChef,
   asDelivery,
+  asHousekeeping,
+  asMaintenance,
   asManager,
   asNobody,
   asStore,
@@ -771,6 +775,31 @@ describe("list queries hand back only the rows the desk owns", () => {
     await expectRefused(() => listUsers());
     asAdmin();
     expect((await listUsers()).length).toBeGreaterThan(0);
+  });
+});
+
+// ─── The two hotel-side desks ───────────────────────────────────────────
+
+describe("the housekeeping and maintenance desks stay inside their own store", () => {
+  it("lets housekeeping read its own shelf and nothing of the order book", async () => {
+    const order = await placeCateringOrder({ headcount: 20, packageTotal: "20000" });
+    asHousekeeping();
+    const message = await expectRefused(() => getOrder(order.id));
+    expect(message).toMatch(/^Requires one of/);
+    expect(Array.isArray(await listStoreItems("housekeeping"))).toBe(true);
+  });
+
+  it("lets maintenance read its own stock but not book a housekeeping receipt", async () => {
+    asMaintenance();
+    expect((await getStoreStock("maintenance")).itemCount).toBeGreaterThanOrEqual(0);
+    const message = await expectRefused(() => recordHousekeepingReceipt({ lines: [] }));
+    expect(message).toMatch(/^Requires one of/);
+  });
+
+  it("keeps the kitchen store out of the spares receipts", async () => {
+    asStore();
+    const message = await expectRefused(() => recordMaintenanceReceipt({ lines: [] }));
+    expect(message).toMatch(/^Requires one of/);
   });
 });
 

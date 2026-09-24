@@ -53,7 +53,9 @@ import { actingAs, asNobody, ensureSeeded, type DeskName } from "../harness";
  * proven end to end, against real rows, in rules.test.ts.
  */
 
-const DESKS: DeskName[] = ["admin", "manager", "chef", "store", "delivery", "accounts"];
+const DESKS: DeskName[] = [
+  "admin", "manager", "chef", "store", "delivery", "accounts", "housekeeping", "maintenance",
+];
 
 /** A cuid-shaped id that matches nothing. */
 const MISSING_ID = "cmissingmissingmissingmis";
@@ -173,9 +175,20 @@ const CASES: GateCase[] = [
       reason: "gate probe",
     }),
   ),
-  gate("store-stock", "adjustStoreStock", ["admin", "manager"], () =>
+  // Housekeeping and maintenance keep their own hand-set figure — the
+  // department head corrects their own shelf; F&B above does not.
+  gate("store-stock", "adjustStoreStock", ["admin", "manager", "housekeeping"], () =>
     storeStock.adjustStoreStock({
       store: "housekeeping",
+      itemId: MISSING_ID,
+      mode: "delta",
+      qty: "1",
+      reason: "gate probe",
+    }),
+  ),
+  gate("store-stock", "adjustStoreStock", ["admin", "manager", "maintenance"], () =>
+    storeStock.adjustStoreStock({
+      store: "maintenance",
       itemId: MISSING_ID,
       mode: "delta",
       qty: "1",
@@ -642,10 +655,13 @@ const CASES: GateCase[] = [
   gate("dishes", "deactivateDish", ["admin", "manager", "chef"], () =>
     dishes.deactivateDish(MISSING_ID),
   ),
+  // The role gate is the whole field staff, the two hotel desks included;
+  // WHAT they may attach to is the per-target check after the file checks,
+  // which this empty-file probe never reaches.
   gate(
     "documents",
     "uploadDocument",
-    ["admin", "manager", "store", "accounts", "delivery"],
+    ["admin", "manager", "store", "accounts", "delivery", "housekeeping", "maintenance"],
     () =>
       documents.uploadDocument({
         entityType: DocumentEntityType.VENDOR_BILL,
@@ -660,38 +676,78 @@ const CASES: GateCase[] = [
     documents.deleteDocument(MISSING_ID),
   ),
 
-  // ── Housekeeping + maintenance (peripheral; their own managers have no
-  //    seeded desk, so only the management set is asserted here) ─────────
-  gate("housekeeping", "upsertRoom", ["admin", "manager"], () =>
+  // ── Housekeeping + maintenance — each department head drives their own
+  //    module alongside management, and neither reaches the other's.
+  //    A thrown "not found" on the deactivate* probes counts as past the
+  //    gate, so these rows hold whether they throw or return ActionResult.
+  gate("housekeeping", "upsertRoom", ["admin", "manager", "housekeeping"], () =>
     housekeeping.upsertRoom({}),
   ),
-  gate("housekeeping", "deleteRoom", ["admin", "manager"], () =>
+  gate("housekeeping", "deactivateRoom", ["admin", "manager", "housekeeping"], () =>
+    housekeeping.deactivateRoom(MISSING_ID),
+  ),
+  gate("housekeeping", "deleteRoom", ["admin", "manager", "housekeeping"], () =>
     housekeeping.deleteRoom(MISSING_ID),
   ),
-  gate("housekeeping", "upsertHousekeepingItem", ["admin", "manager"], () =>
+  gate("housekeeping", "upsertHousekeepingStaff", ["admin", "manager", "housekeeping"], () =>
+    housekeeping.upsertHousekeepingStaff({}),
+  ),
+  gate("housekeeping", "deactivateHousekeepingStaff", ["admin", "manager", "housekeeping"], () =>
+    housekeeping.deactivateHousekeepingStaff(MISSING_ID),
+  ),
+  gate("housekeeping", "deleteHousekeepingStaff", ["admin", "manager", "housekeeping"], () =>
+    housekeeping.deleteHousekeepingStaff(MISSING_ID),
+  ),
+  gate("housekeeping", "upsertHousekeepingItem", ["admin", "manager", "housekeeping"], () =>
     housekeeping.upsertHousekeepingItem({}),
   ),
-  gate("housekeeping", "recordHousekeepingReceipt", ["admin", "manager"], () =>
+  gate("housekeeping", "deactivateHousekeepingItem", ["admin", "manager", "housekeeping"], () =>
+    housekeeping.deactivateHousekeepingItem(MISSING_ID),
+  ),
+  gate("housekeeping", "deleteHousekeepingItem", ["admin", "manager", "housekeeping"], () =>
+    housekeeping.deleteHousekeepingItem(MISSING_ID),
+  ),
+  gate("housekeeping", "recordHousekeepingReceipt", ["admin", "manager", "housekeeping"], () =>
     housekeeping.recordHousekeepingReceipt({}),
   ),
-  gate("housekeeping", "recordHousekeepingIssue", ["admin", "manager"], () =>
+  gate("housekeeping", "recordHousekeepingIssue", ["admin", "manager", "housekeeping"], () =>
     housekeeping.recordHousekeepingIssue({}),
   ),
-  gate("housekeeping", "returnHousekeepingStock", ["admin", "manager"], () =>
+  gate("housekeeping", "returnHousekeepingStock", ["admin", "manager", "housekeeping"], () =>
     housekeeping.returnHousekeepingStock({
       itemId: MISSING_ID,
       qty: "1",
       outcome: "returned",
     }),
   ),
-  gate("maintenance", "upsertMaintenanceItem", ["admin", "manager"], () =>
+  gate("maintenance", "upsertMaintenanceStaff", ["admin", "manager", "maintenance"], () =>
+    maintenance.upsertMaintenanceStaff({}),
+  ),
+  gate("maintenance", "deactivateMaintenanceStaff", ["admin", "manager", "maintenance"], () =>
+    maintenance.deactivateMaintenanceStaff(MISSING_ID),
+  ),
+  gate("maintenance", "deleteMaintenanceStaff", ["admin", "manager", "maintenance"], () =>
+    maintenance.deleteMaintenanceStaff(MISSING_ID),
+  ),
+  gate("maintenance", "upsertMaintenanceItem", ["admin", "manager", "maintenance"], () =>
     maintenance.upsertMaintenanceItem({}),
   ),
-  gate("maintenance", "recordMaintenanceReceipt", ["admin", "manager"], () =>
+  gate("maintenance", "deactivateMaintenanceItem", ["admin", "manager", "maintenance"], () =>
+    maintenance.deactivateMaintenanceItem(MISSING_ID),
+  ),
+  gate("maintenance", "deleteMaintenanceItem", ["admin", "manager", "maintenance"], () =>
+    maintenance.deleteMaintenanceItem(MISSING_ID),
+  ),
+  gate("maintenance", "recordMaintenanceReceipt", ["admin", "manager", "maintenance"], () =>
     maintenance.recordMaintenanceReceipt({}),
   ),
-  gate("maintenance", "recordMaintenanceActivity", ["admin", "manager"], () =>
-    maintenance.recordMaintenanceActivity({}),
+  // Housekeeping finds the room defects, so they may log one (it lands
+  // PENDING, no parts); the work itself stays with maintenance.
+  gate(
+    "maintenance",
+    "recordMaintenanceActivity",
+    ["admin", "manager", "maintenance", "housekeeping"],
+    () => maintenance.recordMaintenanceActivity({}),
   ),
 ];
 
@@ -816,17 +872,6 @@ const NOT_COVERED: Record<string, string> = {
   "tasks.updateTask": "task board",
   "tasks.submitTask": "task board, ownership-checked",
   "tasks.reviewTask": "task board",
-  "housekeeping.deactivateRoom": "same WRITE_ROLES as upsertRoom, asserted above",
-  "housekeeping.upsertHousekeepingStaff": "same WRITE_ROLES, asserted above",
-  "housekeeping.deactivateHousekeepingStaff": "same WRITE_ROLES, asserted above",
-  "housekeeping.deleteHousekeepingStaff": "same WRITE_ROLES, asserted above",
-  "housekeeping.deactivateHousekeepingItem": "same WRITE_ROLES, asserted above",
-  "housekeeping.deleteHousekeepingItem": "same WRITE_ROLES, asserted above",
-  "maintenance.upsertMaintenanceStaff": "same WRITE_ROLES, asserted above",
-  "maintenance.deactivateMaintenanceStaff": "same WRITE_ROLES, asserted above",
-  "maintenance.deleteMaintenanceStaff": "same WRITE_ROLES, asserted above",
-  "maintenance.deactivateMaintenanceItem": "same WRITE_ROLES, asserted above",
-  "maintenance.deleteMaintenanceItem": "same WRITE_ROLES, asserted above",
 };
 
 /** Names that read rather than write. */

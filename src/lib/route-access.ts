@@ -145,7 +145,11 @@ const ROLE_RULES: Array<{ pattern: RegExp; allow: Role[] }> = [
   { pattern: /^\/housekeeping\/rooms(\/|$)/, allow: ["ADMIN", "MANAGER", "HOUSEKEEPING_MANAGER", "MAINTENANCE_MANAGER"] },
   { pattern: /^\/housekeeping(\/|$)/, allow: ["ADMIN", "MANAGER", "HOUSEKEEPING_MANAGER"] },
 
-  // Maintenance — electrical/mechanical work + spares inventory.
+  // Maintenance — electrical/mechanical work + spares inventory. The
+  // housekeeping manager finds the room defects (a dripping tap on
+  // turndown) and may log one without seeing the rest of the module, so the
+  // new-activity form precedes the catch-all. First match wins.
+  { pattern: /^\/maintenance\/activities\/new(\/|$)/, allow: ["ADMIN", "MANAGER", "MAINTENANCE_MANAGER", "HOUSEKEEPING_MANAGER"] },
   { pattern: /^\/maintenance(\/|$)/, allow: ["ADMIN", "MANAGER", "MAINTENANCE_MANAGER"] },
 
   // Banquet — the F&B Service store (role DELIVERY, FNB_SERVICE its retired
