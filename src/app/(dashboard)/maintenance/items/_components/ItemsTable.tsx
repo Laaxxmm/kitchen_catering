@@ -110,7 +110,11 @@ export function ItemsTable({ items }: { items: Item[] }) {
     if (!confirm("Deactivate this item?")) return;
     startTransition(async () => {
       try {
-        await deactivateMaintenanceItem(id);
+        const res = await deactivateMaintenanceItem(id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Deactivated");
         router.refresh();
       } catch (err) {
@@ -242,7 +246,9 @@ export function ItemsTable({ items }: { items: Item[] }) {
           </TableHeader>
           <TableBody>
             {items.map((it) => {
-              const low = it.minStock !== null && Number(it.currentStock) <= Number(it.minStock);
+              const low =
+                Number(it.currentStock) <= 0 ||
+                (it.minStock !== null && Number(it.currentStock) <= Number(it.minStock));
               return (
                 <TableRow key={it.id}>
                   <TableCell className="font-medium">{it.name}</TableCell>

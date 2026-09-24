@@ -1013,21 +1013,23 @@ export type HousekeepingReturnInputT = z.infer<typeof HousekeepingReturnInput>;
 // =====================================================================
 
 export const MaintenanceStaffInput = z.object({
-  name: z.string().min(2).max(120),
-  phone: z.string().max(20).nullable().optional(),
+  name: z.string().trim().min(2).max(120),
+  phone: z.string().trim().max(20).nullable().optional(),
   category: z.nativeEnum(MaintenanceCategory).default(MaintenanceCategory.GENERAL),
-  notes: z.string().max(500).nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
   active: z.boolean().optional(),
 });
 
 export const MaintenanceItemInput = z.object({
-  name: z.string().min(2).max(160),
-  sku: z.string().max(60).nullable().optional(),
-  unit: z.string().min(1).max(20).default("piece"),
+  name: z.string().trim().min(2).max(160),
+  sku: z.string().trim().max(60).nullable().optional(),
+  unit: z.string().trim().min(1).max(20).default("piece"),
   category: z.nativeEnum(MaintenanceCategory).default(MaintenanceCategory.GENERAL),
   minStock: decimalString.nullable().optional(),
   openingStock: decimalString.nullable().optional(),
-  notes: z.string().max(500).nullable().optional(),
+  // Omitted (not null) = leave the stored notes alone; the item form never
+  // sends this field.
+  notes: z.string().trim().max(500).nullable().optional(),
   active: z.boolean().optional(),
 });
 
@@ -1039,8 +1041,8 @@ const MaintReceiptLineInput = z.object({
 
 export const MaintenanceReceiptInput = z.object({
   receivedAt: isoDate,
-  sourceNote: z.string().max(500).nullable().optional(),
-  sourceContact: z.string().max(160).nullable().optional(),
+  sourceNote: z.string().trim().max(500).nullable().optional(),
+  sourceContact: z.string().trim().max(160).nullable().optional(),
   lines: z.array(MaintReceiptLineInput).min(1, "Add at least one line"),
 });
 
@@ -1054,12 +1056,23 @@ export const MaintenanceActivityInput = z.object({
   staffId: z.string().min(1, "Pick a staff member"),
   roomId: z.string().min(1, "Pick a room"),
   category: z.nativeEnum(MaintenanceCategory),
-  status: z.nativeEnum(MaintenanceActivityStatus).default(MaintenanceActivityStatus.COMPLETED),
-  issueReported: z.string().min(2, "Describe the issue").max(500),
-  workDone: z.string().max(1000).nullable().optional(),
-  notes: z.string().max(500).nullable().optional(),
+  // A job is logged open or done; cancelling is a later step
+  // (updateMaintenanceActivityStatus), never the state it is born in.
+  status: z
+    .nativeEnum(MaintenanceActivityStatus)
+    .default(MaintenanceActivityStatus.COMPLETED)
+    .refine((s) => s !== MaintenanceActivityStatus.CANCELLED, "A job can't be logged as cancelled — log it, then cancel it"),
+  issueReported: z.string().trim().min(2, "Describe the issue").max(500),
+  workDone: z.string().trim().max(1000).nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
   // Items consumed are optional — many activities are pure labour.
   lines: z.array(MaintActivityLineInput).optional().default([]),
+});
+
+export const MaintenanceActivityStatusInput = z.object({
+  status: z.enum(["IN_PROGRESS", "COMPLETED", "CANCELLED"]),
+  workDone: z.string().trim().max(1000).nullable().optional(),
+  note: z.string().trim().max(500).nullable().optional(),
 });
 
 // =====================================================================

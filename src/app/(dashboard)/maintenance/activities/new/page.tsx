@@ -13,13 +13,24 @@ import { ActivityForm } from "./_components/ActivityForm";
 export const dynamic = "force-dynamic";
 
 export default async function NewActivityPage() {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.MAINTENANCE_MANAGER]);
+  const session = await gateRolePage([
+    Role.ADMIN,
+    Role.MANAGER,
+    Role.MAINTENANCE_MANAGER,
+    Role.HOUSEKEEPING_MANAGER,
+  ]);
+  // Housekeeping reports a defect; it lands PENDING with no spares, and
+  // they have no business on the maintenance list afterwards.
+  const reportOnly = session.user.role === Role.HOUSEKEEPING_MANAGER;
+  const backHref = reportOnly ? "/housekeeping" : "/maintenance/activities";
 
-  const [items, rooms, staff] = await Promise.all([
-    listMaintenanceItems({ activeOnly: true }),
+  const [rooms, staff] = await Promise.all([
     listRooms({ activeOnly: true }),
     listMaintenanceStaff({ activeOnly: true }),
   ]);
+  const items: Awaited<ReturnType<typeof listMaintenanceItems>> = reportOnly
+    ? []
+    : await listMaintenanceItems({ activeOnly: true });
 
   const missing: string[] = [];
   if (rooms.length === 0) missing.push("rooms (shared with housekeeping)");
@@ -29,9 +40,13 @@ export default async function NewActivityPage() {
     <>
       <PageHeader
         eyebrow="Maintenance"
-        title="Log activity"
-        description="Record one work visit at a room — what was reported, what was done, and any spares used."
-        actions={<Link href="/maintenance/activities"><Button variant="outline" size="sm">← Back</Button></Link>}
+        title={reportOnly ? "Report a job" : "Log activity"}
+        description={
+          reportOnly
+            ? "Report a defect at a room — the maintenance desk picks it up from its pending list."
+            : "Record one work visit at a room — what was reported, what was done, and any spares used."
+        }
+        actions={<Link href={backHref}><Button variant="outline" size="sm">← Back</Button></Link>}
       />
       {missing.length > 0 ? (
         <div className="rounded-md border border-alert/30 bg-alert/5 p-4 text-[13px]">
@@ -56,6 +71,8 @@ export default async function NewActivityPage() {
           }))}
           rooms={rooms.map((r) => ({ id: r.id, number: r.number, name: r.name }))}
           staff={staff.map((s) => ({ id: s.id, name: s.name, category: s.category }))}
+          reportOnly={reportOnly}
+          doneHref={backHref}
         />
       )}
     </>
