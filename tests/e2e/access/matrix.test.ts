@@ -749,6 +749,11 @@ const CASES: GateCase[] = [
     ["admin", "manager", "maintenance", "housekeeping"],
     () => maintenance.recordMaintenanceActivity({}),
   ),
+  // Closing or cancelling a job is maintenance's own call (a cancel puts the
+  // spares back), not housekeeping's.
+  gate("maintenance", "updateMaintenanceActivityStatus", ["admin", "manager", "maintenance"], () =>
+    maintenance.updateMaintenanceActivityStatus(MISSING_ID, { status: "COMPLETED" }),
+  ),
 ];
 
 beforeAll(async () => {
@@ -797,6 +802,7 @@ const READ_ONLY = new Set([
   "housekeeping.consumptionByItem",
   "housekeeping.consumptionByRoom",
   "housekeeping.consumptionByStaff",
+  "housekeeping.reusablesByItem",
   "housekeeping.housekeepingSummary",
   "maintenance.activitiesByCategory",
   "maintenance.activitiesByRoom",

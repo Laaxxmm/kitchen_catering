@@ -147,10 +147,12 @@ async function resetTransactionalDataInner(
 
       // Other departments — housekeeping / maintenance / banquet
       await tx.housekeepingIssueLine.deleteMany();
+      await tx.housekeepingAdjustment.deleteMany();
       await tx.housekeepingIssue.deleteMany();
       await tx.housekeepingReceiptLine.deleteMany();
       await tx.housekeepingReceipt.deleteMany();
       await tx.maintenanceActivityLine.deleteMany();
+      await tx.maintenanceAdjustment.deleteMany();
       await tx.maintenanceActivity.deleteMany();
       await tx.maintenanceReceiptLine.deleteMany();
       await tx.maintenanceReceipt.deleteMany();

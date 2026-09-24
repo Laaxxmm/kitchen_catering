@@ -36,11 +36,18 @@ link, `.env` never committed, non-root container, migrations on boot.
 |---|---|
 | No Content-Security-Policy | The theme snippet in `app/layout.tsx` and Next's inline scripts need nonces first. Separate piece of work. |
 | Petty-cash top-ups over ₹10,000 are self-approved by accounts | Client policy call; the code now says so plainly instead of claiming an approval that does not exist. |
-| Physical stock counts write the figure with no movement document | Needs an adjustment table on both stores; cannot be wrong until someone runs a count. |
+| Physical stock counts write the figure with no movement document | Housekeeping and maintenance now record every hand adjustment (`HousekeepingAdjustment` / `MaintenanceAdjustment`, 24 Sep); the F&B store still writes the bare figure. |
 | Customer contact details visible to every operational role | Deliberate — drivers need the address. Revisit the moment a role is added that should not see them. |
 | In-memory rate limiter | Correct for one replica (`railway.json`); stops working silently above that. |
 | `uuid <11.1.1` (moderate) in the tree | Transitive; needs `npm audit fix --force`. |
 | No database backups on Railway | Operational, not code. **The largest open risk** while an erase-everything button exists. |
+
+## Housekeeping and maintenance modules
+
+Audited and made ready for go-live on 24 September 2026 — five parallel
+read-only audits, then three parallel fix passes. The consolidated findings,
+what shipped, what is deferred, and the team's go-live checklist live in
+`docs/audit-2026-09-24-housekeeping-maintenance.md`.
 
 ## Housekeeping the operator owns
 
