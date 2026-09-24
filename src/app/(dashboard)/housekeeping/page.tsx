@@ -29,7 +29,7 @@ export default async function HousekeepingLandingPage() {
         { label: "Staff", href: "/housekeeping/staff" },
         { label: "Receipts", href: "/housekeeping/receipts" },
         { label: "Issues", href: "/housekeeping/issues" },
-        { label: "Returns", href: "/housekeeping/returns/new" },
+        { label: "Returns", href: "/housekeeping/returns" },
         { label: "Adjust stock", href: "/housekeeping/adjust" },
         { label: "Reports", href: "/housekeeping/reports" },
       ]}

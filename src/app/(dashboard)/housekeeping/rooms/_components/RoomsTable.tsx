@@ -39,7 +39,9 @@ const TYPE_LABEL: Record<RoomType, string> = {
   OTHER: "Other",
 };
 
-export function RoomsTable({ rooms }: { rooms: Room[] }) {
+/** `canWrite` false = read-only view (maintenance manager): the rows show,
+ *  the buttons don't — every write action would refuse them anyway. */
+export function RoomsTable({ rooms, canWrite = true }: { rooms: Room[]; canWrite?: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState<Partial<Room> | null>(null);
@@ -98,7 +100,11 @@ export function RoomsTable({ rooms }: { rooms: Room[] }) {
     if (!confirm("Deactivate this room?")) return;
     startTransition(async () => {
       try {
-        await deactivateRoom(id);
+        const res = await deactivateRoom(id);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success("Deactivated");
         router.refresh();
       } catch (err) {
@@ -221,11 +227,11 @@ export function RoomsTable({ rooms }: { rooms: Room[] }) {
             </Button>
           </div>
         </section>
-      ) : (
+      ) : canWrite ? (
         <div>
           <Button onClick={startCreate}>+ Add room</Button>
         </div>
-      )}
+      ) : null}
 
       {rooms.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">No rooms yet. Add one above.</p>
@@ -238,7 +244,7 @@ export function RoomsTable({ rooms }: { rooms: Room[] }) {
               <TableHead>Type</TableHead>
               <TableHead>Floor</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              {canWrite && <TableHead className="text-right">Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -260,6 +266,7 @@ export function RoomsTable({ rooms }: { rooms: Room[] }) {
                     {r.active ? "Active" : "Inactive"}
                   </span>
                 </TableCell>
+                {canWrite && (
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
                     {r.active ? (
@@ -301,6 +308,7 @@ export function RoomsTable({ rooms }: { rooms: Room[] }) {
                     </Button>
                   </div>
                 </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>

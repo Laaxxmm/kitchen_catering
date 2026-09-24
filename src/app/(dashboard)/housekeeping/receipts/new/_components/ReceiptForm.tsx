@@ -49,6 +49,13 @@ export function ReceiptForm({ items }: { items: Item[] }) {
   }
 
   function submit() {
+    // A line with only the item or only the quantity is a half-typed line,
+    // not a blank one — refuse rather than silently drop it.
+    const half = lines.findIndex((l) => !!l.itemId !== !!l.quantity.trim());
+    if (half >= 0) {
+      toast.error(`Line ${half + 1}: pick an item and enter a quantity, or remove the line`);
+      return;
+    }
     const cleanLines = lines
       .filter((l) => l.itemId && l.quantity.trim())
       .map((l) => ({

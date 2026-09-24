@@ -15,6 +15,7 @@ import {
   consumptionByItem,
   consumptionByRoom,
   consumptionByStaff,
+  reusablesByItem,
   type ReportPeriod,
 } from "@/server/actions/housekeeping";
 
@@ -38,10 +39,11 @@ export default async function HousekeepingReportsPage({
     (PERIODS.find((p) => p.key === sp.period)?.key as ReportPeriod | undefined) ??
     "WEEK";
 
-  const [byItem, byRoom, byStaff] = await Promise.all([
+  const [byItem, byRoom, byStaff, reusables] = await Promise.all([
     consumptionByItem(period, { from: sp.from, to: sp.to }),
     consumptionByRoom(period, { from: sp.from, to: sp.to }),
     consumptionByStaff(period, { from: sp.from, to: sp.to }),
+    reusablesByItem(period, { from: sp.from, to: sp.to }),
   ]);
 
   return (
@@ -49,7 +51,7 @@ export default async function HousekeepingReportsPage({
       <PageHeader
         eyebrow="Housekeeping"
         title="Consumption reports"
-        description="What's been issued, broken down by item, room and staff."
+        description="Consumables used up, by item, room and staff — and the linen loop (out, back, lost) on its own."
         actions={
           <Link href="/housekeeping">
             <Button variant="outline" size="sm">← Back</Button>
@@ -133,18 +135,20 @@ export default async function HousekeepingReportsPage({
               <TableHeader>
                 <TableRow>
                   <TableHead>Room</TableHead>
-                  <TableHead className="text-right">Total units</TableHead>
+                  <TableHead>Item</TableHead>
+                  <TableHead className="text-right">Consumed</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {byRoom.map((r) => (
-                  <TableRow key={r.roomId}>
+                  <TableRow key={`${r.roomId}:${r.itemId}`}>
                     <TableCell className="text-[12.5px]">
                       <span className="font-mono">{r.roomNumber}</span>
                       {r.roomName && <span className="text-ik-ink-3"> — {r.roomName}</span>}
                     </TableCell>
+                    <TableCell className="text-[12.5px]">{r.itemName}</TableCell>
                     <TableCell className="text-right font-mono text-[12.5px]">
-                      {r.totalUnits}
+                      {r.qty} <span className="text-ik-ink-3">{r.unit}</span>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -183,6 +187,38 @@ export default async function HousekeepingReportsPage({
           )}
         </section>
       </div>
+
+      <section className="mt-6">
+        <h2 className="mb-2 text-[12px] font-medium text-ik-ink-2">Reusables — towels, linens, robes</h2>
+        {reusables.length === 0 ? (
+          <p className="text-[12.5px] text-ik-ink-3">No reusable movement in this period.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Item</TableHead>
+                <TableHead className="text-right">Issued</TableHead>
+                <TableHead className="text-right">Returned</TableHead>
+                <TableHead className="text-right">Lost</TableHead>
+                <TableHead className="text-right">Out now</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {reusables.map((r) => (
+                <TableRow key={r.itemId}>
+                  <TableCell className="text-[12.5px]">
+                    {r.name} <span className="text-ik-ink-3">{r.unit}</span>
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-[12.5px]">{r.issued}</TableCell>
+                  <TableCell className="text-right font-mono text-[12.5px]">{r.returned}</TableCell>
+                  <TableCell className={"text-right font-mono text-[12.5px]" + (Number(r.lost) > 0 ? " text-alert" : "")}>{r.lost}</TableCell>
+                  <TableCell className="text-right font-mono text-[12px] text-ik-ink-3">{r.inCirculation}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </section>
     </>
   );
 }
