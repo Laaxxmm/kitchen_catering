@@ -1,6 +1,7 @@
-import { CustomerInvoiceKind, CustomerInvoiceStatus } from "@prisma/client";
+import { CustomerInvoiceKind, CustomerInvoiceStatus, type OrderChannel } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { humanizeStatus } from "@/lib/order-status";
+import { isImmediateChannel } from "@/lib/order-channels";
 
 /**
  * When a customer invoice may be approved for release and when it may be
@@ -125,9 +126,28 @@ export function approveRefusal(input: {
 }
 
 /**
+ * Does this invoice need a manager's sign-off before it goes to the
+ * customer? Catering bills do: 100 were booked, 120 ate, and the figure is
+ * corrected before the client sees it. In-house bills do not — a room
+ * service or à la carte folio mirrors what was served and is settled at the
+ * counter, and the client asked for those to go out without a manager in
+ * the loop. In-house = the consolidated folio (no single order, member
+ * orders back-link to it) or a bill on an immediate-channel order.
+ */
+export function needsReleaseApproval(input: {
+  orderChannel: OrderChannel | null | undefined;
+  consolidated: boolean;
+}): boolean {
+  if (input.consolidated) return false;
+  if (input.orderChannel && isImmediateChannel(input.orderChannel)) return false;
+  return true;
+}
+
+/**
  * Why this invoice can't be issued. The hold is checked first — it's the
  * loud "someone actively blocked this" signal and no amount of approving
- * clears it.
+ * clears it. `requiresApproval` false (an in-house bill) skips the
+ * sign-off check only; the hold and the status still apply.
  */
 export function issueRefusal(input: {
   invoiceNo: string;
@@ -135,15 +155,16 @@ export function issueRefusal(input: {
   onHoldReason: string | null;
   onHold: boolean;
   approvedAt: Date | null;
+  requiresApproval?: boolean;
 }): string | null {
-  const { invoiceNo, status, onHold, onHoldReason, approvedAt } = input;
+  const { invoiceNo, status, onHold, onHoldReason, approvedAt, requiresApproval = true } = input;
   if (onHold) {
     return `Invoice is on hold: ${onHoldReason ?? "no reason recorded"} — release the hold first`;
   }
   if (status !== CustomerInvoiceStatus.DRAFT) {
     return `Cannot issue an invoice that's ${humanizeStatus(status)}`;
   }
-  if (!approvedAt) {
+  if (requiresApproval && !approvedAt) {
     return `${invoiceNo} hasn't been approved for release — a manager or admin has to sign it off before it goes to the customer.`;
   }
   return null;

@@ -23,7 +23,7 @@ import { ActionResultButton } from "@/components/ik/ActionResultButton";
 import { ActionReasonForm } from "@/components/ik/ActionReasonForm";
 import { formatINR, toDecimal } from "@/lib/money";
 import { formatIST } from "@/lib/time";
-import { mayReachCustomer } from "@/lib/customer-invoice-gates";
+import { mayReachCustomer, needsReleaseApproval } from "@/lib/customer-invoice-gates";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +42,17 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const [invoice, session] = await Promise.all([getCustomerInvoice(id), auth()]);
   if (!invoice) notFound();
   const role = session?.user?.role;
-  const canIssue = role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS;
+  const isFinance = role === Role.ADMIN || role === Role.MANAGER || role === Role.ACCOUNTS;
+  // An in-house bill (room service / à la carte folio) needs no manager
+  // sign-off, and the F&B desk that raised it may issue it. Catering bills
+  // keep the approval gate and stay with finance.
+  const requiresApproval = needsReleaseApproval({
+    orderChannel: invoice.order?.channel,
+    consolidated: invoice._count.consolidatedOrders > 0,
+  });
+  const isFnbDesk = role === Role.DELIVERY || role === Role.FNB_SERVICE;
+  const canIssue = isFinance || (!requiresApproval && isFnbDesk);
+  const canEdit = isFinance;
   // Accounts records detailed payments via the form below; the
   // one-click "Mark paid" + manual email-to-customer are admin/manager
   // only, since they're commercial decisions.
@@ -51,7 +61,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   // Billing hold — while held, payment + email controls disappear and a
   // banner explains why. Hold/release is the finance desk (WRITE_ROLES).
   const isHeld = !!invoice.onHoldAt;
-  const canHold = canIssue;
+  const canHold = isFinance;
   // Release approval — accounts prepare and edit, a manager signs off.
   const canApprove = role === Role.ADMIN || role === Role.MANAGER;
   const isApproved = !!invoice.approvedAt;
@@ -144,16 +154,15 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 />
               )}
             <Link href="/invoices"><Button variant="outline">Back</Button></Link>
-            {isDraft && canIssue && (
-              <>
-                <Link href={`/invoices/${invoice.id}/edit`}><Button variant="outline">Edit lines & pax</Button></Link>
-                {/* Issue is offered only once a manager has signed off. The
-                    action refuses anyway; hiding the button means nobody
-                    clicks it expecting the customer to get the bill. */}
-                {isApproved && (
-                  <ActionResultButton action={doIssue} successMessage="Invoice issued">Issue invoice</ActionResultButton>
-                )}
-              </>
+            {isDraft && canEdit && (
+              <Link href={`/invoices/${invoice.id}/edit`}><Button variant="outline">Edit lines & pax</Button></Link>
+            )}
+            {/* Issue is offered once a manager has signed off — or straight
+                away on an in-house bill, which needs no sign-off. The action
+                refuses anyway; hiding the button means nobody clicks it
+                expecting the customer to get the bill. */}
+            {isDraft && canIssue && (isApproved || !requiresApproval) && (
+              <ActionResultButton action={doIssue} successMessage="Invoice issued">Issue invoice</ActionResultButton>
             )}
           </div>
         }
@@ -192,7 +201,13 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       {/* Release gate. A draft is not a customer document until a manager or
           admin has signed off the numbers on it — and any edit sends it back
           here, so the signature always belongs to the amount on screen. */}
-      {isDraft && (
+      {isDraft && !requiresApproval && (
+        <div className="mb-4 rounded-md border border-ik-rule bg-ik-paper-alt p-3 text-[12.5px] text-ik-ink-2">
+          <span className="font-medium text-ik-ink">In-house bill</span> — no manager sign-off needed. Issue it when the
+          guest settles; the share link and PDF go live at that moment.
+        </div>
+      )}
+      {isDraft && requiresApproval && (
         isApproved ? (
           <div className="mb-4 rounded-md border border-positive-wash bg-positive-wash p-3 text-[12.5px]">
             <div className="font-medium text-positive">Approved for release</div>

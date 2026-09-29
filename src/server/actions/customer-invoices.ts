@@ -34,6 +34,7 @@ import {
   approveRefusal,
   issueRefusal,
   mayReachCustomer,
+  needsReleaseApproval,
   paymentRefusal,
   settledStatus,
 } from "@/lib/customer-invoice-gates";
@@ -49,6 +50,10 @@ import {
 import type { Prisma } from "@prisma/client";
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.ACCOUNTS];
+// The F&B desk (DELIVERY / retired alias FNB_SERVICE) raises the in-house
+// folios and may issue THOSE — no manager sign-off on a room service bill.
+// issueCustomerInvoice turns them away from anything that needs approval.
+const INHOUSE_ISSUE_EXTRA_ROLES = [Role.DELIVERY, Role.FNB_SERVICE];
 // Sign-off before an invoice may go to the customer. Deliberately excludes
 // ACCOUNTS: they prepare and edit the draft, a manager signs it off. One
 // desk doing both is the gap this closes.
@@ -579,10 +584,14 @@ function notifyAwaitingApproval(id: string, why: string) {
         invoiceNo: true,
         grandTotal: true,
         customer: { select: { name: true } },
-        order: { select: { code: true } },
+        order: { select: { code: true, channel: true } },
+        _count: { select: { consolidatedOrders: true } },
       },
     });
     if (!invoice) return;
+    // An in-house bill (room service / à la carte) needs no signature, so
+    // there is nothing to ask the managers for.
+    if (!needsReleaseApproval({ orderChannel: invoice.order?.channel, consolidated: invoice._count.consolidatedOrders > 0 })) return;
     await notifyRoles(APPROVE_ROLES, {
       kind: NotificationKind.GENERIC,
       title: `Invoice ${invoice.invoiceNo} needs your approval`,
@@ -966,7 +975,10 @@ export async function issueCustomerInvoice(id: string): Promise<ActionResult> {
 }
 
 async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
-  const session = await requireRole(WRITE_ROLES);
+  // The F&B desk is admitted for the in-house bills it raises (room service
+  // / à la carte folios need no sign-off — see needsReleaseApproval); the
+  // check below turns it away from a catering invoice.
+  const session = await requireRole([...WRITE_ROLES, ...INHOUSE_ISSUE_EXTRA_ROLES]);
   const wantsEInvoice = await eInvoiceEnabled();
 
   await db.$transaction(async (tx) => {
@@ -975,15 +987,25 @@ async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
       select: {
         invoiceNo: true, status: true, orderId: true, amountPaid: true, grandTotal: true,
         onHoldAt: true, onHoldReason: true, approvedAt: true,
+        order: { select: { channel: true } },
+        _count: { select: { consolidatedOrders: true } },
       },
     });
     if (!invoice) throw new ActionError("Invoice not found");
+    const requiresApproval = needsReleaseApproval({
+      orderChannel: invoice.order?.channel,
+      consolidated: invoice._count.consolidatedOrders > 0,
+    });
+    if (requiresApproval && !(WRITE_ROLES as Role[]).includes(session.user.role as Role)) {
+      throw new ActionError("Catering invoices are issued by accounts, a manager or admin.");
+    }
     const refusal = issueRefusal({
       invoiceNo: invoice.invoiceNo,
       status: invoice.status,
       onHold: !!invoice.onHoldAt,
       onHoldReason: invoice.onHoldReason,
       approvedAt: invoice.approvedAt,
+      requiresApproval,
     });
     if (refusal) throw new ActionError(refusal);
     // Cash taken at the door was credited onto the draft, so an invoice can
@@ -996,7 +1018,11 @@ async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
     // approvedAt clause makes an edit landing mid-click lose it too — the
     // edit revoked the sign-off, so this issue must not slip through.
     const updated = await tx.customerInvoice.updateMany({
-      where: { id, status: CustomerInvoiceStatus.DRAFT, approvedAt: { not: null } },
+      where: {
+        id,
+        status: CustomerInvoiceStatus.DRAFT,
+        ...(requiresApproval ? { approvedAt: { not: null } } : {}),
+      },
       data: {
         status: settled,
         issuedAt,
@@ -1637,8 +1663,9 @@ async function createConsolidatedInHouseInvoiceInner(
       data: {
         invoiceNo,
         kind: CustomerInvoiceKind.ORDER,
-        // Same gate as every other order-linked bill: the folio is a draft
-        // until a manager releases it. Money taken on the way is credited
+        // Born a draft like every order-linked bill, but an in-house folio
+        // needs no manager sign-off: the F&B desk issues it when the guest
+        // settles (needsReleaseApproval). Money taken on the way is credited
         // now; the paid/partial status is settled at issue.
         ...ORDER_INVOICE_INITIAL,
         amountPaid: podTotal.toFixed(2),
@@ -1720,7 +1747,8 @@ async function createConsolidatedInHouseInvoiceInner(
     return invoice;
   });
 
-  notifyAwaitingApproval(result.id, "in-house folio");
+  // No "awaiting approval" ping: an in-house folio needs no sign-off — the
+  // desk that raised it issues it when the guest settles.
   revalidatePath("/invoices");
   revalidatePath("/invoices/room-service");
   return { ok: true, id: result.id, invoiceNo: result.invoiceNo };
@@ -1740,10 +1768,13 @@ export async function getCustomerInvoice(id: string) {
       // headcount/mealType feed the PDF's live event line — the invoice's own
       // lines are a creation-time snapshot and go stale when the order is
       // revised (client item #6: 100 → 200 pax still printed 100).
-      order: { select: { id: true, code: true, headcount: true, mealType: true, eventDate: true } },
+      order: { select: { id: true, code: true, headcount: true, mealType: true, eventDate: true, channel: true } },
       createdBy: { select: { name: true } },
       onHoldBy: { select: { name: true } },
       approvedBy: { select: { name: true } },
+      // Member orders of a consolidated in-house folio — their presence is
+      // what tells the page this bill needs no manager sign-off.
+      _count: { select: { consolidatedOrders: true } },
       lines: { orderBy: { sortOrder: "asc" } },
       payments: {
         where: { reversedAt: null },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CustomerInvoiceStatus } from "@prisma/client";
+import { CustomerInvoiceStatus, OrderChannel } from "@prisma/client";
 import {
   APPROVABLE_STATUSES,
   APPROVAL_CLEARED,
@@ -7,9 +7,43 @@ import {
   approveRefusal,
   issueRefusal,
   mayReachCustomer,
+  needsReleaseApproval,
   prorateQuantity,
   settledStatus,
 } from "@/lib/customer-invoice-gates";
+
+// The client's rule, 29 Sep: room service bills go out without a manager.
+// Catering bills keep the sign-off — 100 booked, 120 ate, the figure is
+// corrected before the customer sees it.
+describe("which invoices need a manager's sign-off", () => {
+  it("a consolidated in-house folio does not", () => {
+    expect(needsReleaseApproval({ orderChannel: null, consolidated: true })).toBe(false);
+  });
+
+  it("a bill on a room service, à la carte or management order does not", () => {
+    for (const channel of [OrderChannel.ROOM_SERVICE, OrderChannel.ALACARTE, OrderChannel.MANAGEMENT]) {
+      expect(needsReleaseApproval({ orderChannel: channel, consolidated: false }), channel).toBe(false);
+    }
+  });
+
+  it("every catering channel does, and so does a bill with no order at all", () => {
+    for (const channel of [
+      OrderChannel.BANQUET, OrderChannel.BUFFET, OrderChannel.ODC, OrderChannel.PACKET,
+      OrderChannel.COUNTER_SALE, OrderChannel.RAMAIAH_CAFE,
+    ]) {
+      expect(needsReleaseApproval({ orderChannel: channel, consolidated: false }), channel).toBe(true);
+    }
+    expect(needsReleaseApproval({ orderChannel: null, consolidated: false })).toBe(true);
+  });
+
+  it("an in-house draft issues unsigned; the hold and the status still apply", () => {
+    const base = { invoiceNo: "INV-26-27-0300", status: CustomerInvoiceStatus.DRAFT, onHold: false, onHoldReason: null, approvedAt: null };
+    expect(issueRefusal({ ...base, requiresApproval: false })).toBeNull();
+    expect(issueRefusal({ ...base })).toMatch(/hasn't been approved/);
+    expect(issueRefusal({ ...base, requiresApproval: false, onHold: true, onHoldReason: "dispute" })).toMatch(/on hold/);
+    expect(issueRefusal({ ...base, requiresApproval: false, status: CustomerInvoiceStatus.ISSUED })).toMatch(/Cannot issue/);
+  });
+});
 
 // A customer's GST invoice leaves the building on these decisions, so they
 // are asserted exhaustively — a new CustomerInvoiceStatus must not quietly

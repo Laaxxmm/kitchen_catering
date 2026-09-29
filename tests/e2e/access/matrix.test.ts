@@ -450,10 +450,13 @@ const CASES: GateCase[] = [
   gate("customer-invoices", "approveCustomerInvoiceForRelease", ["admin", "manager"], () =>
     customerInvoices.approveCustomerInvoiceForRelease(MISSING_ID),
   ),
+  // The F&B desk is past the gate: it issues the in-house folios it raises
+  // (no sign-off on a room service bill). A catering invoice turns it away
+  // one step later, proven in rules.test.ts / money/07-inhouse-bill.
   gate(
     "customer-invoices",
     "issueCustomerInvoice",
-    ["admin", "manager", "accounts"],
+    ["admin", "manager", "accounts", "delivery"],
     () => customerInvoices.issueCustomerInvoice(MISSING_ID),
   ),
   gate("customer-invoices", "cancelCustomerInvoiceEInvoice", ["admin", "accounts"], () =>
