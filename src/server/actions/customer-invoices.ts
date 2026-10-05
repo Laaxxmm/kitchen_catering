@@ -21,7 +21,7 @@ import {
   type ActionResultWith,
 } from "@/server/action-result";
 import { deferAfterResponse } from "@/server/defer";
-import { isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
+import { IMMEDIATE_CHANNEL_LIST, isImmediateChannel, isPackagePricedChannel } from "@/lib/order-channels";
 import { nextCustomerInvoiceNumber } from "@/lib/sequences";
 import { sha256Json } from "@/lib/audit";
 import { computeLine, summarise } from "@/lib/gst";
@@ -88,6 +88,7 @@ async function createCustomerInvoiceFromOrderInner(
   orderId: string,
 ): Promise<{ ok: true; id: string; invoiceNo: string }> {
   const session = await requireRole(WRITE_ROLES);
+  const wantsEInvoice = await eInvoiceEnabled();
 
   const result = await db.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
@@ -260,10 +261,17 @@ async function createCustomerInvoiceFromOrderInner(
       },
     });
 
-    return invoice;
+    // A room service / à la carte / management bill needs no sign-off, so
+    // it does not sit as a draft waiting on anyone: issued here, in the same
+    // transaction. Catering bills stay drafts for the manager.
+    const issued = isImmediateChannel(order.channel);
+    if (issued) await issueDraftInTx(tx, invoice.id, session.user, wantsEInvoice);
+
+    return { id: invoice.id, invoiceNo: invoice.invoiceNo, issued };
   });
 
-  notifyAwaitingApproval(result.id, "raised from a delivered order");
+  if (result.issued) afterIssue(result.id, wantsEInvoice);
+  else notifyAwaitingApproval(result.id, "raised from a delivered order");
   revalidatePath("/invoices");
   revalidatePath(`/orders/${orderId}`);
   revalidatePath(`/invoices/${result.id}`);
@@ -977,11 +985,30 @@ export async function issueCustomerInvoice(id: string): Promise<ActionResult> {
 async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
   // The F&B desk is admitted for the in-house bills it raises (room service
   // / à la carte folios need no sign-off — see needsReleaseApproval); the
-  // check below turns it away from a catering invoice.
+  // check inside turns it away from a catering invoice.
   const session = await requireRole([...WRITE_ROLES, ...INHOUSE_ISSUE_EXTRA_ROLES]);
   const wantsEInvoice = await eInvoiceEnabled();
 
-  await db.$transaction(async (tx) => {
+  await db.$transaction((tx) => issueDraftInTx(tx, id, session.user, wantsEInvoice));
+  afterIssue(id, wantsEInvoice);
+  return { ok: true };
+}
+
+/**
+ * Release a DRAFT to the customer, inside the caller's transaction: the
+ * Issue button, and the two in-house creation paths, which issue the bill
+ * the moment it is generated (a room service bill needs no sign-off, so
+ * there is nothing for a draft to wait on). Refuses a held invoice, a
+ * non-draft, a catering invoice without its sign-off, and a catering
+ * invoice issued by the F&B desk. Pair with afterIssue() post-commit.
+ */
+async function issueDraftInTx(
+  tx: Prisma.TransactionClient,
+  id: string,
+  actor: { id: string; role: Role | string },
+  wantsEInvoice: boolean,
+): Promise<void> {
+  {
     const invoice = await tx.customerInvoice.findUnique({
       where: { id },
       select: {
@@ -996,7 +1023,7 @@ async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
       orderChannel: invoice.order?.channel,
       consolidated: invoice._count.consolidatedOrders > 0,
     });
-    if (requiresApproval && !(WRITE_ROLES as Role[]).includes(session.user.role as Role)) {
+    if (requiresApproval && !(WRITE_ROLES as Role[]).includes(actor.role as Role)) {
       throw new ActionError("Catering invoices are issued by accounts, a manager or admin.");
     }
     const refusal = issueRefusal({
@@ -1048,26 +1075,29 @@ async function issueCustomerInvoiceInner(id: string): Promise<{ ok: true }> {
     }
     await tx.auditLog.create({
       data: {
-        userId: session.user.id,
+        userId: actor.id,
         action: "CUSTOMER_INVOICE_ISSUED",
         entity: "CustomerInvoice",
         entityId: id,
+        payloadHash: sha256Json({ requiresApproval, settled }),
       },
     });
-  });
+  }
+}
 
-  // Post-commit, after the response: this is the single point at which an
-  // invoice reaches the customer. It used to fire on delivery confirmation,
-  // which handed the bill over before any manager had seen it.
+/**
+ * Post-commit, after the response: issuing is the single point at which an
+ * invoice reaches the customer. It used to fire on delivery confirmation,
+ * which handed the bill over before any manager had seen it. IRN too — only
+ * ever from here, so an unreleased draft is never filed with the GST portal.
+ */
+function afterIssue(id: string, wantsEInvoice: boolean): void {
   deferAfterResponse("invoice-email", () => emailTaxInvoiceCore(id));
-  // IRN too — only ever from here, so an unapproved draft is never filed
-  // with the GST portal.
   if (wantsEInvoice) {
     deferAfterResponse("invoice-irn", () => generateIRNForInvoice(id));
   }
   revalidatePath("/invoices");
   revalidatePath(`/invoices/${id}`);
-  return { ok: true };
 }
 
 // ─── E-Invoice generation (fire-and-forget after issue) ────────────────
@@ -1439,7 +1469,10 @@ export async function listCustomerInvoices(
     },
     include: {
       customer: { select: { name: true } },
-      order: { select: { code: true } },
+      // channel + member count let the list tell an in-house bill (no
+      // sign-off) from a catering one (needsReleaseApproval).
+      order: { select: { code: true, channel: true } },
+      _count: { select: { consolidatedOrders: true } },
     },
     orderBy: { createdAt: "desc" },
     take: 200,
@@ -1455,7 +1488,16 @@ export async function listCustomerInvoices(
 export async function listCustomerInvoicesAwaitingApproval() {
   await requireRole(READ_ROLES);
   return db.customerInvoice.findMany({
-    where: { status: CustomerInvoiceStatus.DRAFT, approvedAt: null },
+    where: {
+      status: CustomerInvoiceStatus.DRAFT,
+      approvedAt: null,
+      // Only bills that need a signature (needsReleaseApproval): not an
+      // in-house folio, and not a bill on a room service / à la carte /
+      // management order. Those are issued at generation; any left as a
+      // draft from before 5 Oct are issued from their page, unsigned.
+      consolidatedOrders: { none: {} },
+      OR: [{ orderId: null }, { order: { channel: { notIn: IMMEDIATE_CHANNEL_LIST } } }],
+    },
     select: {
       id: true,
       invoiceNo: true,
@@ -1607,6 +1649,7 @@ async function createConsolidatedInHouseInvoiceInner(
   if (!orderIds || orderIds.length === 0) {
     throw new ActionError("Pick at least one order to bill.");
   }
+  const wantsEInvoice = await eInvoiceEnabled();
 
   const result = await db.$transaction(async (tx) => {
     const orders = await tx.order.findMany({
@@ -1663,10 +1706,10 @@ async function createConsolidatedInHouseInvoiceInner(
       data: {
         invoiceNo,
         kind: CustomerInvoiceKind.ORDER,
-        // Born a draft like every order-linked bill, but an in-house folio
-        // needs no manager sign-off: the F&B desk issues it when the guest
-        // settles (needsReleaseApproval). Money taken on the way is credited
-        // now; the paid/partial status is settled at issue.
+        // Created as a draft and issued a few lines below, in this same
+        // transaction: an in-house folio needs no manager sign-off
+        // (needsReleaseApproval), so nothing waits on anyone. Money taken on
+        // the way is credited now; the paid/partial status is settled at issue.
         ...ORDER_INVOICE_INITIAL,
         amountPaid: podTotal.toFixed(2),
         orderId: null, // consolidated — see notes for the source order codes
@@ -1744,12 +1787,15 @@ async function createConsolidatedInHouseInvoiceInner(
       },
     });
 
+    // No sign-off on an in-house bill, so no draft stage either: the folio
+    // is issued the moment it is generated. The member orders were just
+    // back-linked above, which is what marks it in-house to the issue step.
+    await issueDraftInTx(tx, invoice.id, session.user, wantsEInvoice);
+
     return invoice;
   });
 
-  // No "awaiting approval" ping: an in-house folio needs no sign-off — the
-  // desk that raised it issues it when the guest settles.
-  revalidatePath("/invoices");
+  afterIssue(result.id, wantsEInvoice);
   revalidatePath("/invoices/room-service");
   return { ok: true, id: result.id, invoiceNo: result.invoiceNo };
 }

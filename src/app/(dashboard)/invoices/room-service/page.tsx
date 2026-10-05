@@ -46,7 +46,7 @@ export default async function RoomServiceBillingPage() {
       <PageHeader
         eyebrow="Money · In-house"
         title="Room service billing"
-        description="Served room-service, à-la-carte and management orders, grouped by room/guest. Pick a date, confirm the items, and raise one consolidated bill."
+        description="Served room-service, à-la-carte and management orders, grouped by room/guest. Pick a date, confirm the items, and raise one consolidated bill — it is issued straight away, no manager approval."
       />
       <InHouseBilling orders={rows} todayIst={todayIst} onGenerate={generate} />
     </>

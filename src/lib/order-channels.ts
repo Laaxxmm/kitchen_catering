@@ -29,6 +29,9 @@ export function isImmediateChannel(channel: OrderChannel): boolean {
   return IMMEDIATE_CHANNELS.has(channel);
 }
 
+/** Array form for Prisma `{ channel: { in / notIn: … } }` filters — same set. */
+export const IMMEDIATE_CHANNEL_LIST: OrderChannel[] = [...IMMEDIATE_CHANNELS];
+
 /**
  * Channels that get a post-delivery WhatsApp feedback link minted on
  * completion. MANAGEMENT (internal) orders are intentionally excluded.

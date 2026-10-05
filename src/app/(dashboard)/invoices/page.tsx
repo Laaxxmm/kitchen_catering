@@ -8,10 +8,21 @@ import { auth } from "@/server/auth";
 import { toDecimal, formatINRWhole } from "@/lib/money";
 import { SummaryStrip } from "@/components/ik/StatChips";
 import { StatusPill } from "@/components/ik/StatusPill";
+import { needsReleaseApproval } from "@/lib/customer-invoice-gates";
 
 export const dynamic = "force-dynamic";
 
 type Inv = Awaited<ReturnType<typeof listCustomerInvoices>>[number];
+
+/** A draft only waits on a manager when it is a catering bill. Room
+ *  service / à la carte bills need no sign-off (needsReleaseApproval). */
+function awaitsSignOff(i: Inv): boolean {
+  return (
+    i.status === CustomerInvoiceStatus.DRAFT &&
+    !i.approvedAt &&
+    needsReleaseApproval({ orderChannel: i.order?.channel, consolidated: i._count.consolidatedOrders > 0 })
+  );
+}
 
 export default async function InvoicesPage() {
   const [session, invoices] = await Promise.all([auth(), listCustomerInvoices()]);
@@ -24,9 +35,9 @@ export default async function InvoicesPage() {
   const paid = invoices.filter((i) => i.status === CustomerInvoiceStatus.PAID);
   // Drafts nobody has signed off can't reach the customer at all, so they
   // get their own section instead of being buried with the cancelled ones.
-  const awaitingApproval = invoices.filter((i) => i.status === CustomerInvoiceStatus.DRAFT && !i.approvedAt);
+  const awaitingApproval = invoices.filter(awaitsSignOff);
   const other = invoices.filter(
-    (i) => (i.status === CustomerInvoiceStatus.DRAFT && i.approvedAt) || i.status === CustomerInvoiceStatus.CANCELLED,
+    (i) => (i.status === CustomerInvoiceStatus.DRAFT && !awaitsSignOff(i)) || i.status === CustomerInvoiceStatus.CANCELLED,
   );
   const outstanding = unpaid.reduce((s, i) => s.plus(toDecimal(i.grandTotal).minus(toDecimal(i.amountPaid))), toDecimal(0));
 
@@ -66,7 +77,7 @@ export default async function InvoicesPage() {
           )}
           {unpaid.length > 0 && <InvSection title="To collect" rows={unpaid} now={now} canMarkPaid={canMarkPaid} />}
           {paid.length > 0 && <InvSection title="Paid" rows={paid} now={now} canMarkPaid={false} />}
-          {other.length > 0 && <InvSection title="Approved draft & cancelled" rows={other} now={now} canMarkPaid={false} />}
+          {other.length > 0 && <InvSection title="Ready to issue & cancelled" rows={other} now={now} canMarkPaid={false} />}
         </div>
       )}
     </>
@@ -113,9 +124,7 @@ function InvSection({ title, rows, now, canMarkPaid }: { title: string; rows: In
                 <TableCell>
                   <span className="inline-flex items-center gap-1">
                     <StatusPill tone={tone}>{label}</StatusPill>
-                    {inv.status === CustomerInvoiceStatus.DRAFT && !inv.approvedAt && (
-                      <StatusPill tone="amber">NEEDS APPROVAL</StatusPill>
-                    )}
+                    {awaitsSignOff(inv) && <StatusPill tone="amber">NEEDS APPROVAL</StatusPill>}
                     {inv.onHoldAt && <StatusPill tone="red">ON HOLD</StatusPill>}
                   </span>
                 </TableCell>
