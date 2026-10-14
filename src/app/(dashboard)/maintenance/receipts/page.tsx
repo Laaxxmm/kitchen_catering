@@ -17,18 +17,25 @@ import { formatIST } from "@/lib/time";
 export const dynamic = "force-dynamic";
 
 export default async function ReceiptsListPage() {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.MAINTENANCE_MANAGER]);
+  const session = await gateRolePage([Role.ADMIN, Role.MANAGER, Role.MAINTENANCE_MANAGER]);
   const receipts = await listMaintenanceReceipts({ limit: 200 });
+  // The desk receives against an approved stock request; a bare receipt is
+  // management's correction path.
+  const canReceiptDirectly = session.user.role !== Role.MAINTENANCE_MANAGER;
 
   return (
     <>
       <PageHeader
         eyebrow="Maintenance"
         title="Receipts"
-        description="Stock received into the maintenance store. Each receipt bumps current stock."
+        description="Stock received into the maintenance store — against a stock request, or a manager's correction. Each receipt bumps current stock."
         actions={
           <div className="flex gap-2">
-            <Link href="/maintenance/receipts/new"><Button>+ Record receipt</Button></Link>
+            {canReceiptDirectly ? (
+              <Link href="/maintenance/receipts/new"><Button>+ Record receipt</Button></Link>
+            ) : (
+              <Link href="/maintenance/purchase"><Button>Receive against a stock request</Button></Link>
+            )}
             <Link href="/maintenance"><Button variant="outline" size="sm">← Back</Button></Link>
           </div>
         }
@@ -42,6 +49,7 @@ export default async function ReceiptsListPage() {
             <TableRow>
               <TableHead>Received</TableHead>
               <TableHead>From</TableHead>
+              <TableHead>Stock request / bill</TableHead>
               <TableHead>Items</TableHead>
               <TableHead>Recorded by</TableHead>
             </TableRow>
@@ -55,6 +63,16 @@ export default async function ReceiptsListPage() {
                 <TableCell>
                   <div className="text-[12.5px]">{r.sourceContact ?? "—"}</div>
                   {r.sourceNote && <div className="text-[11.5px] text-ik-ink-3">{r.sourceNote}</div>}
+                </TableCell>
+                <TableCell className="text-[12px]">
+                  {r.purchaseOrder ? (
+                    <span className="font-mono">{r.purchaseOrder.number}</span>
+                  ) : (
+                    <span className="text-ik-ink-3">Direct</span>
+                  )}
+                  {r.supplierBillNo && (
+                    <div className="text-[11px] text-ik-ink-3">Bill {r.supplierBillNo}</div>
+                  )}
                 </TableCell>
                 <TableCell className="text-[12.5px]">
                   <ul className="grid gap-0.5">

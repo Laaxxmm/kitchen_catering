@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { MaintenanceActivityStatus, MaintenanceCategory, Prisma, Role } from "@prisma/client";
+import { JobPriority, MaintenanceActivityStatus, MaintenanceCategory, Prisma, Role } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { db } from "@/server/db";
 import { requireRole } from "@/server/rbac";
@@ -11,11 +11,11 @@ import { deferAfterResponse } from "@/server/defer";
 import { createNotification, notifyRoles } from "@/server/notification-core";
 import {
   MaintenanceActivityInput,
-  MaintenanceActivityStatusInput,
   MaintenanceItemInput,
   MaintenanceReceiptInput,
   MaintenanceStaffInput,
 } from "@/lib/validators";
+import { MaintenanceAssignInput, MaintenanceJobStatusInput } from "@/lib/maintenance-job-validators";
 import {
   ActionError,
   actionFailure,
@@ -42,15 +42,18 @@ async function lockMaintenanceItemRows(tx: Prisma.TransactionClient, ids: string
 // Rooms are reused from the housekeeping Room model.
 //
 // Who can do what:
-//   MAINTENANCE_MANAGER:  full read+write on this module.
-//   ADMIN / MANAGER:      full read+write (oversight + reports).
+//   MAINTENANCE_MANAGER:  runs the department — logs, assigns, starts and
+//                         closes its own jobs (no approval), keeps the spares.
+//   ADMIN / MANAGER:      the same, plus direct receipts (a correction path:
+//                         stock normally arrives against an approved request).
 //   HOUSEKEEPING_MANAGER: may REPORT a job (a PENDING activity with no
-//                         spares) — they find most room defects — and read
-//                         the staff list to name who should take it.
+//                         spares and no technician) — they find most room
+//                         defects; the maintenance desk takes it from there.
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.MAINTENANCE_MANAGER];
 const READ_ROLES = [Role.ADMIN, Role.MANAGER, Role.MAINTENANCE_MANAGER];
 const REPORT_ROLES = [...WRITE_ROLES, Role.HOUSEKEEPING_MANAGER];
+const RECEIPT_ROLES = [Role.ADMIN, Role.MANAGER];
 
 const OPEN_STATUSES: MaintenanceActivityStatus[] = ["PENDING", "IN_PROGRESS"];
 const NOT_CANCELLED = { not: MaintenanceActivityStatus.CANCELLED } as const;
@@ -206,8 +209,7 @@ async function deleteMaintenanceStaffInner(id: string): Promise<{ ok: true }> {
 }
 
 export async function listMaintenanceStaff(opts: { activeOnly?: boolean } = {}) {
-  // Housekeeping reads this to name who should take a job they report.
-  await requireRole([...READ_ROLES, Role.HOUSEKEEPING_MANAGER]);
+  await requireRole(READ_ROLES);
   return db.maintenanceStaff.findMany({
     where: opts.activeOnly ? { active: true } : {},
     orderBy: [{ active: "desc" }, { name: "asc" }],
@@ -368,19 +370,26 @@ export async function deleteMaintenanceItem(id: string): Promise<ActionResult> {
 
 async function deleteMaintenanceItemInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
-  const [receiptLines, activityLines] = await Promise.all([
-    db.maintenanceReceiptLine.count({ where: { itemId: id } }),
-    db.maintenanceActivityLine.count({ where: { itemId: id } }),
-  ]);
-  if (receiptLines > 0 || activityLines > 0) {
+  await db.$transaction(async (tx) => {
+    // Every row that names the item. Each one either blocks the delete at the
+    // database (a raw FK error) or would lose its link, so refuse by name.
+    // Inside the txn so a line booked in between can't slip past.
+    const [receiptLines, activityLines, adjustments, requestLines] = await Promise.all([
+      tx.maintenanceReceiptLine.count({ where: { itemId: id } }),
+      tx.maintenanceActivityLine.count({ where: { itemId: id } }),
+      tx.maintenanceAdjustment.count({ where: { itemId: id } }),
+      tx.deptPurchaseOrderLine.count({ where: { mtItemId: id } }),
+    ]);
     const bits: string[] = [];
     if (receiptLines > 0) bits.push(`${receiptLines} receipt line${receiptLines === 1 ? "" : "s"}`);
     if (activityLines > 0) bits.push(`${activityLines} activity line${activityLines === 1 ? "" : "s"}`);
-    throw new ActionError(
-      `This item has history (${bits.join(" + ")}). Deactivate instead to keep the audit trail.`
-    );
-  }
-  await db.$transaction(async (tx) => {
+    if (adjustments > 0) bits.push(`${adjustments} adjustment${adjustments === 1 ? "" : "s"}`);
+    if (requestLines > 0) bits.push(`${requestLines} stock request line${requestLines === 1 ? "" : "s"}`);
+    if (bits.length > 0) {
+      throw new ActionError(
+        `This item has history (${bits.join(" + ")}). Deactivate instead to keep the audit trail.`
+      );
+    }
     await tx.maintenanceItem.delete({ where: { id } });
     await tx.auditLog.create({
       data: {
@@ -418,7 +427,9 @@ export async function recordMaintenanceReceipt(raw: unknown): Promise<ActionResu
 }
 
 async function recordMaintenanceReceiptInner(raw: unknown): Promise<{ ok: true; id: string }> {
-  const session = await requireRole(WRITE_ROLES);
+  // Stock comes in against an approved stock request (/maintenance/purchase);
+  // a bare receipt is management's correction path, not the desk's.
+  const session = await requireRole(RECEIPT_ROLES);
   const input = MaintenanceReceiptInput.parse(raw);
   const receivedAt = parseWhen(input.receivedAt, "received date");
 
@@ -494,6 +505,7 @@ export async function listMaintenanceReceipts(opts: { limit?: number } = {}) {
     orderBy: { receivedAt: "desc" },
     include: {
       recordedBy: { select: { id: true, name: true } },
+      purchaseOrder: { select: { number: true } },
       lines: { include: { item: { select: { id: true, name: true, unit: true, category: true } } } },
     },
   });
@@ -527,6 +539,71 @@ function notifyLowStock(crossed: LowStockItem[]) {
   );
 }
 
+/**
+ * Take a job's spares off the shelf: one total per item (two lines naming
+ * the same spare are one draw on it), checked against on-hand under the row
+ * lock — a pre-check outside the txn could pass for two concurrent jobs that
+ * together overdraw. Writes the lines and the decrements; returns the items
+ * this took to (or below) their floor.
+ */
+async function drawSpares(
+  tx: Prisma.TransactionClient,
+  activityId: string,
+  lines: { itemId: string; qty: Decimal }[],
+): Promise<LowStockItem[]> {
+  if (lines.length === 0) return [];
+  const need = new Map<string, Decimal>();
+  for (const l of lines) need.set(l.itemId, (need.get(l.itemId) ?? new Decimal(0)).plus(l.qty));
+  const itemIds = [...need.keys()].sort();
+
+  await lockMaintenanceItemRows(tx, itemIds);
+  const items = await tx.maintenanceItem.findMany({
+    where: { id: { in: itemIds } },
+    select: { id: true, name: true, unit: true, active: true, currentStock: true, minStock: true },
+  });
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const crossed: LowStockItem[] = [];
+  for (const id of itemIds) {
+    const it = byId.get(id);
+    if (!it) throw new ActionError("Item not found — refresh the list and try again");
+    if (!it.active) throw new ActionError(`${it.name} is hidden — unhide it before drawing it`);
+    const have = new Decimal(it.currentStock.toString());
+    const take = need.get(id)!;
+    if (have.lt(take)) {
+      throw new ActionError(
+        `Not enough ${it.name} in stock: this job needs ${take.toString()} ${it.unit} across its lines, have ${have.toString()}`
+      );
+    }
+    const after = have.minus(take);
+    const floor = it.minStock ? new Decimal(it.minStock.toString()) : new Decimal(0);
+    if (have.gt(floor) && after.lte(floor)) {
+      crossed.push({ id, name: it.name, unit: it.unit, onHand: after.toString() });
+    }
+  }
+
+  await tx.maintenanceActivityLine.createMany({
+    data: lines.map((l) => ({ activityId, itemId: l.itemId, quantity: l.qty })),
+  });
+  for (const id of itemIds) {
+    await tx.maintenanceItem.update({
+      where: { id },
+      data: { currentStock: { decrement: need.get(id)! } },
+    });
+  }
+  return crossed;
+}
+
+/** The technician a job is being given to — present and still on the books. */
+async function activeStaff(tx: Prisma.TransactionClient, staffId: string) {
+  const staff = await tx.maintenanceStaff.findUnique({
+    where: { id: staffId },
+    select: { name: true, active: true },
+  });
+  if (!staff) throw new ActionError("Staff member not found");
+  if (!staff.active) throw new ActionError(`${staff.name} is inactive — pick an active staff member`);
+  return staff;
+}
+
 export async function recordMaintenanceActivity(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
   try {
     return await recordMaintenanceActivityInner(raw);
@@ -541,26 +618,26 @@ async function recordMaintenanceActivityInner(raw: unknown): Promise<{ ok: true;
   const performedAt = parseWhen(input.performedAt, "date and time");
 
   // Housekeeping reports the defect; the maintenance desk takes it from
-  // there. Their job is born PENDING and never touches the spares shelf.
+  // there. Their job is born PENDING and unassigned, and never touches the
+  // spares shelf.
   const reportOnly = session.user.role === Role.HOUSEKEEPING_MANAGER;
   if (reportOnly && input.lines.length > 0) {
     throw new ActionError("Housekeeping can report a job, not draw spares");
   }
   const status = reportOnly ? MaintenanceActivityStatus.PENDING : input.status;
-
+  const staffId = reportOnly ? null : input.staffId || null;
+  const workDone = reportOnly ? null : input.workDone || null;
+  if (!staffId && status !== MaintenanceActivityStatus.PENDING) {
+    throw new ActionError("Pick the staff member doing the work — only a pending job can wait unassigned");
+  }
+  if (status === MaintenanceActivityStatus.COMPLETED && !workDone) {
+    throw new ActionError("Say what work was done — a completed job records it");
+  }
   const lines = input.lines.map((l) => ({ itemId: l.itemId, qty: qty3(l.quantity) }));
-  // One total per item: two lines naming the same spare are one draw on it.
-  const need = new Map<string, Decimal>();
-  for (const l of lines) need.set(l.itemId, (need.get(l.itemId) ?? new Decimal(0)).plus(l.qty));
-  const itemIds = [...need.keys()].sort();
+  const now = new Date();
 
   const outcome = await db.$transaction(async (tx) => {
-    const staff = await tx.maintenanceStaff.findUnique({
-      where: { id: input.staffId },
-      select: { name: true, active: true },
-    });
-    if (!staff) throw new ActionError("Staff member not found");
-    if (!staff.active) throw new ActionError(`${staff.name} is inactive — pick an active staff member`);
+    if (staffId) await activeStaff(tx, staffId);
     const room = await tx.room.findUnique({
       where: { id: input.roomId },
       select: { number: true, active: true },
@@ -568,59 +645,25 @@ async function recordMaintenanceActivityInner(raw: unknown): Promise<{ ok: true;
     if (!room) throw new ActionError("Room not found");
     if (!room.active) throw new ActionError(`Room ${room.number} is inactive`);
 
-    // Availability is checked against the TOTAL per item under the row
-    // lock — a pre-check outside the txn could pass for two concurrent
-    // activities that together overdraw.
-    const crossed: LowStockItem[] = [];
-    if (itemIds.length > 0) {
-      await lockMaintenanceItemRows(tx, itemIds);
-      const items = await tx.maintenanceItem.findMany({
-        where: { id: { in: itemIds } },
-        select: { id: true, name: true, unit: true, active: true, currentStock: true, minStock: true },
-      });
-      const byId = new Map(items.map((i) => [i.id, i]));
-      for (const id of itemIds) {
-        const it = byId.get(id);
-        if (!it) throw new ActionError("Item not found — refresh the list and try again");
-        if (!it.active) throw new ActionError(`${it.name} is hidden — unhide it before drawing it`);
-        const have = new Decimal(it.currentStock.toString());
-        const take = need.get(id)!;
-        if (have.lt(take)) {
-          throw new ActionError(
-            `Not enough ${it.name} in stock: this job needs ${take.toString()} ${it.unit} across its lines, have ${have.toString()}`
-          );
-        }
-        const after = have.minus(take);
-        const floor = it.minStock ? new Decimal(it.minStock.toString()) : new Decimal(0);
-        if (have.gt(floor) && after.lte(floor)) {
-          crossed.push({ id, name: it.name, unit: it.unit, onHand: after.toString() });
-        }
-      }
-    }
-
     const created = await tx.maintenanceActivity.create({
       data: {
         performedAt,
         recordedById: session.user.id,
-        staffId: input.staffId,
+        staffId,
         roomId: input.roomId,
         category: input.category,
+        priority: input.priority,
         status,
-        completedAt: status === MaintenanceActivityStatus.COMPLETED ? new Date() : null,
+        // A job logged as already done has no start to measure, so it stays
+        // out of the time-to-close figure (getMaintenanceJobStats).
+        startedAt: status === MaintenanceActivityStatus.IN_PROGRESS ? now : null,
+        completedAt: status === MaintenanceActivityStatus.COMPLETED ? now : null,
         issueReported: input.issueReported,
-        workDone: input.workDone || null,
+        workDone,
         notes: input.notes || null,
-        lines: lines.length
-          ? { create: lines.map((l) => ({ itemId: l.itemId, quantity: l.qty })) }
-          : undefined,
       },
     });
-    for (const id of itemIds) {
-      await tx.maintenanceItem.update({
-        where: { id },
-        data: { currentStock: { decrement: need.get(id)! } },
-      });
-    }
+    const crossed = await drawSpares(tx, created.id, lines);
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -629,9 +672,10 @@ async function recordMaintenanceActivityInner(raw: unknown): Promise<{ ok: true;
         entityId: created.id,
         payloadHash: sha256Json({
           performedAt: performedAt.toISOString(),
-          staffId: input.staffId,
+          staffId,
           roomId: input.roomId,
           category: input.category,
+          priority: input.priority,
           status,
           lines: lines.map((l) => ({ itemId: l.itemId, quantity: l.qty.toString() })),
         }),
@@ -644,7 +688,7 @@ async function recordMaintenanceActivityInner(raw: unknown): Promise<{ ok: true;
     deferAfterResponse("maintenance:activity:reported", () =>
       notifyRoles([Role.MAINTENANCE_MANAGER], {
         kind: "GENERIC",
-        title: "Maintenance job reported",
+        title: input.priority === "URGENT" ? "URGENT maintenance job reported" : "Maintenance job reported",
         body: `Room ${outcome.room}: ${input.issueReported} — by ${session.user.name ?? session.user.email}`,
         link: "/maintenance/activities?status=PENDING",
         dedupeKey: `maint-act:${outcome.id}`,
@@ -673,9 +717,21 @@ const STATUS_LABEL: Record<MaintenanceActivityStatus, string> = {
   CANCELLED: "cancelled",
 };
 
+/**
+ * Move a job along. IN_PROGRESS stamps startedAt; IN_PROGRESS and COMPLETED
+ * need a technician (pass `staffId` to assign on the way); COMPLETED needs
+ * `workDone` and takes `parts` — the spares actually used, drawn from stock
+ * in the same transaction. CANCELLED puts every drawn spare back.
+ */
 export async function updateMaintenanceActivityStatus(
   id: string,
-  input: { status: "IN_PROGRESS" | "COMPLETED" | "CANCELLED"; workDone?: string | null; note?: string | null },
+  input: {
+    status: "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+    workDone?: string | null;
+    note?: string | null;
+    staffId?: string | null;
+    parts?: { itemId: string; qty: string }[];
+  },
 ): Promise<ActionResult> {
   try {
     return await updateMaintenanceActivityStatusInner(id, input);
@@ -686,7 +742,14 @@ export async function updateMaintenanceActivityStatus(
 
 async function updateMaintenanceActivityStatusInner(id: string, raw: unknown): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
-  const input = MaintenanceActivityStatusInput.parse(raw);
+  const input = MaintenanceJobStatusInput.parse(raw);
+  if (input.parts.length > 0 && input.status !== "COMPLETED") {
+    throw new ActionError("Spares are recorded when the job is completed");
+  }
+  const parts = input.parts.map((p) => ({ itemId: p.itemId, qty: qty3(p.qty) }));
+  // Nobody is assigned to a job on its way to the bin.
+  const assign = input.status === "CANCELLED" ? null : input.staffId || null;
+  const workDone = input.workDone || null;
   const now = new Date();
 
   const outcome = await db.$transaction(async (tx) => {
@@ -694,6 +757,8 @@ async function updateMaintenanceActivityStatusInner(id: string, raw: unknown): P
       where: { id },
       select: {
         status: true,
+        staffId: true,
+        startedAt: true,
         recordedById: true,
         issueReported: true,
         notes: true,
@@ -705,19 +770,33 @@ async function updateMaintenanceActivityStatusInner(id: string, raw: unknown): P
     if (job.status === "COMPLETED") throw new ActionError("This job is already completed");
     if (job.status === "CANCELLED") throw new ActionError("This job was cancelled");
     if (job.status === input.status) throw new ActionError(`This job is already ${STATUS_LABEL[job.status]}`);
+    if (assign) await activeStaff(tx, assign);
+    if (input.status !== "CANCELLED" && !(assign ?? job.staffId)) {
+      throw new ActionError(
+        `Assign a staff member before ${input.status === "IN_PROGRESS" ? "starting" : "completing"} this job`,
+      );
+    }
+    if (input.status === "COMPLETED" && !workDone) {
+      throw new ActionError("Say what work was done before completing the job");
+    }
 
     const flipped = await tx.maintenanceActivity.updateMany({
       where: { id, status: { in: STATUS_FROM[input.status] } },
       data: {
         status: input.status,
-        ...(input.status === "COMPLETED"
-          ? { completedAt: now, ...(input.workDone ? { workDone: input.workDone } : {}) }
-          : {}),
+        ...(assign ? { staffId: assign } : {}),
+        ...(input.status === "IN_PROGRESS" ? { startedAt: now } : {}),
+        // Completed straight from pending: started and finished in one go.
+        ...(input.status === "COMPLETED" ? { completedAt: now, workDone, startedAt: job.startedAt ?? now } : {}),
         ...(input.status === "CANCELLED" ? { cancelledAt: now } : {}),
         ...(input.note ? { notes: job.notes ? `${job.notes}\n${input.note}` : input.note } : {}),
       },
     });
     if (flipped.count !== 1) throw new ActionError("This job changed under you — refresh and try again");
+
+    // The flip above holds the job's row, so a second completion racing this
+    // one waits, finds it COMPLETED and draws nothing.
+    const crossed = input.status === "COMPLETED" ? await drawSpares(tx, id, parts) : [];
 
     // A cancelled job never happened: its spares go back on the shelf, one
     // readable RESTORED record per line so the movement can be traced.
@@ -760,10 +839,16 @@ async function updateMaintenanceActivityStatusInner(id: string, raw: unknown): P
         action: "MAINT_ACTIVITY_STATUS_CHANGED",
         entity: "MaintenanceActivity",
         entityId: id,
-        payloadHash: sha256Json({ from: job.status, to: input.status }),
+        payloadHash: sha256Json({
+          from: job.status,
+          to: input.status,
+          staffId: assign ?? job.staffId,
+          workDone: input.status === "COMPLETED" ? workDone : null,
+          parts: parts.map((p) => ({ itemId: p.itemId, quantity: p.qty.toString() })),
+        }),
       },
     });
-    return { recordedById: job.recordedById, room: job.room.number, issue: job.issueReported };
+    return { recordedById: job.recordedById, room: job.room.number, issue: job.issueReported, crossed };
   });
 
   const by = session.user.name ?? session.user.email;
@@ -793,6 +878,7 @@ async function updateMaintenanceActivityStatusInner(id: string, raw: unknown): P
       }),
     );
   }
+  notifyLowStock(outcome.crossed);
 
   revalidatePath("/maintenance/activities");
   revalidatePath("/maintenance/items");
@@ -800,16 +886,76 @@ async function updateMaintenanceActivityStatusInner(id: string, raw: unknown): P
   return { ok: true };
 }
 
+/** Give an open job to a technician (or hand it to another one). */
+export async function assignMaintenanceActivity(id: string, staffId: string): Promise<ActionResult> {
+  try {
+    return await assignMaintenanceActivityInner(id, staffId);
+  } catch (err) {
+    return actionFailure(err);
+  }
+}
+
+async function assignMaintenanceActivityInner(id: string, rawStaffId: unknown): Promise<{ ok: true }> {
+  const session = await requireRole(WRITE_ROLES);
+  const { staffId } = MaintenanceAssignInput.parse({ staffId: rawStaffId });
+
+  await db.$transaction(async (tx) => {
+    const job = await tx.maintenanceActivity.findUnique({
+      where: { id },
+      select: { status: true, staffId: true },
+    });
+    if (!job) throw new ActionError("Job not found");
+    if (!OPEN_STATUSES.includes(job.status)) {
+      throw new ActionError(`This job is ${STATUS_LABEL[job.status]} — only an open job can be assigned`);
+    }
+    if (job.staffId === staffId) throw new ActionError("This job is already with that staff member");
+    await activeStaff(tx, staffId);
+    const moved = await tx.maintenanceActivity.updateMany({
+      where: { id, status: { in: OPEN_STATUSES } },
+      data: { staffId },
+    });
+    if (moved.count !== 1) throw new ActionError("This job changed under you — refresh and try again");
+    await tx.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "MAINT_ACTIVITY_ASSIGNED",
+        entity: "MaintenanceActivity",
+        entityId: id,
+        payloadHash: sha256Json({ from: job.staffId, to: staffId }),
+      },
+    });
+  });
+
+  revalidatePath("/maintenance/activities");
+  revalidatePath("/maintenance");
+  return { ok: true };
+}
+
+export type ActivitySort = "priority" | "oldest" | "newest";
+
+const ACTIVITY_ORDER: Record<ActivitySort, Prisma.MaintenanceActivityOrderByWithRelationInput[]> = {
+  // JobPriority is declared LOW → URGENT, and Postgres sorts an enum in
+  // declaration order: desc puts URGENT first. Ties go oldest first.
+  priority: [{ priority: "desc" }, { performedAt: "asc" }],
+  oldest: [{ performedAt: "asc" }],
+  newest: [{ performedAt: "desc" }],
+};
+
 export interface ListActivitiesOpts {
   from?: string;
   to?: string;
   roomId?: string;
   staffId?: string;
+  /** Jobs nobody has taken yet; wins over `staffId`. */
+  unassigned?: boolean;
   itemId?: string;
   category?: MaintenanceCategory;
+  priority?: JobPriority;
   status?: MaintenanceActivityStatus;
   /** PENDING + IN_PROGRESS; wins over `status`. */
   open?: boolean;
+  /** Default newest first. */
+  sort?: ActivitySort;
   limit?: number;
 }
 
@@ -819,8 +965,10 @@ export async function listMaintenanceActivities(opts: ListActivitiesOpts = {}) {
   const range = dayRange(opts.from, opts.to);
   if (range) where.performedAt = range;
   if (opts.roomId) where.roomId = opts.roomId;
-  if (opts.staffId) where.staffId = opts.staffId;
+  if (opts.unassigned) where.staffId = null;
+  else if (opts.staffId) where.staffId = opts.staffId;
   if (opts.category) where.category = opts.category;
+  if (opts.priority) where.priority = opts.priority;
   if (opts.open) where.status = { in: OPEN_STATUSES };
   else if (opts.status) where.status = opts.status;
   if (opts.itemId) where.lines = { some: { itemId: opts.itemId } };
@@ -828,7 +976,7 @@ export async function listMaintenanceActivities(opts: ListActivitiesOpts = {}) {
   return db.maintenanceActivity.findMany({
     where,
     take: opts.limit ?? 300,
-    orderBy: { performedAt: "desc" },
+    orderBy: ACTIVITY_ORDER[opts.sort ?? "newest"],
     include: {
       recordedBy: { select: { id: true, name: true } },
       staff: { select: { id: true, name: true, category: true } },
@@ -954,6 +1102,50 @@ export async function activitiesByStaff(
     .sort((a, b) => b.count - a.count);
 }
 
+/**
+ * The job desk at a glance: open jobs by priority, the oldest one still
+ * open, and how long a job takes from logged to completed over the period.
+ */
+export async function getMaintenanceJobStats(
+  period: MaintenancePeriod = "MONTH",
+  opts: { from?: string; to?: string } = {},
+) {
+  await requireRole(READ_ROLES);
+  const openWhere = { status: { in: OPEN_STATUSES } };
+  const [open, oldest, closed] = await Promise.all([
+    db.maintenanceActivity.groupBy({ by: ["priority"], where: openWhere, _count: { _all: true } }),
+    db.maintenanceActivity.findFirst({
+      where: openWhere,
+      orderBy: { performedAt: "asc" },
+      select: { performedAt: true },
+    }),
+    // Jobs logged as already done carry no startedAt — nothing to measure.
+    // ponytail: averaged in JS over at most 5000 rows; AVG() in SQL if the
+    // period ever holds more.
+    db.maintenanceActivity.findMany({
+      where: {
+        status: MaintenanceActivityStatus.COMPLETED,
+        completedAt: periodRange(period, opts.from, opts.to),
+        startedAt: { not: null },
+      },
+      select: { performedAt: true, completedAt: true },
+      take: 5000,
+    }),
+  ]);
+
+  const openByPriority: Record<JobPriority, number> = { LOW: 0, NORMAL: 0, HIGH: 0, URGENT: 0 };
+  for (const g of open) openByPriority[g.priority] = g._count._all;
+  const hours = closed.map(
+    (c) => Math.max(0, (c.completedAt ?? c.performedAt).getTime() - c.performedAt.getTime()) / 3_600_000,
+  );
+  return {
+    openByPriority,
+    oldestOpenAt: oldest?.performedAt ?? null,
+    closedCount: hours.length,
+    avgHoursToClose: hours.length ? hours.reduce((a, b) => a + b, 0) / hours.length : null,
+  };
+}
+
 /** Top-line counters for the maintenance dashboard. */
 export async function maintenanceSummary() {
   await requireRole(READ_ROLES);
@@ -996,6 +1188,7 @@ export async function maintenanceSummary() {
 
   const topConsumed = await maintenanceConsumptionByItem("WEEK");
   const byCat = await activitiesByCategory("WEEK");
+  const jobs = await getMaintenanceJobStats("WEEK");
 
   return {
     itemCount,
@@ -1005,5 +1198,7 @@ export async function maintenanceSummary() {
     pendingActivities: open,
     topItemsThisWeek: topConsumed.slice(0, 5),
     byCategoryThisWeek: byCat,
+    openByPriority: jobs.openByPriority,
+    oldestOpenAt: jobs.oldestOpenAt,
   };
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { JobPriority } from "@prisma/client";
 import { maintenanceSummary } from "@/server/actions/maintenance";
 
 const CAT_LABEL: Record<string, string> = {
@@ -6,6 +7,58 @@ const CAT_LABEL: Record<string, string> = {
   MECHANICAL: "Mechanical",
   GENERAL: "General",
 };
+
+const PRIORITY_ORDER: JobPriority[] = ["URGENT", "HIGH", "NORMAL", "LOW"];
+
+export const PRIORITY_LABEL: Record<JobPriority, string> = {
+  URGENT: "Urgent",
+  HIGH: "High",
+  NORMAL: "Normal",
+  LOW: "Low",
+};
+
+export const PRIORITY_TONE: Record<JobPriority, string> = {
+  URGENT: "text-alert font-medium",
+  HIGH: "text-amber",
+  NORMAL: "text-ik-ink-2",
+  LOW: "text-ik-ink-3",
+};
+
+/** How long ago, as the desk says it: hours under a day, then days. */
+export function ageLabel(since: Date, now = Date.now()): string {
+  const hours = Math.max(0, Math.floor((now - since.getTime()) / 3_600_000));
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
+/** Open jobs by priority, most urgent first, and the oldest one's age. */
+export function OpenJobsStrip({
+  byPriority,
+  oldestOpenAt,
+}: {
+  byPriority: Record<JobPriority, number>;
+  oldestOpenAt: Date | null;
+}) {
+  const total = PRIORITY_ORDER.reduce((n, p) => n + byPriority[p], 0);
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-ik-rule bg-ik-card p-3 text-[12.5px]">
+      <Link href="/maintenance/activities" className="font-medium text-ik-ink-2 hover:text-brand">
+        Open jobs: <span className="font-mono">{total}</span>
+      </Link>
+      {PRIORITY_ORDER.map((p) => (
+        <Link
+          key={p}
+          href={`/maintenance/activities?priority=${p}`}
+          className={PRIORITY_TONE[p] + " hover:underline"}
+        >
+          {PRIORITY_LABEL[p]} <span className="font-mono">{byPriority[p]}</span>
+        </Link>
+      ))}
+      <span className="text-ik-ink-3">
+        {oldestOpenAt ? <>Oldest open: <span className="font-mono">{ageLabel(oldestOpenAt)}</span></> : "Nothing open"}
+      </span>
+    </div>
+  );
+}
 
 /**
  * Maintenance-focused dashboard panel — mirrors HousekeepingPanel.
@@ -29,15 +82,19 @@ export async function MaintenancePanel({ compact = false }: { compact?: boolean 
       <div className="grid grid-cols-2 gap-px bg-ik-rule sm:grid-cols-5">
         <KPI label="Items" value={s.itemCount} />
         <KPI label="Receipts (7d)" value={s.receiptsLastWeek} />
-        <KPI label="Activities (7d)" value={s.activitiesLastWeek} />
+        <KPI label="Jobs (7d)" value={s.activitiesLastWeek} />
         <KPI label="Open" value={s.pendingActivities} highlight={s.pendingActivities > 0} />
         <KPI label="Low stock" value={s.lowStock.length} alert={s.lowStock.length > 0} />
+      </div>
+
+      <div className="border-t border-ik-rule p-3">
+        <OpenJobsStrip byPriority={s.openByPriority} oldestOpenAt={s.oldestOpenAt} />
       </div>
 
       {!compact && (
         <div className="border-t border-ik-rule p-3">
           <div className="mb-2 text-[10.5px] uppercase tracking-wide text-ik-ink-3">
-            Activities this week — by category
+            Jobs this week — by category
           </div>
           {s.byCategoryThisWeek.length === 0 ? (
             <p className="text-[12.5px] text-ik-ink-3">No activities recorded this week.</p>
