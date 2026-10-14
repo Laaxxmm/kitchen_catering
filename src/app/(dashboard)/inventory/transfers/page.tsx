@@ -21,7 +21,7 @@ export default async function TransfersPage() {
       <PageHeader
         eyebrow="Operations"
         title="Store transfers"
-        description="Stock moving between the kitchen, F&B and housekeeping stores. Each row is one document: the source went down and the destination went up by the same quantity."
+        description="Stock moving between the kitchen and F&B stores. Each row is one document: the source went down and the destination went up by the same quantity. Housekeeping now runs its own store, so older rows naming it are history only."
         actions={
           <Link href="/inventory/transfers/new">
             <Button>Record transfer</Button>

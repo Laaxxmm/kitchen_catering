@@ -15,14 +15,22 @@ import {
   type ActionResult,
 } from "@/server/action-result";
 
-const READ_ROLES = [
-  Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER, Role.MAINTENANCE_MANAGER,
-  // F&B Service (role DELIVERY, FNB_SERVICE its retired alias) runs the banquet store.
-  Role.FNB_SERVICE, Role.DELIVERY,
-  // Store keeper: works the F&B counter (receipts, issues) — reads on-hand,
-  // no longer writes it (see WRITE_ROLES_BY_STORE).
-  Role.STORE_KEEPER,
-];
+// Who may read a store's on-hand. Housekeeping and maintenance are self-run
+// departments, untied from the kitchen stores and from each other: each
+// head reads only their own shelf, and the kitchen store keeper reads
+// neither.
+const READ_ROLES_BY_STORE: Record<StoreKey, Role[]> = {
+  housekeeping: [Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER],
+  maintenance: [Role.ADMIN, Role.MANAGER, Role.MAINTENANCE_MANAGER],
+  banquet: [
+    Role.ADMIN, Role.MANAGER,
+    // F&B Service (role DELIVERY, FNB_SERVICE its retired alias) runs the banquet store.
+    Role.FNB_SERVICE, Role.DELIVERY,
+    // Store keeper: works the F&B counter (receipts, issues) — reads on-hand,
+    // no longer writes it (see WRITE_ROLES_BY_STORE).
+    Role.STORE_KEEPER,
+  ],
+};
 // Who may correct on-hand for a given store: admin/manager + the store's
 // own manager. Mirrors the receipt-write roles for each module.
 //
@@ -37,6 +45,12 @@ const WRITE_ROLES_BY_STORE: Record<StoreKey, Role[]> = {
 };
 
 export type StoreKey = "housekeeping" | "maintenance" | "banquet";
+
+/** The store name comes from the client; anything but the three keys is refused. */
+function storeKey(store: unknown): StoreKey {
+  if (store === "housekeeping" || store === "maintenance" || store === "banquet") return store;
+  throw new ActionError("Unknown store");
+}
 
 /**
  * Row-lock a store item for the rest of the transaction. adjustStoreStock
@@ -73,8 +87,9 @@ interface RawItem {
  * Items with no minStock are flagged so the page can nudge the user to set
  * thresholds. Also returns this-week received / issued counts.
  */
-export async function getStoreStock(store: StoreKey) {
-  await requireRole(READ_ROLES);
+export async function getStoreStock(raw: StoreKey) {
+  const store = storeKey(raw);
+  await requireRole(READ_ROLES_BY_STORE[store]);
   const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000);
 
   let items: RawItem[];
@@ -130,10 +145,11 @@ export async function getStoreStock(store: StoreKey) {
 }
 
 /** Active items for a store's adjust-stock picker (id · name · unit · on-hand). */
-export async function listStoreItems(store: StoreKey) {
+export async function listStoreItems(raw: StoreKey) {
   // Read-only picker for the adjust screen — read roles, not write roles
   // (the write itself is gated in adjustStoreStock).
-  await requireRole(READ_ROLES);
+  const store = storeKey(raw);
+  await requireRole(READ_ROLES_BY_STORE[store]);
   const select = { id: true, name: true, unit: true, currentStock: true } as const;
   const rows =
     store === "housekeeping"
@@ -176,7 +192,7 @@ async function adjustStoreStockInner(input: {
   reason: string;
   note?: string;
 }): Promise<{ ok: true }> {
-  const session = await requireRole(WRITE_ROLES_BY_STORE[input.store]);
+  const session = await requireRole(WRITE_ROLES_BY_STORE[storeKey(input.store)]);
   const reason = input.reason?.trim();
   if (!reason) throw new ActionError("A reason is required");
   if (input.mode !== "set" && input.mode !== "delta") throw new ActionError("Unknown adjustment mode");

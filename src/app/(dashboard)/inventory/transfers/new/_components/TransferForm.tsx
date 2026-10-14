@@ -33,7 +33,9 @@ interface Props {
   onSubmit: (input: StockTransferInputT) => Promise<ActionResultWith<{ id: string }>>;
 }
 
-const STORES = ["KITCHEN", "FNB", "HOUSEKEEPING"] as const;
+// Housekeeping is a self-run department with its own stock requests — not
+// a store this desk moves stock in or out of.
+const STORES = ["KITCHEN", "FNB"] as const;
 
 const selectClass = "h-9 w-full rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]";
 

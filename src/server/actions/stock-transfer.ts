@@ -12,22 +12,25 @@ import { unitsEquivalent } from "@/lib/units";
 import { istToUtc } from "@/lib/time";
 import { toDecimal } from "@/lib/money";
 import { sha256Json } from "@/lib/audit";
-import { deferAfterResponse } from "@/server/defer";
-import { notifyRoles } from "@/server/notification-core";
 import {
   ActionError,
   actionFailure,
   type ActionResultWith,
 } from "@/server/action-result";
 
-// Stock moving between the three stores. The hard part is that they hold
-// DIFFERENT item records: foil in the kitchen is an Ingredient row, foil in
+// Stock moving between the kitchen store and the F&B store. The hard part
+// is that they hold DIFFERENT item records: foil in the kitchen is an Ingredient row, foil in
 // F&B is a BanquetItem row. So a transfer is never one row's quantity
 // moving — it decrements a row in store A and increments a different row in
 // store B, in one transaction, and the user names both rows explicitly.
 // Nothing here matches items by name: "Aluminium Foil" and "Aluminium Foil
 // [Roll]" are different rows, often in different units, and a silent wrong
 // match corrupts two stores at once.
+//
+// Housekeeping used to be a third store here. It is now a self-run
+// department, untied from the kitchen stores: its stock arrives only through
+// its own stock requests. Past transfers in or out of it stay on the list as
+// documents; no new one can be recorded.
 //
 // Mirrors inventory.ts's WRITE_ROLES (a "use server" file can only export
 // async functions, so the list can't be shared across the two).
@@ -40,7 +43,7 @@ interface Side {
   unit: string;
   active: boolean;
   qty: Decimal;
-  /** Only the kitchen carries a valuation; F&B and housekeeping are quantity-only. */
+  /** Only the kitchen carries a valuation; F&B is quantity-only. */
   cost: Decimal | null;
   /** The exact values read, for the guarded write's where-clause. */
   rawQty: Prisma.Decimal;
@@ -59,9 +62,6 @@ async function lockRow(tx: Prisma.TransactionClient, store: StockStore, id: stri
       return;
     case StockStore.FNB:
       await tx.$executeRaw`SELECT 1 FROM "BanquetItem" WHERE "id" = ${id} FOR UPDATE`;
-      return;
-    case StockStore.HOUSEKEEPING:
-      await tx.$executeRaw`SELECT 1 FROM "HousekeepingItem" WHERE "id" = ${id} FOR UPDATE`;
       return;
   }
 }
@@ -84,16 +84,11 @@ async function readSide(
         }
       : null;
   }
-  const r =
-    store === StockStore.FNB
-      ? await tx.banquetItem.findUnique({
-          where: { id },
-          select: { id: true, name: true, unit: true, active: true, currentStock: true },
-        })
-      : await tx.housekeepingItem.findUnique({
-          where: { id },
-          select: { id: true, name: true, unit: true, active: true, currentStock: true },
-        });
+  if (store !== StockStore.FNB) return null;
+  const r = await tx.banquetItem.findUnique({
+    where: { id },
+    select: { id: true, name: true, unit: true, active: true, currentStock: true },
+  });
   return r
     ? {
         id: r.id, name: r.name, unit: r.unit, active: r.active,
@@ -134,13 +129,8 @@ async function writeSide(
       });
       return res.count;
     }
-    case StockStore.HOUSEKEEPING: {
-      const res = await tx.housekeepingItem.updateMany({
-        where: { id: side.id, currentStock: side.rawQty },
-        data: { currentStock: qty },
-      });
-      return res.count;
-    }
+    default:
+      return 0;
   }
 }
 
@@ -156,6 +146,11 @@ async function recordStockTransferInner(raw: unknown): Promise<{ ok: true; id: s
   const session = await requireRole(TRANSFER_ROLES);
   const input = StockTransferInput.parse(raw);
 
+  if (input.fromStore === StockStore.HOUSEKEEPING || input.toStore === StockStore.HOUSEKEEPING) {
+    throw new ActionError(
+      "Housekeeping runs its own store — its stock arrives through its own stock requests, not a transfer from the kitchen or F&B.",
+    );
+  }
   if (input.fromStore === input.toStore) {
     throw new ActionError(
       `Both sides are the ${STORE_LABELS[input.fromStore]} — moving stock inside one store is a stock adjustment, not a transfer.`,
@@ -198,7 +193,7 @@ async function recordStockTransferInner(raw: unknown): Promise<{ ok: true; id: s
     // it is the source; when the source keeps no valuation the destination's
     // own average is used, which leaves that average untouched rather than
     // inventing a price.
-    // ponytail: F&B and housekeeping hold no cost at all, so a transfer INTO
+    // ponytail: F&B holds no cost at all, so a transfer INTO
     // the kitchen from them adds quantity at the kitchen's existing average.
     // Put a cost field on the form if those stores ever start being valued.
     const unitCost = from.cost ?? (to.cost ?? null);
@@ -267,23 +262,6 @@ async function recordStockTransferInner(raw: unknown): Promise<{ ok: true; id: s
   revalidatePath("/inventory/transfers");
   revalidatePath("/inventory/ingredients");
   revalidatePath("/banquet/items");
-  revalidatePath("/housekeeping/items");
-
-  // The housekeeping manager cannot open /inventory/transfers, so a move
-  // touching their shelf is the one stock movement they would otherwise
-  // never hear about. Best-effort, after the response, like every notify.
-  if (input.fromStore === StockStore.HOUSEKEEPING || input.toStore === StockStore.HOUSEKEEPING) {
-    const into = input.toStore === StockStore.HOUSEKEEPING;
-    deferAfterResponse("transfer:notify-hk", () =>
-      notifyRoles([Role.HOUSEKEEPING_MANAGER], {
-        kind: "GENERIC",
-        title: `Stock moved ${into ? "into" : "out of"} the housekeeping store`,
-        body: `${into ? transfer.toItemName : transfer.fromItemName} ${toDecimal(transfer.quantity).toString()} ${into ? transfer.toUnit : transfer.fromUnit} — by ${session.user.name ?? session.user.email}`,
-        link: "/housekeeping/items",
-        dedupeKey: `transfer:${transfer.id}`,
-      }),
-    );
-  }
   return { ok: true, id: transfer.id };
 }
 
@@ -291,7 +269,7 @@ export interface TransferItemOption {
   id: string;
   store: StockStore;
   /**
-   * GP code, F&B only. The other two catalogues have unique names; the F&B
+   * GP code, F&B only. The kitchen catalogue has unique names; the F&B
    * one does not (in-house vs hired soup bowls), and the code prefix
    * GP-IN- / GP-HR- is what tells the two apart in the dropdown.
    */
@@ -302,13 +280,13 @@ export interface TransferItemOption {
 }
 
 /**
- * Every store's active catalogue, for the two dropdowns. The pickers are
+ * The kitchen and F&B active catalogues, for the two dropdowns. The pickers are
  * dropdown-only: the store may not free-type or create items here, and
  * catalogue creation stays with admin/manager in each store's own screen.
  */
 export async function listTransferItems(): Promise<TransferItemOption[]> {
   await requireRole(TRANSFER_ROLES);
-  const [ingredients, banquet, housekeeping] = await Promise.all([
+  const [ingredients, banquet] = await Promise.all([
     db.ingredient.findMany({
       where: { active: true },
       select: { id: true, name: true, unit: true, onHandQty: true },
@@ -317,11 +295,6 @@ export async function listTransferItems(): Promise<TransferItemOption[]> {
     db.banquetItem.findMany({
       where: { active: true },
       select: { id: true, sku: true, name: true, unit: true, currentStock: true, category: true },
-      orderBy: { name: "asc" },
-    }),
-    db.housekeepingItem.findMany({
-      where: { active: true },
-      select: { id: true, name: true, unit: true, currentStock: true },
       orderBy: { name: "asc" },
     }),
   ]);
@@ -338,9 +311,6 @@ export async function listTransferItems(): Promise<TransferItemOption[]> {
       name: i.category ? `${i.name} (${i.category})` : i.name,
       unit: i.unit,
       stock: i.currentStock.toString(),
-    })),
-    ...housekeeping.map((i) => ({
-      id: i.id, store: StockStore.HOUSEKEEPING, sku: null, name: i.name, unit: i.unit, stock: i.currentStock.toString(),
     })),
   ];
 }

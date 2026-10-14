@@ -2,8 +2,10 @@ import "./db-url";
 
 import { beforeAll, describe, expect, it } from "vitest";
 import { StockStore } from "@prisma/client";
-import { recordStockTransfer } from "@/server/actions/stock-transfer";
+import { listTransferItems, recordStockTransfer } from "@/server/actions/stock-transfer";
+import { upsertHousekeepingItem } from "@/server/actions/housekeeping";
 import {
+  asHousekeeping,
   asStore,
   db,
   ensureSeeded,
@@ -17,7 +19,8 @@ import {
 } from "./harness";
 
 /**
- * Stock moving between the kitchen store and the F&B store. The two hold
+ * Stock moving between the kitchen store and the F&B store — the only two
+ * stores this desk moves stock between. Housekeeping runs its own store. The two hold
  * DIFFERENT rows — foil in the kitchen is an Ingredient, foil in F&B is a
  * BanquetItem — so a transfer is never one quantity moving: it is one row
  * down and a different row up, in one transaction, with both rows named
@@ -247,5 +250,35 @@ describe("units and identity", () => {
     ).toMatch(/source item no longer exists/i);
 
     expectDecimal(await read.onHand(ingredientId), kitchenBefore, "kitchen unchanged");
+  });
+});
+
+describe("housekeeping is not a store this desk transfers to or from", () => {
+  it("refuses both directions and lists no housekeeping item to pick", async () => {
+    asHousekeeping();
+    const hkItem = mustOk(
+      await upsertHousekeepingItem({ name: `Transfer probe ${Date.now()}`, unit: "nos", openingStock: "4" }),
+      "housekeeping item",
+    ).id;
+    const kitchenBefore = await read.onHand(ingredientId);
+
+    for (const sides of [
+      { fromStore: StockStore.KITCHEN, fromItemId: ingredientId, toStore: StockStore.HOUSEKEEPING, toItemId: hkItem },
+      { fromStore: StockStore.HOUSEKEEPING, fromItemId: hkItem, toStore: StockStore.KITCHEN, toItemId: ingredientId },
+    ]) {
+      expect(await expectRefused(() => transfer({ ...sides, quantity: "1" }))).toMatch(
+        /Housekeeping runs its own store/,
+      );
+    }
+    expectDecimal(await read.onHand(ingredientId), kitchenBefore, "kitchen unchanged");
+    expectDecimal(
+      (await db.housekeepingItem.findUniqueOrThrow({ where: { id: hkItem } })).currentStock,
+      "4",
+      "housekeeping unchanged",
+    );
+
+    asStore();
+    const stores = new Set((await listTransferItems()).map((i) => i.store));
+    expect(stores).toEqual(new Set([StockStore.KITCHEN, StockStore.FNB]));
   });
 });
