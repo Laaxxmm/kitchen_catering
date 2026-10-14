@@ -79,6 +79,20 @@ export interface ManpowerToApprove {
   createdAt: string;
 }
 
+/** Housekeeping / maintenance asking for stock. Approved on the PO page,
+ *  where quantities can be cut line by line. */
+export interface DeptStockRequest {
+  id: string;
+  number: string;
+  department: "HOUSEKEEPING" | "MAINTENANCE";
+  reason: string;
+  requestedBy: string;
+  lines: number;
+  estimatedTotal: string;
+  /** ISO submittedAt. */
+  submittedAt: string;
+}
+
 interface Props {
   ordersToApprove: OrderToApprove[];
   orderChanges: OrderChange[];
@@ -89,6 +103,7 @@ interface Props {
   invoicesToApprove?: InvoiceToApprove[];
   /** Hired labour the chef / F&B asked for, awaiting sign-off. */
   manpowerToApprove?: ManpowerToApprove[];
+  deptStockRequests?: DeptStockRequest[];
   viewerIsAdmin?: boolean;
 }
 
@@ -111,10 +126,11 @@ const CHANNEL_LABEL: Record<OrderChannel, string> = {
  * grows downwards and stays on screen. Nothing here gets missed: the order
  * gate sits first since the kitchen waits on it.
  */
-export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseOrders, pendingVendors = [], invoicesToApprove = [], manpowerToApprove = [], viewerIsAdmin = false }: Props) {
+export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseOrders, pendingVendors = [], invoicesToApprove = [], manpowerToApprove = [], deptStockRequests = [], viewerIsAdmin = false }: Props) {
   const total =
     ordersToApprove.length + orderChanges.length + purchaseOrders.length
-    + pendingVendors.length + invoicesToApprove.length + manpowerToApprove.length;
+    + pendingVendors.length + invoicesToApprove.length + manpowerToApprove.length
+    + deptStockRequests.length;
   if (total === 0) return null;
 
   const tabs = [
@@ -124,6 +140,7 @@ export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseO
     { key: "po", label: "Purchase orders", hint: "Sign off spend", count: purchaseOrders.length },
     { key: "vendors", label: "New suppliers", hint: "Approve to unblock POs", count: pendingVendors.length },
     { key: "manpower", label: "Manpower", hint: "Hired labour — sign off", count: manpowerToApprove.length },
+    { key: "deptStock", label: "Housekeeping / maintenance stock requests", hint: "Department stock", count: deptStockRequests.length },
   ];
 
   // Soonest event first (the kitchen waits on these); POs keep their order.
@@ -161,6 +178,13 @@ export function ManagerApprovalsBoard({ ordersToApprove, orderChanges, purchaseO
             return (
               <CappedList items={manpowerToApprove} className={CARD_GRID} keyOf={(m) => m.id}>
                 {(m) => <ManpowerApprovalCard req={m} />}
+              </CappedList>
+            );
+          }
+          if (active === "deptStock") {
+            return (
+              <CappedList items={deptStockRequests} className={CARD_GRID} keyOf={(r) => r.id}>
+                {(r) => <DeptStockRequestCard req={r} />}
               </CappedList>
             );
           }
@@ -409,6 +433,31 @@ function ManpowerApprovalCard({ req }: { req: ManpowerToApprove }) {
       </div>
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <Link href={`/manpower/${req.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">
+          Review &amp; approve
+        </Link>
+      </div>
+    </li>
+  );
+}
+
+function DeptStockRequestCard({ req }: { req: DeptStockRequest }) {
+  const dept = req.department === "HOUSEKEEPING" ? "housekeeping" : "maintenance";
+  return (
+    <li className={CARD + " border border-brand-200 bg-brand-50"}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="font-mono text-[12.5px] text-brand-700">{req.number}</span>
+        <span className="font-mono text-[12.5px] text-ik-ink">{formatINR(req.estimatedTotal)}</span>
+      </div>
+      <div className="mt-1 text-[13px] text-ik-ink"><strong>{req.reason}</strong></div>
+      <div className="mt-0.5 text-[11.5px] text-ik-ink-2">
+        {req.department === "HOUSEKEEPING" ? "Housekeeping" : "Maintenance"} · {req.lines}{" "}
+        {req.lines === 1 ? "item" : "items"} · by {req.requestedBy}
+      </div>
+      <div className="mt-0.5 text-[11px] text-ik-ink-3">
+        Asked {formatIST(new Date(req.submittedAt), "d MMM, HH:mm")}
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <Link href={`/${dept}/purchase/${req.id}`} className="ml-auto text-[11.5px] text-brand hover:underline">
           Review &amp; approve
         </Link>
       </div>
