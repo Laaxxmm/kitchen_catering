@@ -16,6 +16,7 @@ import * as deptPurchase from "@/server/actions/dept-purchase";
 import * as dishes from "@/server/actions/dishes";
 import * as documents from "@/server/actions/documents";
 import * as housekeeping from "@/server/actions/housekeeping";
+import * as housekeepingJobs from "@/server/actions/housekeeping-jobs";
 import * as inventory from "@/server/actions/inventory";
 import * as inventoryAudit from "@/server/actions/inventory-audit";
 import * as invoiceSettings from "@/server/actions/invoice-settings";
@@ -713,7 +714,9 @@ const CASES: GateCase[] = [
   //    module alongside management, and neither reaches the other's.
   //    A thrown "not found" on the deactivate* probes counts as past the
   //    gate, so these rows hold whether they throw or return ActionResult.
-  gate("housekeeping", "upsertRoom", ["admin", "manager", "housekeeping"], () =>
+  // Rooms are shared master data: maintenance logs jobs against them, so
+  // its head may add and edit one (deactivate / delete stay housekeeping's).
+  gate("housekeeping", "upsertRoom", ["admin", "manager", "housekeeping", "maintenance"], () =>
     housekeeping.upsertRoom({}),
   ),
   gate("housekeeping", "deactivateRoom", ["admin", "manager", "housekeeping"], () =>
@@ -740,8 +743,26 @@ const CASES: GateCase[] = [
   gate("housekeeping", "deleteHousekeepingItem", ["admin", "manager", "housekeeping"], () =>
     housekeeping.deleteHousekeepingItem(MISSING_ID),
   ),
-  gate("housekeeping", "recordHousekeepingReceipt", ["admin", "manager", "housekeeping"], () =>
+  // Stock reaches housekeeping through its approved stock requests
+  // (receiveDeptPurchaseOrder); a direct receipt is a manager's correction.
+  gate("housekeeping", "recordHousekeepingReceipt", ["admin", "manager"], () =>
     housekeeping.recordHousekeepingReceipt({}),
+  ),
+  // The department's own jobs — no approval anywhere.
+  gate("housekeeping-jobs", "createHousekeepingJob", ["admin", "manager", "housekeeping"], () =>
+    housekeepingJobs.createHousekeepingJob({}),
+  ),
+  gate("housekeeping-jobs", "updateHousekeepingJob", ["admin", "manager", "housekeeping"], () =>
+    housekeepingJobs.updateHousekeepingJob(MISSING_ID, {}),
+  ),
+  gate("housekeeping-jobs", "startHousekeepingJob", ["admin", "manager", "housekeeping"], () =>
+    housekeepingJobs.startHousekeepingJob(MISSING_ID, {}),
+  ),
+  gate("housekeeping-jobs", "completeHousekeepingJob", ["admin", "manager", "housekeeping"], () =>
+    housekeepingJobs.completeHousekeepingJob(MISSING_ID, { outcome: "gate probe" }),
+  ),
+  gate("housekeeping-jobs", "cancelHousekeepingJob", ["admin", "manager", "housekeeping"], () =>
+    housekeepingJobs.cancelHousekeepingJob(MISSING_ID, "gate probe"),
   ),
   gate("housekeeping", "recordHousekeepingIssue", ["admin", "manager", "housekeeping"], () =>
     housekeeping.recordHousekeepingIssue({}),
@@ -771,7 +792,9 @@ const CASES: GateCase[] = [
   gate("maintenance", "deleteMaintenanceItem", ["admin", "manager", "maintenance"], () =>
     maintenance.deleteMaintenanceItem(MISSING_ID),
   ),
-  gate("maintenance", "recordMaintenanceReceipt", ["admin", "manager", "maintenance"], () =>
+  // Spares arrive through approved stock requests; a direct receipt is a
+  // manager's correction.
+  gate("maintenance", "recordMaintenanceReceipt", ["admin", "manager"], () =>
     maintenance.recordMaintenanceReceipt({}),
   ),
   // Housekeeping finds the room defects, so they may log one (it lands
@@ -786,6 +809,9 @@ const CASES: GateCase[] = [
   // spares back), not housekeeping's.
   gate("maintenance", "updateMaintenanceActivityStatus", ["admin", "manager", "maintenance"], () =>
     maintenance.updateMaintenanceActivityStatus(MISSING_ID, { status: "COMPLETED" }),
+  ),
+  gate("maintenance", "assignMaintenanceActivity", ["admin", "manager", "maintenance"], () =>
+    maintenance.assignMaintenanceActivity(MISSING_ID, MISSING_ID),
   ),
 ];
 
@@ -835,6 +861,7 @@ const READ_ONLY = new Set([
   "housekeeping.consumptionByItem",
   "housekeeping.consumptionByRoom",
   "housekeeping.consumptionByStaff",
+  "housekeeping.jobsReport",
   "housekeeping.reusablesByItem",
   "housekeeping.housekeepingSummary",
   "maintenance.activitiesByCategory",

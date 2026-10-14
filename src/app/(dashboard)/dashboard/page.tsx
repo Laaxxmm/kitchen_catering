@@ -500,14 +500,17 @@ export default async function DashboardPage({
       <>
         <LauncherGreeting
           firstName={firstName}
-          subtitle="Every issue-to-room, grouped by Today / This week / Earlier. Record new issues and receipts up top."
+          subtitle="Your department, run by you: open jobs, issue to rooms, and raise a stock request when the shelf runs low."
           actions={
             <div className="flex flex-wrap gap-2">
-              <Link href="/housekeeping/issues/new">
-                <Button>New issue to room</Button>
+              <Link href="/housekeeping/jobs/new">
+                <Button>New job</Button>
               </Link>
-              <Link href="/housekeeping/receipts/new">
-                <Button variant="outline">Record receipt</Button>
+              <Link href="/housekeeping/issues/new">
+                <Button variant="outline">Issue to room</Button>
+              </Link>
+              <Link href="/housekeeping/purchase/new">
+                <Button variant="outline">Request stock</Button>
               </Link>
             </div>
           }
@@ -546,11 +549,11 @@ export default async function DashboardPage({
       <>
         <LauncherGreeting
           firstName={firstName}
-          subtitle="Every electrical / mechanical activity, grouped by Today / This week / Earlier. Log new activities and receipts up top."
+          subtitle="Your department, run by you: log a job, close it with the parts used, and raise a stock request when the shelf runs low."
           actions={
             <div className="flex flex-wrap gap-2">
-              <Link href="/maintenance/activities/new"><Button>Log activity</Button></Link>
-              <Link href="/maintenance/receipts/new"><Button variant="outline">Record receipt</Button></Link>
+              <Link href="/maintenance/activities/new"><Button>Log a job</Button></Link>
+              <Link href="/maintenance/purchase/new"><Button variant="outline">Request stock</Button></Link>
             </div>
           }
         />
