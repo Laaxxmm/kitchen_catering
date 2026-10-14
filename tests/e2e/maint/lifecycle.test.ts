@@ -111,7 +111,10 @@ describe("pending → in progress → completed", () => {
     asAdmin();
     const { id } = mustOk(await recordMaintenanceActivity(job()), "admin logs");
     asMaintenance();
-    mustOk(await updateMaintenanceActivityStatus(id, { status: "COMPLETED" }), "complete");
+    mustOk(
+      await updateMaintenanceActivityStatus(id, { status: "COMPLETED", workDone: "Reset breaker" }),
+      "complete",
+    );
     await flushDeferred();
     const key = `maint-act-done:${id}`;
     for (const who of ["manager", "admin"] as const) {
@@ -171,7 +174,9 @@ describe("cancelling", () => {
     const today = formatIST(new Date(), "yyyy-MM-dd");
     const room = (await db.room.create({ data: { number: `LC-rep-${tag}` } })).id;
     mustOk(
-      await recordMaintenanceActivity(job({ roomId: room, status: "COMPLETED", lines: [{ itemId, quantity: "1" }] })),
+      await recordMaintenanceActivity(
+        job({ roomId: room, status: "COMPLETED", workDone: "Swapped fuse", lines: [{ itemId, quantity: "1" }] }),
+      ),
       "kept",
     );
     const dropped = mustOk(
@@ -198,7 +203,8 @@ describe("housekeeping reports, maintenance takes over", () => {
       await recordMaintenanceActivity(job({ status: "COMPLETED", issueReported: `Leaking tap ${tag}` })),
       "housekeeping reports",
     );
-    expect((await activity(id)).status).toBe("PENDING");
+    // Born PENDING and unassigned whatever was sent: the desk assigns it.
+    expect(await activity(id)).toMatchObject({ status: "PENDING", staffId: null });
     await flushDeferred();
     const note = await db.notification.findFirst({
       where: { userId: desk("maintenance").id, dedupeKey: `maint-act:${id}` },

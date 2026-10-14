@@ -1047,15 +1047,19 @@ export const MaintenanceReceiptInput = z.object({
 });
 
 const MaintActivityLineInput = z.object({
-  itemId: z.string().min(1),
+  itemId: z.string().trim().min(1).max(60),
   quantity: decimalString,
 });
 
 export const MaintenanceActivityInput = z.object({
   performedAt: isoDate,
-  staffId: z.string().min(1, "Pick a staff member"),
-  roomId: z.string().min(1, "Pick a room"),
+  // Optional while the job is only PENDING (a reported defect nobody has
+  // taken yet); the action insists on one for IN_PROGRESS / COMPLETED.
+  staffId: z.string().trim().max(60).nullable().optional(),
+  roomId: z.string().trim().min(1, "Pick a room").max(60),
   category: z.nativeEnum(MaintenanceCategory),
+  // Mirrors the JobPriority enum (spelled out to keep the import list alone).
+  priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
   // A job is logged open or done; cancelling is a later step
   // (updateMaintenanceActivityStatus), never the state it is born in.
   status: z
@@ -1066,13 +1070,17 @@ export const MaintenanceActivityInput = z.object({
   workDone: z.string().trim().max(1000).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
   // Items consumed are optional — many activities are pure labour.
-  lines: z.array(MaintActivityLineInput).optional().default([]),
+  lines: z.array(MaintActivityLineInput).max(50, "At most 50 spares lines on one job").optional().default([]),
 });
 
 export const MaintenanceActivityStatusInput = z.object({
   status: z.enum(["IN_PROGRESS", "COMPLETED", "CANCELLED"]),
+  // Required (non-blank) for COMPLETED — checked in the action, after the
+  // job's own state, so a second completion still says "already completed".
   workDone: z.string().trim().max(1000).nullable().optional(),
   note: z.string().trim().max(500).nullable().optional(),
+  // Assign while moving: starting or completing an unassigned job needs one.
+  staffId: z.string().trim().max(60).nullable().optional(),
 });
 
 // =====================================================================

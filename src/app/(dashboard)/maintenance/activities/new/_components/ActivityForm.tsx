@@ -4,7 +4,7 @@ import { localInputAt } from "@/lib/datetime-local";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { MaintenanceActivityStatus, MaintenanceCategory } from "@prisma/client";
+import { JobPriority, MaintenanceActivityStatus, MaintenanceCategory } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,7 +48,7 @@ export function ActivityForm({
   items: Item[];
   rooms: Room[];
   staff: Staff[];
-  /** Housekeeping: status fixed at PENDING, no spares section. */
+  /** Housekeeping: status fixed at PENDING, no technician, no spares section. */
   reportOnly?: boolean;
   doneHref?: string;
 }) {
@@ -58,6 +58,7 @@ export function ActivityForm({
   const [staffId, setStaffId] = useState("");
   const [roomId, setRoomId] = useState("");
   const [category, setCategory] = useState<MaintenanceCategory>(MaintenanceCategory.GENERAL);
+  const [priority, setPriority] = useState<JobPriority>(JobPriority.NORMAL);
   const [status, setStatus] = useState<MaintenanceActivityStatus>(
     reportOnly ? MaintenanceActivityStatus.PENDING : MaintenanceActivityStatus.COMPLETED,
   );
@@ -87,9 +88,16 @@ export function ActivityForm({
   }
 
   function submit() {
-    if (!staffId) { toast.error("Pick a staff member"); return; }
     if (!roomId) { toast.error("Pick a room"); return; }
+    if (!reportOnly && !staffId && status !== MaintenanceActivityStatus.PENDING) {
+      toast.error("Pick the staff member doing the work — only a pending job can wait unassigned");
+      return;
+    }
     if (issueReported.trim().length < 2) { toast.error("Describe the issue reported"); return; }
+    if (!reportOnly && status === MaintenanceActivityStatus.COMPLETED && !workDone.trim()) {
+      toast.error("Say what work was done — a completed job records it");
+      return;
+    }
     // A line with one half typed is a mistake, not noise — refuse rather
     // than drop it; a wholly blank line is just an unused "+ Add item".
     const half = lines.findIndex((l) => (l.itemId || l.quantity.trim()) && !(l.itemId && l.quantity.trim()));
@@ -106,12 +114,13 @@ export function ActivityForm({
       try {
         const res = await recordMaintenanceActivity({
           performedAt,
-          staffId,
+          staffId: reportOnly ? null : staffId || null,
           roomId,
           category,
+          priority,
           status,
           issueReported: issueReported.trim(),
-          workDone: workDone.trim() || null,
+          workDone: reportOnly ? null : workDone.trim() || null,
           notes: notes.trim() || null,
           lines: cleanLines,
         });
@@ -119,7 +128,7 @@ export function ActivityForm({
           toast.error(res.error);
           return;
         }
-        toast.success(reportOnly ? "Job reported to maintenance" : "Activity recorded");
+        toast.success(reportOnly ? "Job reported to maintenance" : "Job logged");
         router.push(doneHref);
         router.refresh();
       } catch (err) {
@@ -137,13 +146,17 @@ export function ActivityForm({
             <Label htmlFor="performedAt">Performed at</Label>
             <input id="performedAt" type="datetime-local" value={performedAt} onChange={(e) => setPerformedAt(e.target.value)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]" />
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="staffId">Staff (who did the work)</Label>
-            <select id="staffId" value={staffId} onChange={(e) => setStaffId(e.target.value)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
-              <option value="">— Pick staff —</option>
-              {staff.map((s) => <option key={s.id} value={s.id}>{s.name} · {CAT_LABEL[s.category]}</option>)}
-            </select>
-          </div>
+          {!reportOnly && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="staffId">
+                Staff {status === MaintenanceActivityStatus.PENDING ? "(optional while pending)" : "(who does the work)"}
+              </Label>
+              <select id="staffId" value={staffId} onChange={(e) => setStaffId(e.target.value)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
+                <option value="">— Unassigned —</option>
+                {staff.map((s) => <option key={s.id} value={s.id}>{s.name} · {CAT_LABEL[s.category]}</option>)}
+              </select>
+            </div>
+          )}
           <div className="grid gap-1.5">
             <Label htmlFor="roomId">Room</Label>
             <select id="roomId" value={roomId} onChange={(e) => setRoomId(e.target.value)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
@@ -159,7 +172,13 @@ export function ActivityForm({
             <select id="category" value={category} onChange={(e) => setCategory(e.target.value as MaintenanceCategory)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
               {Object.values(MaintenanceCategory).map((c) => <option key={c} value={c}>{CAT_LABEL[c]}</option>)}
             </select>
-            <p className="text-[11px] text-ik-ink-3">Auto-set from staff. Override if needed.</p>
+            {!reportOnly && <p className="text-[11px] text-ik-ink-3">Auto-set from staff. Override if needed.</p>}
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="priority">Priority</Label>
+            <select id="priority" value={priority} onChange={(e) => setPriority(e.target.value as JobPriority)} className="h-9 rounded-md border border-ik-rule bg-ik-card px-2 text-[13px]">
+              {Object.values(JobPriority).map((p) => <option key={p} value={p}>{p[0] + p.slice(1).toLowerCase()}</option>)}
+            </select>
           </div>
           {!reportOnly && (
             <div className="grid gap-1.5">
@@ -175,10 +194,14 @@ export function ActivityForm({
           <Label htmlFor="issueReported">Issue reported</Label>
           <Textarea id="issueReported" rows={2} placeholder="e.g. AC not cooling, tap dripping" value={issueReported} onChange={(e) => setIssueReported(e.target.value)} />
         </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor="workDone">Work done (optional)</Label>
-          <Textarea id="workDone" rows={2} placeholder="e.g. replaced capacitor, tightened washer" value={workDone} onChange={(e) => setWorkDone(e.target.value)} />
-        </div>
+        {!reportOnly && (
+          <div className="grid gap-1.5">
+            <Label htmlFor="workDone">
+              Work done {status === MaintenanceActivityStatus.COMPLETED ? "" : "(optional)"}
+            </Label>
+            <Textarea id="workDone" rows={2} placeholder="e.g. replaced capacitor, tightened washer" value={workDone} onChange={(e) => setWorkDone(e.target.value)} />
+          </div>
+        )}
         <div className="grid gap-1.5">
           <Label htmlFor="notes">Notes (optional)</Label>
           <Input id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -231,7 +254,7 @@ export function ActivityForm({
       </section>}
 
       <div className="flex gap-2">
-        <Button onClick={submit} disabled={pending}>{pending ? "Saving…" : reportOnly ? "Report job" : "Save activity"}</Button>
+        <Button onClick={submit} disabled={pending}>{pending ? "Saving…" : reportOnly ? "Report job" : "Save job"}</Button>
         <Button variant="outline" onClick={() => router.back()} disabled={pending}>Cancel</Button>
       </div>
     </div>

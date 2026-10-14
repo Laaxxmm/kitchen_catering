@@ -15,9 +15,11 @@ import {
   activitiesByCategory,
   activitiesByRoom,
   activitiesByStaff,
+  getMaintenanceJobStats,
   maintenanceConsumptionByItem,
   type MaintenancePeriod,
 } from "@/server/actions/maintenance";
+import { OpenJobsStrip } from "@/components/ik/dashboard/MaintenancePanel";
 
 export const dynamic = "force-dynamic";
 
@@ -44,11 +46,12 @@ export default async function MaintenanceReportsPage({
   const period: MaintenancePeriod =
     (PERIODS.find((p) => p.key === sp.period)?.key as MaintenancePeriod | undefined) ?? "WEEK";
 
-  const [byCategory, byItem, byRoom, byStaff] = await Promise.all([
+  const [byCategory, byItem, byRoom, byStaff, jobs] = await Promise.all([
     activitiesByCategory(period, { from: sp.from, to: sp.to }),
     maintenanceConsumptionByItem(period, { from: sp.from, to: sp.to }),
     activitiesByRoom(period, { from: sp.from, to: sp.to }),
     activitiesByStaff(period, { from: sp.from, to: sp.to }),
+    getMaintenanceJobStats(period, { from: sp.from, to: sp.to }),
   ]);
 
   return (
@@ -56,7 +59,7 @@ export default async function MaintenanceReportsPage({
       <PageHeader
         eyebrow="Maintenance"
         title="Reports"
-        description="Activity volume + spares consumption — broken down by category, item, room and staff."
+        description="Job volume, time to close and spares consumption — by category, item, room and staff."
         actions={<Link href="/maintenance"><Button variant="outline" size="sm">← Back</Button></Link>}
       />
 
@@ -95,6 +98,17 @@ export default async function MaintenanceReportsPage({
           <Button type="submit" variant="outline" size="sm">Apply</Button>
         </form>
       )}
+
+      <div className="mb-4 grid gap-3 sm:grid-cols-[220px,1fr]">
+        <div className="rounded-md border border-ik-rule bg-ik-card p-3">
+          <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">Average time to close</div>
+          <div className="mt-1 font-mono text-[22px]">{closeTime(jobs.avgHoursToClose)}</div>
+          <div className="text-[11px] text-ik-ink-3">
+            logged → completed, over {jobs.closedCount} job{jobs.closedCount === 1 ? "" : "s"} closed in the period
+          </div>
+        </div>
+        <OpenJobsStrip byPriority={jobs.openByPriority} oldestOpenAt={jobs.oldestOpenAt} />
+      </div>
 
       <div className="mb-5 grid gap-3 sm:grid-cols-3">
         {byCategory.length === 0 ? (
@@ -198,6 +212,12 @@ export default async function MaintenanceReportsPage({
       </div>
     </>
   );
+}
+
+/** Under two days in hours, then days — "—" when nothing closed. */
+function closeTime(hours: number | null): string {
+  if (hours == null) return "—";
+  return hours < 48 ? `${hours.toFixed(1)}h` : `${(hours / 24).toFixed(1)}d`;
 }
 
 function buildHref(sp: { period?: string; from?: string; to?: string }) {

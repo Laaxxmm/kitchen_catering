@@ -12,6 +12,7 @@ import {
   upsertMaintenanceStaff,
 } from "@/server/actions/maintenance";
 import {
+  actingAs,
   asMaintenance,
   desk,
   ensureSeeded,
@@ -50,6 +51,14 @@ async function stock(itemId: string): Promise<string> {
   return row.currentStock.toString();
 }
 
+/**
+ * A direct receipt is management's correction path — the desk receives
+ * against an approved stock request — so it is booked as the manager.
+ */
+function receipt(raw: Record<string, unknown>) {
+  return actingAs("manager", () => recordMaintenanceReceipt(raw));
+}
+
 function job(over: Record<string, unknown> = {}) {
   return {
     performedAt: istInput(new Date()),
@@ -58,6 +67,8 @@ function job(over: Record<string, unknown> = {}) {
     category: "GENERAL",
     status: "COMPLETED",
     issueReported: `Ledger job ${tag}-${++n}`,
+    // A job logged as done says what was done.
+    workDone: "Fixed",
     lines: [],
     ...over,
   };
@@ -85,7 +96,7 @@ describe("stock in", () => {
   it("a receipt adds stock", async () => {
     const itemId = await newItem({ openingStock: "10" });
     mustOk(
-      await recordMaintenanceReceipt({
+      await receipt({
         receivedAt: istInput(new Date()),
         lines: [{ itemId, quantity: "5", costPerUnit: "12.50" }],
       }),
@@ -98,7 +109,7 @@ describe("stock in", () => {
     const hidden = await newItem();
     mustOk(await deactivateMaintenanceItem(hidden), "hide the empty item");
     const why = await expectRefused(() =>
-      recordMaintenanceReceipt({
+      receipt({
         receivedAt: istInput(new Date()),
         lines: [{ itemId: hidden, quantity: "1" }],
       }),
@@ -106,7 +117,7 @@ describe("stock in", () => {
     expect(why).toMatch(/hidden/);
     expect(
       await expectRefused(() =>
-        recordMaintenanceReceipt({
+        receipt({
           receivedAt: istInput(new Date()),
           lines: [{ itemId: "nope", quantity: "1" }],
         }),
@@ -183,7 +194,7 @@ describe("stock out", () => {
 
     // Back above the floor and down through it again the same day: no repeat.
     mustOk(
-      await recordMaintenanceReceipt({
+      await receipt({
         receivedAt: istInput(new Date()),
         lines: [{ itemId, quantity: "2" }],
       }),
