@@ -34,6 +34,7 @@ import { effectiveFigures, estimatedCost } from "@/lib/manpower";
 import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
 import { listHousekeepingIssues } from "@/server/actions/housekeeping";
 import { listMaintenanceActivities } from "@/server/actions/maintenance";
+import { listDeptPurchaseOrdersAwaitingApproval } from "@/server/actions/dept-purchase";
 import { getStoreStock } from "@/server/actions/store-stock";
 import { toDecimal, formatINRWhole } from "@/lib/money";
 import { isPayable } from "@/lib/vendor-bill-gates";
@@ -738,6 +739,9 @@ export default async function DashboardPage({
         // Hired labour the chef / F&B asked for — money the manager hasn't
         // sanctioned yet, so it belongs beside the other approvals.
         listManpowerRequests({ statuses: [ManpowerRequestStatus.REQUESTED] }),
+        // Housekeeping / maintenance asking for stock — the one approval
+        // those self-run departments still need.
+        listDeptPurchaseOrdersAwaitingApproval(),
       ])
     : null;
 
@@ -909,6 +913,16 @@ export default async function DashboardPage({
                 createdAt: m.createdAt.toISOString(),
               };
             })}
+            deptStockRequests={approvals[6].map((r) => ({
+              id: r.id,
+              number: r.number,
+              department: r.department,
+              reason: r.reason,
+              requestedBy: r.createdBy.name,
+              lines: r._count.lines,
+              estimatedTotal: r.estimatedTotal.toString(),
+              submittedAt: (r.submittedAt ?? r.createdAt).toISOString(),
+            }))}
             viewerIsAdmin={role === "ADMIN"}
           />
         )}
