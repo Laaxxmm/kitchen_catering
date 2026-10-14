@@ -1,19 +1,16 @@
 import { describe, expect, it } from "vitest";
-import ExcelJS from "exceljs";
-import { deflateRawSync } from "node:zlib";
-import { buildWorkbook } from "@/lib/exports/excel";
 import {
   MAX_UPLOAD_ROWS,
   cleanText,
   planUpload,
   readStockFile,
-  templateSheet,
+  templateCsv,
   type ExistingItem,
 } from "@/server/dept-stock-upload";
 
 /**
- * The department stock upload's pure half: reading an untrusted .csv /
- * .xlsx into rows, and planning those rows against the items already in the
+ * The department stock upload's pure half: reading an untrusted .csv into
+ * rows, and planning those rows against the items already in the
  * department. The database half is tests/e2e/dept/upload.test.ts.
  */
 
@@ -21,13 +18,6 @@ const HK = "HOUSEKEEPING" as const;
 const MT = "MAINTENANCE" as const;
 
 const csv = (text: string, name = "stock.csv") => ({ name, bytes: new TextEncoder().encode(text) });
-
-async function xlsx(rows: ExcelJS.CellValue[][], name = "stock.xlsx") {
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet("Stock");
-  for (const r of rows) ws.addRow(r);
-  return { name, bytes: new Uint8Array(await wb.xlsx.writeBuffer()) };
-}
 
 const HEADER = "Item name*,Unit*,Opening quantity*,Minimum stock,Cost per unit,Reusable";
 
@@ -62,22 +52,6 @@ describe("reading the file", () => {
       [2, "Towel, bath", "piece", "40", "10", "250.5", true, []],
       [4, 'Soap "mini"', "pcs", "100.125", null, null, false, []],
     ]);
-  });
-
-  it("reads an .xlsx, and refuses a formula cell rather than trusting its cached result", async () => {
-    const rows = await readStockFile(
-      await xlsx([
-        ["Item name*", "Unit*", "Opening quantity*", "Category"],
-        ["LED bulb", "piece", 25, "electrical"],
-        ["Fuse", "piece", { formula: "C2*2", result: 50 }, "General"],
-        [{ richText: [{ text: "Cable " }, { text: "2.5mm" }] }, "m", 100.5, ""],
-      ]),
-      MT,
-    );
-    expect(rows[0]).toMatchObject({ name: "LED bulb", qty: "25", category: "ELECTRICAL", problems: [] });
-    expect(rows[1].qty).toBeNull();
-    expect(rows[1].problems).toEqual(["Opening quantity is a formula or error cell — paste plain values"]);
-    expect(rows[2]).toMatchObject({ name: "Cable 2.5mm", unit: "m", qty: "100.5", category: null, problems: [] });
   });
 
   it("reads the department's own columns only", async () => {
@@ -137,46 +111,29 @@ describe("reading the file", () => {
     await expect(readStockFile(csv(`${HEADER}\n\n`), HK)).rejects.toThrow(/no item rows/);
   });
 
-  it("refuses anything that isn't really an .xlsx or .csv, or is too big", async () => {
-    await expect(readStockFile(csv("x", "stock.txt"), HK)).rejects.toThrow(/\.xlsx or \.csv/);
-    await expect(readStockFile(csv(`${HEADER}\nTowel,piece,1,,,`, "stock.xlsx"), HK)).rejects.toThrow(
-      /isn't an Excel workbook/,
+  it("takes CSV only, and refuses anything else or too big", async () => {
+    await expect(readStockFile(csv("x", "stock.txt"), HK)).rejects.toThrow(/Upload a \.csv/);
+    await expect(readStockFile(csv(`${HEADER}\nTowel,piece,1,,,`, "stock.xlsx"), HK)).rejects.toThrow(/CSV UTF-8/);
+    // A workbook renamed to .csv is still a zip.
+    const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]);
+    await expect(readStockFile({ name: "stock.csv", bytes: zip }, HK)).rejects.toThrow(/CSV UTF-8/);
+    await expect(readStockFile({ name: "stock.csv", bytes: new Uint8Array([65, 0, 66]) }, HK)).rejects.toThrow(
+      /isn't a text CSV/,
     );
-    const book = await xlsx([["Item name*", "Unit*", "Opening quantity*"]]);
-    await expect(readStockFile({ ...book, name: "stock.csv" }, HK)).rejects.toThrow(/isn't a text CSV/);
     await expect(
       readStockFile({ name: "stock.csv", bytes: new Uint8Array(1024 * 1024 + 1).fill(65) }, HK),
     ).rejects.toThrow(/larger than 1 MB/);
     await expect(readStockFile({ name: "stock.csv", bytes: new Uint8Array(0) }, HK)).rejects.toThrow(/empty/);
   });
 
-  it("refuses a zip that inflates past the ceiling before exceljs sees it", async () => {
-    // One stored entry name, 30 MB of zeros deflated to a few KB.
-    const data = deflateRawSync(Buffer.alloc(30 * 1024 * 1024));
-    const name = Buffer.from("xl/sharedStrings.xml");
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(8, 8);
-    local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(1024, 22); // lies about the size
-    local.writeUInt16LE(name.length, 26);
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(8, 10);
-    central.writeUInt32LE(data.length, 20);
-    central.writeUInt32LE(1024, 24);
-    central.writeUInt16LE(name.length, 28);
-    central.writeUInt32LE(0, 42);
-    const cdOffset = local.length + name.length + data.length;
-    const end = Buffer.alloc(22);
-    end.writeUInt32LE(0x06054b50, 0);
-    end.writeUInt16LE(1, 8);
-    end.writeUInt16LE(1, 10);
-    end.writeUInt32LE(central.length + name.length, 12);
-    end.writeUInt32LE(cdOffset, 16);
-    const bomb = Buffer.concat([local, name, data, central, name, end]);
-    expect(bomb.length).toBeLessThan(1024 * 1024);
-    await expect(readStockFile({ name: "stock.xlsx", bytes: bomb }, HK)).rejects.toThrow(/too large once unpacked/);
+  it("folds look-alike names and refuses mixed alphabets", async () => {
+    // Full-width letters and a decomposed é fold to the plain spelling.
+    expect(cleanText("Ｔｏｗｅｌ")).toBe("Towel");
+    expect(cleanText("Cafe\u0301 mug")).toBe("Café mug");
+    expect(cleanText("Bath\u3164towel")).toBe("Bathtowel");
+    const rows = await readStockFile(csv(`${HEADER}\nT\u043Ewel,piece,1,,,\nПолотенце,piece,1,,,`), HK);
+    expect(rows[0].problems).toEqual(["Item name mixes alphabets (a Cyrillic or Greek letter among Latin ones) — retype it"]);
+    expect(rows[1].problems).toEqual([]);
   });
 
   it(`caps the upload at ${MAX_UPLOAD_ROWS} item rows`, async () => {
@@ -185,17 +142,13 @@ describe("reading the file", () => {
     await expect(readStockFile(csv(`${HEADER}\n${body(MAX_UPLOAD_ROWS + 1)}`), HK)).rejects.toThrow(
       /more than 2000 item rows/,
     );
-    const big = await xlsx([["Item name*", "Unit*", "Opening quantity*"], ...Array.from({ length: MAX_UPLOAD_ROWS + 1 }, (_, i) => [`Item ${i}`, "piece", 1])]);
-    await expect(readStockFile(big, MT)).rejects.toThrow(/more than 2000 item rows/);
   });
 
-  it("round-trips its own template", async () => {
+  it("reads its own template, and won't import the example row", async () => {
     for (const dept of [HK, MT]) {
-      const t = templateSheet(dept);
-      const buf = await buildWorkbook([{ name: "Stock", header: t.header, rows: [t.example] }]);
-      const rows = await readStockFile({ name: "template.xlsx", bytes: new Uint8Array(buf) }, dept);
+      const rows = await readStockFile(csv(templateCsv(dept), "template.csv"), dept);
       expect(rows).toHaveLength(1);
-      expect(rows[0].problems).toEqual([]);
+      expect(rows[0].problems).toEqual(["This is the template's example row — delete it"]);
     }
   });
 });

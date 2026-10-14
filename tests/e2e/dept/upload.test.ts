@@ -12,6 +12,7 @@ import {
   asAdmin,
   asHousekeeping,
   asMaintenance,
+  asManager,
   asNobody,
   asStore,
   ensureSeeded,
@@ -22,11 +23,11 @@ import {
 } from "../harness";
 
 /**
- * The one-time department stock upload, end to end: the head previews and
- * applies a sheet, new items arrive on an opening receipt, existing items
+ * The one-time department stock upload, end to end: management previews
+ * and applies a sheet, new items arrive on an opening receipt, existing items
  * are set by an ADJUSTED record, a second run changes nothing, one bad row
- * stops the whole file, and each department's head is kept to their own
- * department. Plus the other half of the go-live: housekeeping is no longer
+ * stops the whole file, and the department heads cannot upload at all —
+ * after go-live they maintain stock through jobs and stock requests. Plus the other half of the go-live: housekeeping is no longer
  * a store the kitchen desk can move stock into, and each department's
  * on-hand is read only by its own head and management.
  *
@@ -66,9 +67,9 @@ beforeAll(async () => {
   ).id;
 });
 
-describe("the housekeeping head uploads their shelf", () => {
+describe("management uploads the housekeeping shelf", () => {
   it("previews without writing anything", async () => {
-    asHousekeeping();
+    asManager();
     const plan = mustOk(await previewDeptStockUpload(HK, sheet(HK_FILE)), "preview");
     expect(plan.summary).toEqual({ new: 2, update: 1, unchanged: 0, problems: 0 });
     expect(plan.rows.map((r) => [r.line, r.status, r.notes])).toEqual([
@@ -80,7 +81,7 @@ describe("the housekeeping head uploads their shelf", () => {
   });
 
   it("creates new items on an opening receipt and sets existing ones through an ADJUSTED record", async () => {
-    asHousekeeping();
+    asManager();
     const res = mustOk(await applyDeptStockUpload(HK, sheet(HK_FILE)), "apply");
     expect(res).toMatchObject({ created: 2, updated: 1, unchanged: 0 });
 
@@ -120,7 +121,7 @@ describe("the housekeeping head uploads their shelf", () => {
   });
 
   it("changes nothing when the same file is applied again", async () => {
-    asHousekeeping();
+    asManager();
     const counts = async () => ({
       receipts: await db.housekeepingReceiptLine.count({ where: { item: { name: { in: [towel, soap, robe] } } } }),
       adjustments: await db.housekeepingAdjustment.count({ where: { item: { name: { in: [towel, soap, robe] } } } }),
@@ -139,7 +140,7 @@ describe("the housekeeping head uploads their shelf", () => {
   });
 
   it("applies nothing when a single row has a problem", async () => {
-    asHousekeeping();
+    asManager();
     const bad = `Bad ${tag}`;
     const file = () => sheet([`${towel},piece,15,,,yes`, `${bad},piece,abc,,,`]);
     const plan = mustOk(await previewDeptStockUpload(HK, file()), "preview with a problem");
@@ -152,7 +153,7 @@ describe("the housekeeping head uploads their shelf", () => {
   });
 
   it("sets a recount on existing items without posting a receipt", async () => {
-    asHousekeeping();
+    asManager();
     const receiptsBefore = await db.housekeepingReceipt.count();
     expect(mustOk(await applyDeptStockUpload(HK, sheet([`${towel},piece,15,,,`])), "recount")).toMatchObject({
       created: 0,
@@ -172,8 +173,8 @@ describe("the housekeeping head uploads their shelf", () => {
 describe("each department is its own", () => {
   const MT_HEADER = "Item name*,Unit*,Opening quantity*,Category";
 
-  it("lets the maintenance head upload spares, with their category", async () => {
-    asMaintenance();
+  it("lets management upload maintenance spares, with their category", async () => {
+    asAdmin();
     const fuse = `Fuse ${tag}`;
     mustOk(await applyDeptStockUpload(MT, sheet([`${fuse},piece,8,Electrical`], MT_HEADER)), "maintenance upload");
     const item = await db.maintenanceItem.findUniqueOrThrow({ where: { name: fuse }, include: { receiptLines: true } });
@@ -182,14 +183,13 @@ describe("each department is its own", () => {
     expect(item.receiptLines).toHaveLength(1);
   });
 
-  it("keeps each head out of the other department, and the store keeper out of both", async () => {
-    asHousekeeping();
-    for (const call of [previewDeptStockUpload, applyDeptStockUpload]) {
-      expect(await expectRefused(() => call(MT, sheet(["X,piece,1"], MT_HEADER)))).toMatch(/^Requires one of/);
-    }
-    asMaintenance();
-    for (const call of [previewDeptStockUpload, applyDeptStockUpload]) {
-      expect(await expectRefused(() => call(HK, sheet(HK_FILE)))).toMatch(/^Requires one of/);
+  it("keeps both heads and the store keeper out of the upload", async () => {
+    for (const as of [asHousekeeping, asMaintenance]) {
+      as();
+      for (const call of [previewDeptStockUpload, applyDeptStockUpload]) {
+        expect(await expectRefused(() => call(MT, sheet(["X,piece,1"], MT_HEADER)))).toMatch(/^Requires one of/);
+        expect(await expectRefused(() => call(HK, sheet(HK_FILE)))).toMatch(/^Requires one of/);
+      }
     }
     asStore();
     for (const dept of [HK, MT]) {
@@ -244,14 +244,19 @@ describe("the template download", () => {
     });
 
   it("checks the session and the department itself", async () => {
-    asHousekeeping();
+    asManager();
     const ok = await get("housekeeping");
     expect(ok.status).toBe(200);
-    expect(ok.headers.get("Content-Disposition")).toMatch(/housekeeping-stock-template\.xlsx/);
-    expect((await get("maintenance")).status).toBe(403);
-    asMaintenance();
+    expect(ok.headers.get("Content-Disposition")).toMatch(/housekeeping-stock-template\.csv/);
+    // UTF-8 BOM first so Excel opens it cleanly, then the header.
+    const body = Buffer.from(await ok.arrayBuffer());
+    expect([...body.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(body.subarray(3).toString("utf8")).toMatch(/^Item name\*,Unit\*,Opening quantity\*/);
     expect((await get("maintenance")).status).toBe(200);
+    asHousekeeping();
     expect((await get("housekeeping")).status).toBe(403);
+    asMaintenance();
+    expect((await get("maintenance")).status).toBe(403);
     asStore();
     expect((await get("housekeeping")).status).toBe(403);
     asNobody();

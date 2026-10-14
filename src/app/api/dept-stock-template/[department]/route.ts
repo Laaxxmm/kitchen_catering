@@ -1,7 +1,6 @@
 import { StoreDepartment } from "@prisma/client";
 import { AuthenticationError, requireSession } from "@/server/rbac";
-import { buildWorkbook, xlsxResponse } from "@/lib/exports/excel";
-import { UPLOAD_ROLES, templateSheet } from "@/server/dept-stock-upload";
+import { UPLOAD_ROLES, templateCsv } from "@/server/dept-stock-upload";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +26,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ departm
   }
   if (!UPLOAD_ROLES[dept].includes(role)) return new Response("Forbidden", { status: 403 });
 
-  const { header, example } = templateSheet(dept);
-  const buf = await buildWorkbook([
-    { name: "Stock", header, rows: [example], widths: header.map((h, i) => (i === 0 ? 40 : Math.max(14, h.length + 4))) },
-  ]);
-  return xlsxResponse(buf, `${dept.toLowerCase()}-stock-template.xlsx`);
+  return new Response(templateCsv(dept), {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${dept.toLowerCase()}-stock-template.csv"`,
+      "Cache-Control": "private, no-store",
+    },
+  });
 }

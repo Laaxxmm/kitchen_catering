@@ -99,13 +99,13 @@ describe("the housekeeping and maintenance desks", () => {
 });
 
 describe("the two departments are separate products", () => {
-  it("lets each head reach their own department's upload, stock requests and jobs, and not the other's", () => {
-    for (const p of ["/housekeeping/upload", "/housekeeping/purchase", "/housekeeping/jobs"]) {
+  it("lets each head reach their own department's stock requests and jobs, and not the other's", () => {
+    for (const p of ["/housekeeping/purchase", "/housekeeping/jobs"]) {
       expect(routeAllows(p, "HOUSEKEEPING_MANAGER")).toBe(true);
       expect(routeAllows(p, "MAINTENANCE_MANAGER")).toBe(false);
       expect(routeAllows(p, "STORE_KEEPER")).toBe(false);
     }
-    for (const p of ["/maintenance/upload", "/maintenance/purchase"]) {
+    for (const p of ["/maintenance/purchase"]) {
       expect(routeAllows(p, "MAINTENANCE_MANAGER")).toBe(true);
       expect(routeAllows(p, "HOUSEKEEPING_MANAGER")).toBe(false);
       expect(routeAllows(p, "STORE_KEEPER")).toBe(false);

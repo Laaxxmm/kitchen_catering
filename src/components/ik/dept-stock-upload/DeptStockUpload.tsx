@@ -95,7 +95,7 @@ export function DeptStockUpload({ department }: { department: StoreDepartment })
           <input
             ref={inputRef}
             type="file"
-            accept=".xlsx,.csv"
+            accept=".csv,text/csv"
             onChange={(e) => {
               setFile(e.target.files?.[0] ?? null);
               setPlan(null);
@@ -109,7 +109,7 @@ export function DeptStockUpload({ department }: { department: StoreDepartment })
           <Button type="button" onClick={apply} disabled={!plan || !s || s.problems > 0 || changes === 0 || pending}>
             {pending && plan ? "Applying…" : "Apply"}
           </Button>
-          <span className="text-[11px] text-ik-ink-3">.xlsx or .csv · ≤ 1 MB · ≤ 2,000 rows</span>
+          <span className="text-[11px] text-ik-ink-3">.csv · ≤ 1 MB · ≤ 2,000 rows · in Excel: Save As → CSV UTF-8</span>
         </div>
       </div>
 

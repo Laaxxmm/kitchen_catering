@@ -35,7 +35,7 @@ export default async function MaintenanceLandingPage() {
           { label: "Jobs", href: "/maintenance/activities" },
           { label: "Items", href: "/maintenance/items", active: true },
           { label: "Stock requests", href: "/maintenance/purchase" },
-          { label: "Upload stock", href: "/maintenance/upload" },
+          ...(canReceiptDirectly ? [{ label: "Upload stock", href: "/maintenance/upload" }] : []),
           { label: "Rooms", href: "/housekeeping/rooms" },
           { label: "Staff", href: "/maintenance/staff" },
           { label: "Reports", href: "/maintenance/reports" },

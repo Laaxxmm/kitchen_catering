@@ -24,9 +24,9 @@ import {
 } from "@/server/dept-stock-upload";
 
 // The one-time stock upload that opens a self-run department's own store:
-// the head (or admin / manager) fills the template, previews what it will
-// do, and applies it. Housekeeping and maintenance are separate products —
-// a head can only ever upload into their own department.
+// management fills the template, previews what it will do, and applies it.
+// After that the department head maintains the stock through jobs, issues
+// and approved stock requests.
 //
 // Apply never trusts the preview: it re-reads the same file, re-plans it
 // under row locks and writes all of it or none of it. Re-applying the same
@@ -60,6 +60,13 @@ async function readUpload(formData: unknown, dept: StoreDepartment): Promise<{ r
 /** The department's items as the planner sees them. History of any kind pins the unit. */
 async function loadExisting(tx: Tx, dept: StoreDepartment): Promise<ExistingItem[]> {
   if (dept === StoreDepartment.HOUSEKEEPING) {
+    // Past transfers (before housekeeping left the kitchen stores) were
+    // recorded in the item's unit too, so they pin it like any history.
+    const moved = await tx.stockTransfer.findMany({
+      where: { OR: [{ fromStore: "HOUSEKEEPING" }, { toStore: "HOUSEKEEPING" }] },
+      select: { fromStore: true, fromItemId: true, toItemId: true },
+    });
+    const transferred = new Set(moved.map((t) => (t.fromStore === "HOUSEKEEPING" ? t.fromItemId : t.toItemId)));
     const rows = await tx.housekeepingItem.findMany({
       select: {
         id: true, name: true, unit: true, active: true, currentStock: true, inCirculation: true,
@@ -73,7 +80,8 @@ async function loadExisting(tx: Tx, dept: StoreDepartment): Promise<ExistingItem
       inCirculation: r.inCirculation.toString(),
       minStock: r.minStock?.toString() ?? null,
       category: null,
-      hasHistory: n.receiptLines + n.issueLines + n.adjustments + n.purchaseLines > 0,
+      hasHistory:
+        n.receiptLines + n.issueLines + n.adjustments + n.purchaseLines > 0 || transferred.has(r.id),
     }));
   }
   const rows = await tx.maintenanceItem.findMany({
@@ -129,6 +137,10 @@ async function applyInner(department: unknown, formData: unknown) {
       // discipline as every other stock movement), then plan against what
       // is under the lock — a receipt landing between preview and apply is
       // planned with, not overwritten.
+      // One upload per department at a time: two concurrent applies could
+      // otherwise both create "Towel" and "towel" (the unique index is
+      // case-sensitive) or plan against each other's half-written rows.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`dept-stock-upload:${dept}`}))`;
       const named = new Set(rows.map((r) => nameKey(r.name)));
       const ids = (await loadExisting(tx, dept)).filter((e) => named.has(nameKey(e.name))).map((e) => e.id).sort();
       for (const id of ids) {
@@ -136,6 +148,12 @@ async function applyInner(department: unknown, formData: unknown) {
         else await tx.$executeRaw`SELECT 1 FROM "MaintenanceItem" WHERE "id" = ${id} FOR UPDATE`;
       }
       const plan = planUpload(rows, await loadExisting(tx, dept));
+      // An item renamed onto a name in the file after the lock list was
+      // taken would be updated unlocked — refuse rather than risk it.
+      const locked = new Set(ids);
+      if (plan.rows.some((r) => r.status === "UPDATE" && r.itemId && !locked.has(r.itemId))) {
+        throw new ActionError("The item list changed while uploading — preview again and retry.");
+      }
       const { problems, unchanged } = plan.summary;
       if (problems > 0) {
         throw new ActionError(

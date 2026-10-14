@@ -481,7 +481,7 @@ const CASES: GateCase[] = [
 
   // The one-time stock upload: a department head uploads their own store
   // only (proven both ways in tests/e2e/dept/upload.test.ts).
-  gate("dept-stock-upload", "applyDeptStockUpload", ["admin", "manager", "housekeeping"], () =>
+  gate("dept-stock-upload", "applyDeptStockUpload", ["admin", "manager"], () =>
     deptStockUpload.applyDeptStockUpload("HOUSEKEEPING", new FormData()),
   ),
 

@@ -1,22 +1,21 @@
-import { inflateRawSync } from "node:zlib";
-import ExcelJS from "exceljs";
 import { Decimal } from "decimal.js";
 import { MaintenanceCategory, Role, StoreDepartment } from "@prisma/client";
 import { unitsEquivalent } from "@/lib/units";
 
 /**
- * One-time department stock upload — the pure half. Reads an .xlsx / .csv
- * the department head filled in and plans it against the department's
- * current items. No database, no session: the action in
+ * One-time department stock upload — the pure half. Reads a .csv that
+ * management filled in and plans it against the department's current
+ * items. No database, no session: the action in
  * src/server/actions/dept-stock-upload.ts loads the items, re-plans on apply
  * and does the writes.
  *
- * The file is untrusted input from a browser, so: 1 MB cap, extension AND
- * content must agree, an .xlsx is a zip whose inflated size is bounded
- * before exceljs ever sees it, only cell VALUES are read (a formula or error
- * cell is a problem, never evaluated or trusted for its cached result),
- * control / invisible characters are stripped, lengths and decimals are
- * strict, and every lookup keyed by file content is a Map.
+ * CSV only, by decision (14 Oct security review): parsing an untrusted
+ * .xlsx with exceljs let a 6 KB workbook exhaust the server's memory (a
+ * merge or column range is expanded cell by cell) and a crafted zip slip
+ * past any size pre-check. A CSV is read by the small parser below, with a
+ * 1 MB cap, strict numbers, and names normalised (NFKC, invisible and
+ * format characters stripped, mixed alphabets refused) so a look-alike
+ * cannot become a second "Towel". In Excel: File → Save As → CSV UTF-8.
  *
  * Errors are plain `Error`s on purpose: actionFailure passes their message
  * through, and importing the server ActionError would drag NextAuth into the
@@ -25,13 +24,15 @@ import { unitsEquivalent } from "@/lib/units";
 
 export const MAX_UPLOAD_BYTES = 1024 * 1024;
 export const MAX_UPLOAD_ROWS = 2000;
-const MAX_INFLATED_BYTES = 20 * 1024 * 1024;
-const MAX_ZIP_ENTRIES = 200;
 
-/** Who may upload into which department. ADMIN / MANAGER both; each head only their own. */
+/**
+ * Who may upload. Management only: "we upload the stock once, and they
+ * maintain it" — after go-live a department's stock moves through its jobs,
+ * issues and approved stock requests, never through another bulk file.
+ */
 export const UPLOAD_ROLES: Record<StoreDepartment, Role[]> = {
-  HOUSEKEEPING: [Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER],
-  MAINTENANCE: [Role.ADMIN, Role.MANAGER, Role.MAINTENANCE_MANAGER],
+  HOUSEKEEPING: [Role.ADMIN, Role.MANAGER],
+  MAINTENANCE: [Role.ADMIN, Role.MANAGER],
 };
 
 export function parseDepartment(raw: unknown): StoreDepartment {
@@ -67,11 +68,20 @@ export function templateSheet(dept: StoreDepartment): { header: string[]; exampl
   return { header, example };
 }
 
+/** The template as CSV text (UTF-8 with BOM so Excel opens it cleanly). */
+export function templateCsv(dept: StoreDepartment): string {
+  const { header, example } = templateSheet(dept);
+  const esc = (v: string | number) => {
+    const t = String(v);
+    return /[",\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  };
+  return "\uFEFF" + [header, example].map((r) => r.map(esc).join(",")).join("\r\n") + "\r\n";
+}
+
 // ─── Reading the file ─────────────────────────────────────────────────────
 
 /** A formula or an error cell: never a value we will trust. */
-const NOT_A_VALUE = Symbol("not-a-value");
-type Cell = string | null | typeof NOT_A_VALUE;
+type Cell = string | null;
 
 /**
  * Whitespace runs (tabs, newlines, NBSP, line separators) become one space;
@@ -81,8 +91,14 @@ type Cell = string | null | typeof NOT_A_VALUE;
  */
 export function cleanText(s: string): string {
   return s
+    // Compatibility forms fold together: decomposed "é", full-width letters,
+    // ligatures — the same name typed two ways is one name.
+    .normalize("NFKC")
     .replace(/\s+/g, " ")
-    .replace(/[\u0000-\u001F\u007F-\u009F​-‏‪-‮⁠-⁩]/g, "")
+    // Control and format characters (zero-width, bidi, soft hyphen, tags,
+    // joiners) and the filler characters that render as blanks.
+    .replace(/[\p{Cc}\p{Cf}\u034F\u115F\u1160\u3164\uFFA0\uFE00-\uFE0F]/gu, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -93,71 +109,6 @@ function bad(msg: string): Error {
   return new Error(msg);
 }
 
-/**
- * Walk the zip's central directory and inflate every entry with a hard
- * ceiling, before exceljs loads it. A 1 MB zip can inflate to a gigabyte;
- * the sizes in the directory can lie, so the bytes are actually inflated
- * here with maxOutputLength rather than trusted.
- */
-function assertSafeZip(buf: Buffer): void {
-  const damaged = () => bad("That .xlsx file is damaged or isn't an Excel workbook — save it again from Excel and retry.");
-  let end = -1;
-  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65_557); i--) {
-    if (buf.readUInt32LE(i) === 0x06054b50) {
-      end = i;
-      break;
-    }
-  }
-  if (end < 0) throw damaged();
-  const entries = buf.readUInt16LE(end + 10);
-  if (entries > MAX_ZIP_ENTRIES) throw damaged();
-  let p = buf.readUInt32LE(end + 16);
-  let total = 0;
-  for (let n = 0; n < entries; n++) {
-    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) throw damaged();
-    const method = buf.readUInt16LE(p + 10);
-    const size = buf.readUInt32LE(p + 20);
-    const local = buf.readUInt32LE(p + 42);
-    p += 46 + buf.readUInt16LE(p + 28) + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
-    if (local + 30 > buf.length || buf.readUInt32LE(local) !== 0x04034b50) throw damaged();
-    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
-    const data = buf.subarray(start, start + size);
-    if (data.length !== size) throw damaged();
-    if (method === 0) {
-      total += size;
-    } else if (method === 8) {
-      try {
-        total += inflateRawSync(data, { maxOutputLength: Math.max(1, MAX_INFLATED_BYTES - total) }).length;
-      } catch {
-        throw bad("That .xlsx file is too large once unpacked, or damaged — keep it to the stock sheet and retry.");
-      }
-    } else {
-      throw damaged();
-    }
-    if (total > MAX_INFLATED_BYTES) {
-      throw bad("That .xlsx file is too large once unpacked — keep it to the stock sheet and retry.");
-    }
-  }
-}
-
-function xlsxCell(v: ExcelJS.CellValue): Cell {
-  if (v == null) return null;
-  if (typeof v === "string") return v;
-  if (typeof v === "number") return String(v);
-  if (typeof v === "boolean") return v ? "yes" : "no";
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
-  if ("formula" in v || "sharedFormula" in v || "error" in v) return NOT_A_VALUE;
-  if ("richText" in v) return v.richText.map((t) => t.text).join("");
-  if ("text" in v) {
-    const t = v.text as unknown;
-    if (typeof t === "string") return t;
-    if (t && typeof t === "object" && "richText" in t) {
-      return (t as ExcelJS.CellRichTextValue).richText.map((r) => r.text).join("");
-    }
-  }
-  return NOT_A_VALUE;
-}
-
 /** A non-blank row of the sheet, with the row number the user sees. */
 interface SheetRow {
   line: number;
@@ -166,32 +117,6 @@ interface SheetRow {
 
 const tooManyRows = () =>
   bad(`The file has more than ${MAX_UPLOAD_ROWS} item rows — upload ${MAX_UPLOAD_ROWS} or fewer at a time.`);
-
-async function readXlsx(buf: Buffer): Promise<SheetRow[]> {
-  assertSafeZip(buf);
-  const wb = new ExcelJS.Workbook();
-  try {
-    // exceljs types its Buffer as an ArrayBuffer; at runtime it hands it to JSZip, which takes a Buffer.
-    await wb.xlsx.load(buf as unknown as Parameters<typeof wb.xlsx.load>[0]);
-  } catch {
-    throw bad("Couldn't read that .xlsx file — save it again from Excel and retry.");
-  }
-  const ws = wb.worksheets[0];
-  if (!ws) throw bad("That workbook has no sheets.");
-  const rows: SheetRow[] = [];
-  // Only rows holding a value; merged cells read their master's value, and
-  // formulas are never read for their result.
-  ws.eachRow((row, line) => {
-    if (rows.length > MAX_UPLOAD_ROWS + 1) return;
-    const cells: Cell[] = [];
-    row.eachCell((cell, col) => {
-      cells[col - 1] = xlsxCell(cell.value);
-    });
-    rows.push({ line, cells });
-  });
-  if (rows.length > MAX_UPLOAD_ROWS + 1) throw tooManyRows();
-  return rows;
-}
 
 /** RFC 4180: quoted fields, "" escapes, CRLF / LF / CR line ends. Blank lines are skipped. */
 function readCsv(bytes: Uint8Array): SheetRow[] {
@@ -329,8 +254,7 @@ function toRows(sheet: SheetRow[], dept: StoreDepartment): UploadRow[] {
     const values = new Map<Field, string>();
     for (const [field, col] of colOf) {
       const c = cells[col];
-      if (c === NOT_A_VALUE) problems.push(`${label(field)} is a formula or error cell — paste plain values`);
-      else values.set(field, c == null ? "" : cleanText(c));
+      values.set(field, c == null ? "" : cleanText(c));
     }
     if (problems.length === 0 && [...values.values()].every((v) => v === "")) continue;
     // A formula cell already has its problem; don't also call it blank.
@@ -340,6 +264,13 @@ function toRows(sheet: SheetRow[], dept: StoreDepartment): UploadRow[] {
     if (has("qty") && v("qty") === "") problems.push(`${label("qty")} is blank`);
     const name = has("name") ? text(v("name"), "name", 160, problems) : "";
     if (name.length === 1) problems.push(`${label("name")} is too short`);
+    // "Tоwel" with a Cyrillic о reads as "Towel" and would become a second item.
+    if (/\p{Script=Latin}/u.test(name) && /[\p{Script=Cyrillic}\p{Script=Greek}]/u.test(name)) {
+      problems.push(`${label("name")} mixes alphabets (a Cyrillic or Greek letter among Latin ones) — retype it`);
+    }
+    if (/\(example - delete this row\)/i.test(name)) {
+      problems.push("This is the template's example row — delete it");
+    }
     const unit = has("unit") ? text(v("unit"), "unit", 20, problems) : "";
 
     const reusableRaw = v("reusable").toLowerCase();
@@ -381,15 +312,14 @@ export async function readStockFile(
   if (bytes.length > MAX_UPLOAD_BYTES) throw bad("That file is larger than 1 MB — upload the stock sheet on its own.");
   const ext = /\.([a-z0-9]{1,8})$/i.exec(file.name)?.[1]?.toLowerCase();
   const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
-  if (ext === "xlsx") {
-    if (!isZip) throw bad("That file is named .xlsx but isn't an Excel workbook.");
-    return toRows(await readXlsx(Buffer.from(bytes)), dept);
+  if (ext === "xlsx" || ext === "xls" || isZip) {
+    throw bad("Upload a .csv file — in Excel use File → Save As → CSV UTF-8 (Comma delimited).");
   }
   if (ext === "csv") {
-    if (isZip || bytes.includes(0)) throw bad("That file is named .csv but isn't a text CSV.");
+    if (bytes.includes(0)) throw bad("That file is named .csv but isn't a text CSV.");
     return toRows(readCsv(bytes), dept);
   }
-  throw bad("Upload an .xlsx or .csv file (download the template to start).");
+  throw bad("Upload a .csv file (download the template to start).");
 }
 
 // ─── Plan ────────────────────────────────────────────────────────────────

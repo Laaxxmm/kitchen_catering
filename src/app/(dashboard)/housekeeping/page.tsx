@@ -42,7 +42,7 @@ export default async function HousekeepingLandingPage() {
         { label: "Returns", href: "/housekeeping/returns" },
         { label: "Items", href: "/housekeeping/items", active: true },
         { label: "Stock requests", href: "/housekeeping/purchase" },
-        { label: "Upload stock", href: "/housekeeping/upload" },
+        ...(canPostReceipt ? [{ label: "Upload stock", href: "/housekeeping/upload" }] : []),
         { label: "Receipts", href: "/housekeeping/receipts" },
         { label: "Rooms", href: "/housekeeping/rooms" },
         { label: "Staff", href: "/housekeeping/staff" },

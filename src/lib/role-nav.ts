@@ -72,14 +72,14 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   // kitchen stores, and nothing of maintenance.
   HOUSEKEEPING_MANAGER: new Set([
     "dashboard", "tasks",
-    "hk-jobs", "hk-stock", "hk-issues", "hk-returns", "hk-purchase", "hk-upload",
+    "hk-jobs", "hk-stock", "hk-issues", "hk-returns", "hk-purchase",
     "hk-rooms", "hk-staff", "hk-reports",
   ]),
   // Maintenance head: the same shape — jobs, spares stock and requests, and
   // the shared room list.
   MAINTENANCE_MANAGER: new Set([
     "dashboard", "tasks",
-    "mt-jobs", "mt-stock", "mt-purchase", "mt-upload", "mt-rooms", "mt-staff", "mt-reports",
+    "mt-jobs", "mt-stock", "mt-purchase", "mt-rooms", "mt-staff", "mt-reports",
   ]),
   // F&B service: takes room-service / alacarte / management orders, serves
   // them, and bills them (the in-house room-billing screen). Also drives the
