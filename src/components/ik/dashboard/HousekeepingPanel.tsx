@@ -23,7 +23,8 @@ export async function HousekeepingPanel({ compact = false }: { compact?: boolean
         </Link>
       </header>
 
-      <div className="grid grid-cols-2 gap-px bg-ik-rule sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px bg-ik-rule sm:grid-cols-5">
+        <KPI label="Open jobs" value={s.openJobs} href="/housekeeping/jobs" />
         <KPI label="Items in catalog" value={s.itemCount} />
         <KPI label="Receipts (7d)" value={s.receiptsLastWeek} />
         <KPI label="Issues (7d)" value={s.issuesLastWeek} />
@@ -99,13 +100,15 @@ function KPI({
   label,
   value,
   alert,
+  href,
 }: {
   label: string;
   value: number;
   alert?: boolean;
+  href?: string;
 }) {
-  return (
-    <div className="bg-ik-card p-3">
+  const body = (
+    <>
       <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">{label}</div>
       <div
         className={
@@ -114,6 +117,13 @@ function KPI({
       >
         {value}
       </div>
-    </div>
+    </>
+  );
+  return href ? (
+    <Link href={href} className="bg-ik-card p-3 hover:bg-ik-paper-alt">
+      {body}
+    </Link>
+  ) : (
+    <div className="bg-ik-card p-3">{body}</div>
   );
 }

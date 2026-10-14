@@ -9,7 +9,9 @@ import { ReceiptForm } from "./_components/ReceiptForm";
 export const dynamic = "force-dynamic";
 
 export default async function NewReceiptPage() {
-  await gateRolePage([Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER]);
+  // A manager's correction path — the department receives against an
+  // approved stock request at /housekeeping/purchase.
+  await gateRolePage([Role.ADMIN, Role.MANAGER]);
   const items = await listHousekeepingItems({ activeOnly: true });
 
   return (
@@ -17,7 +19,7 @@ export default async function NewReceiptPage() {
       <PageHeader
         eyebrow="Housekeeping"
         title="Record receipt"
-        description="Stock received from the maintenance / purchasing team."
+        description="Manager correction — stock that came in outside a stock request. Normal deliveries are received against the request."
         actions={
           <Link href="/housekeeping/receipts">
             <Button variant="outline" size="sm">← Back</Button>

@@ -11,10 +11,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { gateRolePage } from "@/server/rbac";
+import { HK_JOB_TYPE_LABEL } from "@/lib/housekeeping-job-validators";
 import {
   consumptionByItem,
   consumptionByRoom,
   consumptionByStaff,
+  jobsReport,
   reusablesByItem,
   type ReportPeriod,
 } from "@/server/actions/housekeeping";
@@ -39,19 +41,21 @@ export default async function HousekeepingReportsPage({
     (PERIODS.find((p) => p.key === sp.period)?.key as ReportPeriod | undefined) ??
     "WEEK";
 
-  const [byItem, byRoom, byStaff, reusables] = await Promise.all([
+  const [byItem, byRoom, byStaff, reusables, jobs] = await Promise.all([
     consumptionByItem(period, { from: sp.from, to: sp.to }),
     consumptionByRoom(period, { from: sp.from, to: sp.to }),
     consumptionByStaff(period, { from: sp.from, to: sp.to }),
     reusablesByItem(period, { from: sp.from, to: sp.to }),
+    jobsReport(period, { from: sp.from, to: sp.to }),
   ]);
+  const hours = (h: number | null) => (h === null ? "—" : `${h} h`);
 
   return (
     <>
       <PageHeader
         eyebrow="Housekeeping"
-        title="Consumption reports"
-        description="Consumables used up, by item, room and staff — and the linen loop (out, back, lost) on its own."
+        title="Reports"
+        description="Jobs opened and closed, consumables used up by item, room and staff — and the linen loop (out, back, lost) on its own."
         actions={
           <Link href="/housekeeping">
             <Button variant="outline" size="sm">← Back</Button>
@@ -94,6 +98,39 @@ export default async function HousekeepingReportsPage({
           <Button type="submit" variant="outline" size="sm">Apply</Button>
         </form>
       )}
+
+      <section className="mb-6">
+        <h2 className="mb-2 text-[12px] font-medium text-ik-ink-2">Jobs</h2>
+        <p className="mb-2 text-[12.5px] text-ik-ink-2">
+          <span className="font-mono">{jobs.opened}</span> opened · <span className="font-mono">{jobs.done}</span> done ·{" "}
+          <span className="font-mono">{jobs.openNow}</span> open now · average time to close{" "}
+          <span className="font-mono">{hours(jobs.avgHoursToClose)}</span>
+        </p>
+        {jobs.byType.length > 0 && (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Type</TableHead>
+                <TableHead className="text-right">Opened</TableHead>
+                <TableHead className="text-right">Done</TableHead>
+                <TableHead className="text-right">Open now</TableHead>
+                <TableHead className="text-right">Avg time to close</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {jobs.byType.map((r) => (
+                <TableRow key={r.type}>
+                  <TableCell className="text-[12.5px]">{HK_JOB_TYPE_LABEL[r.type]}</TableCell>
+                  <TableCell className="text-right font-mono text-[12.5px]">{r.opened}</TableCell>
+                  <TableCell className="text-right font-mono text-[12.5px]">{r.done}</TableCell>
+                  <TableCell className="text-right font-mono text-[12.5px]">{r.openNow}</TableCell>
+                  <TableCell className="text-right font-mono text-[12.5px]">{hours(r.avgHoursToClose)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </section>
 
       <div className="grid gap-5 lg:grid-cols-3">
         <section>

@@ -17,6 +17,7 @@ import {
   upsertRoom,
 } from "@/server/actions/housekeeping";
 import {
+  actingAs,
   asChef,
   asHousekeeping,
   asMaintenance,
@@ -84,8 +85,12 @@ function issue(lines: Array<{ itemId: string; quantity: string }>) {
   return recordHousekeepingIssue({ issuedAt: now(), staffId, roomId, lines });
 }
 
+/** A direct receipt is the manager's correction path — the housekeeping
+ *  head receives stock against an approved stock request instead. */
 function receipt(itemId: string, quantity: string) {
-  return recordHousekeepingReceipt({ receivedAt: now(), lines: [{ itemId, quantity }] });
+  return actingAs("manager", () =>
+    recordHousekeepingReceipt({ receivedAt: now(), lines: [{ itemId, quantity }] }),
+  );
 }
 
 async function notifications(userId: string, dedupeKey: string) {
@@ -119,7 +124,7 @@ describe("stock in", () => {
     expectDecimal((await stock(soap)).currentStock, "10", "stock");
   });
 
-  it("a receipt adds stock", async () => {
+  it("a manager's receipt adds stock", async () => {
     asHousekeeping();
     mustOk(await receipt(soap, "5"), "receipt");
     expectDecimal((await stock(soap)).currentStock, "15", "stock");
@@ -360,10 +365,14 @@ describe("who may post", () => {
     expectDecimal((await stock(soap)).currentStock, "11", "stock untouched");
   });
 
-  it("the maintenance manager is refused on recordHousekeepingReceipt", async () => {
-    asMaintenance();
-    const why = await expectRefused(() => receipt(soap, "1"));
-    expect(why).toMatch(/Requires one of: ADMIN, MANAGER, HOUSEKEEPING_MANAGER/);
+  it("the maintenance and housekeeping heads are refused on recordHousekeepingReceipt", async () => {
+    for (const become of [asMaintenance, asHousekeeping]) {
+      become();
+      const why = await expectRefused(() =>
+        recordHousekeepingReceipt({ receivedAt: now(), lines: [{ itemId: soap, quantity: "1" }] }),
+      );
+      expect(why).toBe("Requires one of: ADMIN, MANAGER");
+    }
     expectDecimal((await stock(soap)).currentStock, "11", "stock untouched");
   });
 });

@@ -1,13 +1,29 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Prisma, Role, StockStore, StoreAdjustmentKind } from "@prisma/client";
+import {
+  DeptJobStatus,
+  type HousekeepingJobType,
+  Prisma,
+  Role,
+  StockStore,
+  StoreAdjustmentKind,
+} from "@prisma/client";
 import { db } from "@/server/db";
 import { requireRole, requireSession } from "@/server/rbac";
-import { formatIST, istDayWindow, istToUtc } from "@/lib/time";
+import { istToUtc } from "@/lib/time";
 import { sha256Json } from "@/lib/audit";
 import { deferAfterResponse } from "@/server/defer";
 import { notifyRoles } from "@/server/notification-core";
+import {
+  dateRange,
+  dayEnd,
+  dayStart,
+  drawHousekeepingIssue,
+  lockHousekeepingItemRows,
+  notifyHousekeepingLowStock,
+  toQty,
+} from "@/server/housekeeping-stock";
 import {
   HousekeepingItemInput,
   HousekeepingIssueInput,
@@ -23,56 +39,7 @@ import {
   type ActionResultWith,
 } from "@/server/action-result";
 
-type Tx = Prisma.TransactionClient;
 type Session = Awaited<ReturnType<typeof requireRole>>;
-
-/**
- * Row-lock housekeeping items for the rest of the transaction. Every stock
- * movement (receipt / issue / return) reads or updates currentStock /
- * inCirculation — without the lock two concurrent movements read the same
- * snapshot and one update is silently lost (stock can even go negative past
- * the availability check). FOR UPDATE serialises them; ids are locked in a
- * stable order so concurrent multi-line movements can't deadlock.
- */
-async function lockHousekeepingItemRows(tx: Tx, ids: string[]) {
-  for (const id of [...new Set(ids)].sort()) {
-    await tx.$executeRaw`SELECT 1 FROM "HousekeepingItem" WHERE "id" = ${id} FOR UPDATE`;
-  }
-}
-
-/** Quantities live at 3 dp. Anything that rounds to nothing is refused
- *  rather than written as a 0-quantity line. */
-function toQty(raw: string, what: string): Prisma.Decimal {
-  const q = new Prisma.Decimal(raw).toDecimalPlaces(3);
-  if (q.lte(0)) throw new ActionError(`${what}: quantity must be at least 0.001`);
-  return q;
-}
-
-/** "YYYY-MM-DD" (an IST calendar day) → UTC start of that day. Anything
- *  else — blank, malformed, 31 Feb — is ignored rather than crashing the
- *  page. */
-function dayStart(s?: string): Date | undefined {
-  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return undefined;
-  try {
-    const d = istToUtc(`${s}T00:00:00`);
-    return Number.isNaN(d.getTime()) ? undefined : d;
-  } catch {
-    return undefined;
-  }
-}
-
-/** The moment the "to" day ends — half-open, so the whole day is included. */
-function dayEnd(s?: string): Date | undefined {
-  const d = dayStart(s);
-  return d ? istDayWindow(d).toExclusive : undefined;
-}
-
-function dateRange(from?: string, to?: string): Prisma.DateTimeFilter | undefined {
-  const gte = dayStart(from);
-  const lt = dayEnd(to);
-  if (!gte && !lt) return undefined;
-  return { ...(gte ? { gte } : {}), ...(lt ? { lt } : {}) };
-}
 
 /** A receipt or issue keyed in by admin / manager is news to the desk that
  *  owns the stock. The desk's own postings need no echo. */
@@ -87,17 +54,24 @@ function tellHousekeepingManager(
   );
 }
 
-// Housekeeping is a self-contained stockroom for hotel guest supplies.
-// Distinct from kitchen inventory — runs on its own catalog (HousekeepingItem),
-// its own receipts (from maintenance) and its own issues (to room via staff).
+// Housekeeping is a self-run department with its own stockroom for hotel
+// guest supplies. Distinct from kitchen inventory — runs on its own catalog
+// (HousekeepingItem), its own jobs (housekeeping-jobs.ts) and its own issues
+// (to room via staff). Stock comes in against approved stock requests.
 //
 // Who can do what:
 //   HOUSEKEEPING_MANAGER: full read+write on housekeeping items, rooms,
-//                        staff, receipts, issues. Cannot see other modules
+//                        staff, issues, returns. Cannot see other modules
 //                        unless granted via role-nav.
-//   ADMIN/MANAGER:       full read+write (oversight + reports).
+//   ADMIN/MANAGER:       full read+write (oversight + reports), plus the
+//                        direct receipt — a correction path now that goods
+//                        arrive against stock requests.
+//   MAINTENANCE_MANAGER: may add and edit rooms (they log jobs against
+//                        them), never deactivate or delete one.
 
 const WRITE_ROLES = [Role.ADMIN, Role.MANAGER, Role.HOUSEKEEPING_MANAGER];
+const RECEIPT_ROLES = [Role.ADMIN, Role.MANAGER];
+const ROOM_EDIT_ROLES = [...WRITE_ROLES, Role.MAINTENANCE_MANAGER];
 const READ_ROLES = [
   Role.ADMIN,
   Role.MANAGER,
@@ -118,10 +92,13 @@ export async function upsertRoom(
 }
 
 async function upsertRoomInner(raw: unknown, id?: string): Promise<{ ok: true; id: string }> {
-  const session = await requireRole(WRITE_ROLES);
+  const session = await requireRole(ROOM_EDIT_ROLES);
   const input = RoomInput.parse(raw);
   const number = input.number.trim();
   if (!number) throw new ActionError("Room number is required");
+  // Maintenance may add and edit rooms but not take one out of (or put one
+  // back into) service — `active` is housekeeping's call, so it's ignored.
+  const ownsActive = session.user.role !== Role.MAINTENANCE_MANAGER;
 
   const row = await db.$transaction(async (tx) => {
     const dupe = await tx.room.findFirst({
@@ -138,10 +115,12 @@ async function upsertRoomInner(raw: unknown, id?: string): Promise<{ ok: true; i
       name: input.name ?? null,
       type: input.type,
       floor: input.floor ?? null,
-      active: input.active ?? true,
     };
     if (id) {
-      const updated = await tx.room.update({ where: { id }, data });
+      const updated = await tx.room.update({
+        where: { id },
+        data: { ...data, ...(ownsActive ? { active: input.active ?? true } : {}) },
+      });
       await tx.auditLog.create({
         data: {
           userId: session.user.id,
@@ -152,7 +131,9 @@ async function upsertRoomInner(raw: unknown, id?: string): Promise<{ ok: true; i
       });
       return updated;
     }
-    const created = await tx.room.create({ data });
+    const created = await tx.room.create({
+      data: { ...data, active: ownsActive ? (input.active ?? true) : true },
+    });
     await tx.auditLog.create({
       data: {
         userId: session.user.id,
@@ -166,6 +147,13 @@ async function upsertRoomInner(raw: unknown, id?: string): Promise<{ ok: true; i
 
   revalidatePath("/housekeeping/rooms");
   return { ok: true, id: row.id };
+}
+
+function historyLabel(issues: number, jobs: number): string {
+  const bits: string[] = [];
+  if (issues > 0) bits.push(`${issues} historical issue${issues === 1 ? "" : "s"}`);
+  if (jobs > 0) bits.push(`${jobs} job${jobs === 1 ? "" : "s"}`);
+  return bits.join(" and ");
 }
 
 export async function deactivateRoom(id: string): Promise<ActionResult> {
@@ -204,10 +192,15 @@ export async function deleteRoom(id: string): Promise<ActionResult> {
 
 async function deleteRoomInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
-  const issues = await db.housekeepingIssue.count({ where: { roomId: id } });
-  if (issues > 0) {
+  // Jobs would lose their room silently (the FK sets it null), so they
+  // count as history too.
+  const [issues, jobs] = await Promise.all([
+    db.housekeepingIssue.count({ where: { roomId: id } }),
+    db.housekeepingJob.count({ where: { roomId: id } }),
+  ]);
+  if (issues + jobs > 0) {
     throw new ActionError(
-      `This room has ${issues} historical issue${issues === 1 ? "" : "s"}. Deactivate instead to keep the audit trail.`
+      `This room has ${historyLabel(issues, jobs)}. Deactivate instead to keep the audit trail.`
     );
   }
   await db.$transaction(async (tx) => {
@@ -330,10 +323,13 @@ export async function deleteHousekeepingStaff(id: string): Promise<ActionResult>
 
 async function deleteHousekeepingStaffInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
-  const issues = await db.housekeepingIssue.count({ where: { staffId: id } });
-  if (issues > 0) {
+  const [issues, jobs] = await Promise.all([
+    db.housekeepingIssue.count({ where: { staffId: id } }),
+    db.housekeepingJob.count({ where: { staffId: id } }),
+  ]);
+  if (issues + jobs > 0) {
     throw new ActionError(
-      `This staff member has ${issues} historical issue${issues === 1 ? "" : "s"}. Deactivate instead to keep the audit trail.`
+      `This staff member has ${historyLabel(issues, jobs)}. Deactivate instead to keep the audit trail.`
     );
   }
   await db.$transaction(async (tx) => {
@@ -582,12 +578,17 @@ async function deleteHousekeepingItemInner(id: string): Promise<{ ok: true }> {
         ],
       },
     });
-    if (receiptLines > 0 || issueLines > 0 || adjustments > 0 || transfers > 0) {
+    // A stock request line keeps its item (the FK would set it null, and a
+    // CHECK needs exactly one item id on the line, so the delete would just
+    // fail with a raw error) — counted as history like the rest.
+    const requestLines = await tx.deptPurchaseOrderLine.count({ where: { hkItemId: id } });
+    if (receiptLines > 0 || issueLines > 0 || adjustments > 0 || transfers > 0 || requestLines > 0) {
       const bits: string[] = [];
       if (receiptLines > 0) bits.push(`${receiptLines} receipt line${receiptLines === 1 ? "" : "s"}`);
       if (issueLines > 0) bits.push(`${issueLines} issue line${issueLines === 1 ? "" : "s"}`);
       if (adjustments > 0) bits.push(`${adjustments} adjustment${adjustments === 1 ? "" : "s"}`);
       if (transfers > 0) bits.push(`${transfers} store transfer${transfers === 1 ? "" : "s"}`);
+      if (requestLines > 0) bits.push(`${requestLines} stock request line${requestLines === 1 ? "" : "s"}`);
       throw new ActionError(
         `This item has history (${bits.join(" + ")}). Deactivate instead to keep the audit trail.`
       );
@@ -615,7 +616,9 @@ export async function listHousekeepingItems(opts: { activeOnly?: boolean } = {})
   });
 }
 
-// ─── Receipts (maintenance → housekeeping) ────────────────────────────
+// ─── Receipts ─────────────────────────────────────────────────────────
+// Goods normally arrive against an approved stock request (/housekeeping/
+// purchase). Posting one directly is a manager's correction path.
 
 export async function recordHousekeepingReceipt(raw: unknown): Promise<ActionResultWith<{ id: string }>> {
   try {
@@ -626,7 +629,7 @@ export async function recordHousekeepingReceipt(raw: unknown): Promise<ActionRes
 }
 
 async function recordHousekeepingReceiptInner(raw: unknown): Promise<{ ok: true; id: string }> {
-  const session = await requireRole(WRITE_ROLES);
+  const session = await requireRole(RECEIPT_ROLES);
   const input = HousekeepingReceiptInput.parse(raw);
 
   // Coerce + validate quantities once before opening the txn.
@@ -711,6 +714,7 @@ export async function listHousekeepingReceipts(opts: { limit?: number } = {}) {
     orderBy: { receivedAt: "desc" },
     include: {
       recordedBy: { select: { id: true, name: true } },
+      purchaseOrder: { select: { id: true, number: true } },
       lines: {
         include: { item: { select: { id: true, name: true, unit: true } } },
       },
@@ -736,118 +740,20 @@ async function recordHousekeepingIssueInner(raw: unknown): Promise<{ ok: true; i
     itemId: l.itemId,
     qty: toQty(l.quantity, `Line ${i + 1}`),
   }));
-  // Availability is checked per ITEM, not per line: two lines for the same
-  // towel must not each pass against the same snapshot and overdraw together.
-  const totals = new Map<string, Prisma.Decimal>();
-  for (const l of lines) {
-    totals.set(l.itemId, (totals.get(l.itemId) ?? new Prisma.Decimal(0)).plus(l.qty));
-  }
-  const itemIds = [...totals.keys()];
 
-  const issue = await db.$transaction(async (tx) => {
-    // Check stock availability under the row lock — a pre-check outside the
-    // txn could pass for two concurrent issues that together overdraw.
-    await lockHousekeepingItemRows(tx, itemIds);
-    const staff = await tx.housekeepingStaff.findUnique({
-      where: { id: input.staffId },
-      select: { active: true },
-    });
-    if (!staff?.active) throw new ActionError("Pick an active staff member");
-    const room = await tx.room.findUnique({ where: { id: input.roomId }, select: { active: true } });
-    if (!room?.active) throw new ActionError("Pick an active room");
+  const issue = await db.$transaction((tx) =>
+    drawHousekeepingIssue(tx, {
+      recordedById: session.user.id,
+      issuedAt: istToUtc(input.issuedAt),
+      staffId: input.staffId,
+      roomId: input.roomId,
+      purpose: input.purpose ?? null,
+      notes: input.notes ?? null,
+      lines,
+    }),
+  );
 
-    const items = await tx.housekeepingItem.findMany({
-      where: { id: { in: itemIds } },
-      select: {
-        id: true,
-        name: true,
-        currentStock: true,
-        minStock: true,
-        unit: true,
-        active: true,
-        reusable: true,
-      },
-    });
-    const byId = new Map(items.map((i) => [i.id, i]));
-    for (const [itemId, total] of totals) {
-      const it = byId.get(itemId);
-      if (!it) throw new ActionError("Item not found — refresh the page and pick it again");
-      if (!it.active) throw new ActionError(`${it.name} is inactive`);
-      if (it.currentStock.lt(total)) {
-        throw new ActionError(
-          `Not enough ${it.name} in stock — this issue needs ${total.toString()} ${it.unit} across its lines, only ${it.currentStock.toString()} ${it.unit} on hand`,
-        );
-      }
-    }
-
-    const created = await tx.housekeepingIssue.create({
-      data: {
-        issuedAt: istToUtc(input.issuedAt),
-        recordedById: session.user.id,
-        staffId: input.staffId,
-        roomId: input.roomId,
-        purpose: input.purpose ?? null,
-        notes: input.notes ?? null,
-        lines: {
-          create: lines.map((l) => ({
-            itemId: l.itemId,
-            quantity: l.qty,
-            // Snapshot: the item's flag can be toggled later; the line keeps
-            // what it meant when it was issued.
-            reusable: byId.get(l.itemId)!.reusable,
-          })),
-        },
-      },
-    });
-    const crossed: Array<{ id: string; name: string; unit: string; after: string }> = [];
-    for (const [itemId, total] of totals) {
-      const it = byId.get(itemId)!;
-      // Reusable items move from clean stock into circulation (they'll come
-      // back via a Return). Consumables just leave stock.
-      await tx.housekeepingItem.update({
-        where: { id: itemId },
-        data: {
-          currentStock: { decrement: total },
-          ...(it.reusable ? { inCirculation: { increment: total } } : {}),
-        },
-      });
-      const threshold = it.minStock ?? new Prisma.Decimal(0);
-      const after = it.currentStock.minus(total);
-      if (it.currentStock.gt(threshold) && after.lte(threshold)) {
-        crossed.push({ id: itemId, name: it.name, unit: it.unit, after: after.toString() });
-      }
-    }
-    await tx.auditLog.create({
-      data: {
-        userId: session.user.id,
-        action: "HK_ISSUE_CREATED",
-        entity: "HousekeepingIssue",
-        entityId: created.id,
-        payloadHash: sha256Json({
-          issuedAt: input.issuedAt,
-          staffId: input.staffId,
-          roomId: input.roomId,
-          lines: lines.map((l) => ({ itemId: l.itemId, qty: l.qty.toString() })),
-        }),
-      },
-    });
-    return { id: created.id, crossed, names: items.map((i) => i.name) };
-  });
-
-  if (issue.crossed.length > 0) {
-    const day = formatIST(new Date(), "yyyy-MM-dd");
-    deferAfterResponse("housekeeping:low-stock:notify", async () => {
-      for (const it of issue.crossed) {
-        await notifyRoles([Role.HOUSEKEEPING_MANAGER, Role.MANAGER], {
-          kind: "GENERIC",
-          title: "Housekeeping stock low",
-          body: `${it.name}: ${it.after} ${it.unit} left`,
-          link: "/housekeeping/items",
-          dedupeKey: `hk-low:${it.id}:${day}`,
-        });
-      }
-    });
-  }
+  notifyHousekeepingLowStock(issue.crossed);
   tellHousekeepingManager(session, "housekeeping:issue:notify", {
     title: "Housekeeping issue recorded",
     body: `${issue.names.join(", ")} — by ${session.user.name ?? session.user.email}`,
@@ -1251,10 +1157,56 @@ export async function consumptionByStaff(
     .sort((a, b) => Number(b.totalUnits) - Number(a.totalUnits) || b.trips - a.trips);
 }
 
+/**
+ * Jobs over the period, by type: opened (reported in the period), done
+ * (closed in the period), open now (OPEN + IN_PROGRESS, whenever reported)
+ * and the average time from report to close for the jobs done in the
+ * period. Hours, not minutes — that's the scale a room job runs at.
+ */
+export async function jobsReport(
+  period: ReportPeriod,
+  opts: { from?: string; to?: string } = {}
+) {
+  await requireRole(READ_ROLES);
+  const { from, toExclusive } = periodRange(period, opts.from, opts.to);
+  const rows = await db.$queryRaw<
+    Array<{ type: HousekeepingJobType; opened: bigint; done: bigint; openNow: bigint; closeSecs: number | null }>
+  >`
+    SELECT "type"::text AS type,
+           COUNT(*) FILTER (WHERE "reportedAt" >= ${from} AND "reportedAt" < ${toExclusive}) AS opened,
+           COUNT(*) FILTER (WHERE "status" = 'DONE' AND "completedAt" >= ${from} AND "completedAt" < ${toExclusive}) AS done,
+           COUNT(*) FILTER (WHERE "status" IN ('OPEN', 'IN_PROGRESS')) AS "openNow",
+           SUM(EXTRACT(EPOCH FROM ("completedAt" - "reportedAt")))
+             FILTER (WHERE "status" = 'DONE' AND "completedAt" >= ${from} AND "completedAt" < ${toExclusive})::float8 AS "closeSecs"
+    FROM "HousekeepingJob"
+    GROUP BY "type"
+  `;
+  const hours = (secs: number, n: number) => (n > 0 ? Math.round((secs / n / 3600) * 10) / 10 : null);
+  const byType = rows
+    .map((r) => ({
+      type: r.type,
+      opened: Number(r.opened),
+      done: Number(r.done),
+      openNow: Number(r.openNow),
+      avgHoursToClose: hours(r.closeSecs ?? 0, Number(r.done)),
+    }))
+    .filter((r) => r.opened + r.done + r.openNow > 0)
+    .sort((a, b) => b.opened - a.opened || b.openNow - a.openNow);
+  const sum = (k: "opened" | "done" | "openNow") => byType.reduce((n, r) => n + r[k], 0);
+  const done = sum("done");
+  return {
+    opened: sum("opened"),
+    done,
+    openNow: sum("openNow"),
+    avgHoursToClose: hours(rows.reduce((n, r) => n + (r.closeSecs ?? 0), 0), done),
+    byType,
+  };
+}
+
 /** Top-line counters for the housekeeping dashboard. */
 export async function housekeepingSummary() {
   await requireRole(READ_ROLES);
-  const [items, lowStock, recentReceipts, recentIssues] = await Promise.all([
+  const [items, lowStock, recentReceipts, recentIssues, openJobs] = await Promise.all([
     db.housekeepingItem.count({ where: { active: true } }),
     db.housekeepingItem.findMany({
       where: {
@@ -1274,6 +1226,9 @@ export async function housekeepingSummary() {
     }),
     db.housekeepingIssue.count({
       where: { issuedAt: { gte: new Date(Date.now() - 7 * 24 * 3600 * 1000) } },
+    }),
+    db.housekeepingJob.count({
+      where: { status: { in: [DeptJobStatus.OPEN, DeptJobStatus.IN_PROGRESS] } },
     }),
   ]);
   // Filter low-stock client-side because we need to compare Decimal fields.
@@ -1297,6 +1252,7 @@ export async function housekeepingSummary() {
     lowStock: lows,
     receiptsLastWeek: recentReceipts,
     issuesLastWeek: recentIssues,
+    openJobs,
     topItemsThisWeek: top.slice(0, 5),
   };
 }

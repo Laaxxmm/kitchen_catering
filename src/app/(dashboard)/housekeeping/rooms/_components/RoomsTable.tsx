@@ -39,9 +39,10 @@ const TYPE_LABEL: Record<RoomType, string> = {
   OTHER: "Other",
 };
 
-/** `canWrite` false = read-only view (maintenance manager): the rows show,
- *  the buttons don't — every write action would refuse them anyway. */
-export function RoomsTable({ rooms, canWrite = true }: { rooms: Room[]; canWrite?: boolean }) {
+/** `canRetire` false = the maintenance manager: they add and edit rooms,
+ *  but deactivate / reactivate / delete are housekeeping's (the server
+ *  refuses those and ignores `active` from them anyway). */
+export function RoomsTable({ rooms, canRetire = true }: { rooms: Room[]; canRetire?: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState<Partial<Room> | null>(null);
@@ -117,7 +118,7 @@ export function RoomsTable({ rooms, canWrite = true }: { rooms: Room[]; canWrite
   function hardDelete(r: Room) {
     if (
       !confirm(
-        `Permanently delete room "${r.number}"? This cannot be undone. If the room has any historical issues, the system will refuse — deactivate instead.`
+        `Permanently delete room "${r.number}"? This cannot be undone. If the room has any historical issues or jobs, the system will refuse — deactivate instead.`
       )
     )
       return;
@@ -227,11 +228,11 @@ export function RoomsTable({ rooms, canWrite = true }: { rooms: Room[]; canWrite
             </Button>
           </div>
         </section>
-      ) : canWrite ? (
+      ) : (
         <div>
           <Button onClick={startCreate}>+ Add room</Button>
         </div>
-      ) : null}
+      )}
 
       {rooms.length === 0 ? (
         <p className="text-[13px] text-ik-ink-3">No rooms yet. Add one above.</p>
@@ -244,7 +245,7 @@ export function RoomsTable({ rooms, canWrite = true }: { rooms: Room[]; canWrite
               <TableHead>Type</TableHead>
               <TableHead>Floor</TableHead>
               <TableHead>Status</TableHead>
-              {canWrite && <TableHead className="text-right">Actions</TableHead>}
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -266,28 +267,27 @@ export function RoomsTable({ rooms, canWrite = true }: { rooms: Room[]; canWrite
                     {r.active ? "Active" : "Inactive"}
                   </span>
                 </TableCell>
-                {canWrite && (
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
-                    {r.active ? (
-                      <>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => startEdit(r)}
-                          disabled={pending}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => deactivate(r.id)}
-                          disabled={pending}
-                        >
-                          Deactivate
-                        </Button>
-                      </>
+                    {r.active && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => startEdit(r)}
+                        disabled={pending}
+                      >
+                        Edit
+                      </Button>
+                    )}
+                    {canRetire && (r.active ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => deactivate(r.id)}
+                        disabled={pending}
+                      >
+                        Deactivate
+                      </Button>
                     ) : (
                       <Button
                         size="sm"
@@ -297,18 +297,19 @@ export function RoomsTable({ rooms, canWrite = true }: { rooms: Room[]; canWrite
                       >
                         Reactivate
                       </Button>
+                    ))}
+                    {canRetire && (
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => hardDelete(r)}
+                        disabled={pending}
+                      >
+                        Delete
+                      </Button>
                     )}
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => hardDelete(r)}
-                      disabled={pending}
-                    >
-                      Delete
-                    </Button>
                   </div>
                 </TableCell>
-                )}
               </TableRow>
             ))}
           </TableBody>
