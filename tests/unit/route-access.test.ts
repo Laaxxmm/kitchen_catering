@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { routeAllows } from "@/lib/route-access";
+import { routeAllows, type Role } from "@/lib/route-access";
+import { NAV_GROUPS } from "@/lib/nav-config";
+import { SIDEBAR_KEYS_BY_ROLE } from "@/lib/role-nav";
 
 /**
  * Route gates, first-match-wins.
@@ -93,6 +95,41 @@ describe("the housekeeping and maintenance desks", () => {
       expect(routeAllows("/housekeeping", role)).toBe(false);
       expect(routeAllows("/maintenance", role)).toBe(false);
     }
+  });
+});
+
+describe("the two departments are separate products", () => {
+  it("lets each head reach their own department's upload, stock requests and jobs, and not the other's", () => {
+    for (const p of ["/housekeeping/upload", "/housekeeping/purchase", "/housekeeping/jobs"]) {
+      expect(routeAllows(p, "HOUSEKEEPING_MANAGER")).toBe(true);
+      expect(routeAllows(p, "MAINTENANCE_MANAGER")).toBe(false);
+      expect(routeAllows(p, "STORE_KEEPER")).toBe(false);
+    }
+    for (const p of ["/maintenance/upload", "/maintenance/purchase"]) {
+      expect(routeAllows(p, "MAINTENANCE_MANAGER")).toBe(true);
+      expect(routeAllows(p, "HOUSEKEEPING_MANAGER")).toBe(false);
+      expect(routeAllows(p, "STORE_KEEPER")).toBe(false);
+    }
+    expect(routeAllows("/housekeeping/upload", "MANAGER")).toBe(true);
+    expect(routeAllows("/maintenance/upload", "MANAGER")).toBe(true);
+  });
+
+  it("never shows a role a menu entry its route gate would refuse", () => {
+    for (const [role, keys] of Object.entries(SIDEBAR_KEYS_BY_ROLE)) {
+      for (const item of NAV_GROUPS.flatMap((g) => g.items).filter((i) => keys.has(i.key))) {
+        expect({ role, href: item.href, allowed: routeAllows(item.href, role as Role) }).toEqual({
+          role,
+          href: item.href,
+          allowed: true,
+        });
+      }
+    }
+  });
+
+  it("gives the store keeper no housekeeping or maintenance entry", () => {
+    const keys = SIDEBAR_KEYS_BY_ROLE.STORE_KEEPER;
+    const seen = NAV_GROUPS.flatMap((g) => g.items).filter((i) => keys.has(i.key));
+    expect(seen.filter((i) => /^\/(housekeeping|maintenance)(\/|$)/.test(i.href))).toEqual([]);
   });
 });
 
