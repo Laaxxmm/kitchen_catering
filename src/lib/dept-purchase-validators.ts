@@ -10,7 +10,9 @@ import { StoreDepartment } from "@prisma/client";
  * as a zero the DB check would then reject.
  */
 
-const PLAIN_NUMBER = /^\d*\.?\d+$/;
+// Linear-time: no nested optional digit runs to backtrack over (the old
+// /^\d*\.?\d+$/ was quadratic on a long digit string ending in a letter).
+const PLAIN_NUMBER = /^(?:\d+(?:\.\d+)?|\.\d+)$/;
 
 /**
  * One transform, not a refine chain: zod runs later refines on a value an
@@ -27,6 +29,7 @@ function parseAmount(
   };
   const s = String(raw).trim();
   if (s === "") return fail(`Enter ${o.what}`);
+  if (s.length > 20) return fail(`That ${o.what} is too long`);
   if (!PLAIN_NUMBER.test(s)) return fail(`Enter a valid ${o.what} (no minus sign)`);
   const d = new Decimal(s).toDecimalPlaces(o.dp);
   if (o.positive && d.lte(0)) return fail(`${o.what[0].toUpperCase()}${o.what.slice(1)} must be more than 0`);
@@ -71,7 +74,15 @@ const optDate = z
   .trim()
   .nullish()
   .transform((v) => v || null)
-  .refine((v) => v === null || /^\d{4}-\d{2}-\d{2}$/.test(v), "Enter a valid date");
+  .refine((v) => v === null || isCalendarDate(v), "Enter a valid date");
+
+/** yyyy-mm-dd that is a real day ("2026-02-31" and "2026-13-45" are not). */
+function isCalendarDate(v: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!m) return false;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return d.getUTCFullYear() === Number(m[1]) && d.getUTCMonth() === Number(m[2]) - 1 && d.getUTCDate() === Number(m[3]);
+}
 
 function noDuplicates<T>(key: (row: T) => string, message: string) {
   return (rows: T[], ctx: z.RefinementCtx) => {

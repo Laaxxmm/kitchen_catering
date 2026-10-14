@@ -407,7 +407,9 @@ async function upsertHousekeepingItemInner(
         if (!hasHistory) {
           hasHistory =
             (await tx.housekeepingReceiptLine.count({ where: { itemId: id } })) > 0 ||
-            (await tx.housekeepingIssueLine.count({ where: { itemId: id } })) > 0;
+            (await tx.housekeepingIssueLine.count({ where: { itemId: id } })) > 0 ||
+            // A stock request approved in the old unit counts too.
+            (await tx.deptPurchaseOrderLine.count({ where: { hkItemId: id } })) > 0;
         }
         if (hasHistory) {
           throw new ActionError(

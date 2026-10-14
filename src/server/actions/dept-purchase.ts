@@ -278,6 +278,11 @@ export async function decideDeptPurchaseOrder(id: string, raw: unknown): Promise
     // approving your own spend is the one thing this flow exists to stop.
     const session = await requireRole(APPROVER_ROLES);
     const po = await loadForCaller(id, session.user.role);
+    // Nor may a manager sign off a request they raised themselves — someone
+    // else approves it (an admin may, being the last word anyway).
+    if (po.createdById === session.user.id && session.user.role !== Role.ADMIN) {
+      throw new ActionError("You raised this request — another manager or an admin has to approve it");
+    }
     const input = DeptPurchaseDecisionInput.parse(raw);
     const now = new Date();
 
@@ -410,6 +415,12 @@ export async function receiveDeptPurchaseOrder(
     const input = DeptPurchaseReceiveInput.parse(raw);
     const receivedAt = istToUtc(input.receivedAt);
     if (Number.isNaN(receivedAt.getTime())) throw new ActionError("Enter a valid received date");
+    // A receipt dated years away skews every date-based stock and
+    // consumption report: goods arrive today-ish.
+    const DAY = 24 * 3600 * 1000;
+    if (receivedAt.getTime() > Date.now() + DAY || receivedAt.getTime() < Date.now() - 60 * DAY) {
+      throw new ActionError("The received date must be within the last 60 days");
+    }
     const hk = po.department === "HOUSEKEEPING";
 
     const out = await db.$transaction(async (tx) => {
@@ -439,6 +450,13 @@ export async function receiveDeptPurchaseOrder(
       if (!RECEIVABLE.includes(order.status)) {
         throw new ActionError("Goods can only be received against an approved or ordered PO");
       }
+      // A retried form or a second tab must not book the same delivery
+      // twice: one supplier bill, one receipt (checked under the PO lock).
+      if (input.supplierBillNo) {
+        const where = { purchaseOrderId: po.id, supplierBillNo: input.supplierBillNo };
+        const dup = hk ? await tx.housekeepingReceipt.count({ where }) : await tx.maintenanceReceipt.count({ where });
+        if (dup > 0) throw new ActionError(`Bill ${input.supplierBillNo} is already booked against ${po.number}`);
+      }
       const byLine = new Map(order.lines.map((l) => [l.id, l]));
       const approvedOf = (l: (typeof order.lines)[number]) =>
         new Decimal((l.approvedQty ?? l.quantity).toString());
@@ -467,8 +485,19 @@ export async function receiveDeptPurchaseOrder(
 
       await lockItems(tx, po.department, moves.map((m) => m.itemId));
       const items = await findItems(tx, po.department, moves.map((m) => m.itemId));
+      const unitOfItem = new Map(items.map((it) => [it.id, it.unit]));
       for (const it of items) {
         if (!it.active) throw new ActionError(`${it.name} is hidden — unhide it before receiving it`);
+      }
+      // The approval was for N of the line's unit. If the item's unit was
+      // changed since, receiving N would book N of something else.
+      for (const m of moves) {
+        const line = byLine.get(m.lineId)!;
+        if (unitOfItem.get(m.itemId) !== line.unit) {
+          throw new ActionError(
+            `${line.itemName} is now counted in ${unitOfItem.get(m.itemId)}, but this request approved ${line.unit} — raise a new request`,
+          );
+        }
       }
 
       const data = {

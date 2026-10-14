@@ -366,7 +366,9 @@ export async function DeptPurchasePrintPage({ department, params }: IdParams) {
   const { id } = await params;
   const po = await loadPo(department, id);
   const d = DEPT[department];
-  const approved = po.decidedAt != null && po.status !== "REJECTED" && po.status !== "PENDING_APPROVAL";
+  // Only a live, approved order prints as one. A cancelled order keeps its
+  // decidedAt, and must not reach a supplier as "Approved by …".
+  const approved = (["APPROVED", "ORDERED", "PARTIALLY_RECEIVED", "RECEIVED"] as string[]).includes(po.status);
   const rows = po.lines
     .map((l) => ({ l, qty: approved ? approvedOf(l) : dec(l.quantity) }))
     .filter((r) => r.qty.gt(0));

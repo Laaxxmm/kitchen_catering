@@ -39,7 +39,10 @@ export const decimalString = z
   // "" is allowed (some callers treat it as "not provided"); anything else
   // must be a plain number — garbage here used to surface as a raw
   // [DecimalError] crash deep in the money math.
-  .refine((s) => s === "" || /^-?\d*\.?\d+$/.test(s), "Enter a valid number");
+  // Length cap first, and a regex without nested optional runs: the old
+  // /^-?\d*\.?\d+$/ backtracked quadratically, so one long digit string
+  // ending in a letter could block the server's event loop for minutes.
+  .refine((s) => s === "" || (s.length <= 40 && /^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(s)), "Enter a valid number");
 
 /** 2-digit Indian GST state code, e.g. "29" for Karnataka. */
 export const stateCode = z.string().regex(/^[0-9]{2}$/, "stateCode must be 2 digits");

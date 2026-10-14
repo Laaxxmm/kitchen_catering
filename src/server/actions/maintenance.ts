@@ -261,7 +261,7 @@ async function upsertMaintenanceItemInner(
         select: {
           unit: true,
           currentStock: true,
-          _count: { select: { receiptLines: true, activityLines: true } },
+          _count: { select: { receiptLines: true, activityLines: true, purchaseLines: true } },
         },
       });
       if (!existing) throw new ActionError("Item not found");
@@ -271,7 +271,9 @@ async function upsertMaintenanceItemInner(
         existing.unit !== input.unit &&
         (new Decimal(existing.currentStock.toString()).gt(0) ||
           existing._count.receiptLines > 0 ||
-          existing._count.activityLines > 0)
+          existing._count.activityLines > 0 ||
+          // a stock request approved in the old unit counts too
+          existing._count.purchaseLines > 0)
       ) {
         throw new ActionError(
           `Unit can't change from "${existing.unit}" once the item has stock or history — add a new item instead`
