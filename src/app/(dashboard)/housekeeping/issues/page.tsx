@@ -140,6 +140,13 @@ export default async function IssuesListPage({
                 </TableCell>
                 <TableCell className="text-[12px] text-ik-ink-2">
                   {i.purpose ?? "—"}
+                  {i.jobId && (
+                    <div>
+                      <Link href={`/housekeeping/jobs/${i.jobId}`} className="text-[11px] text-brand hover:underline">
+                        Closing a job →
+                      </Link>
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell className="text-[12.5px]">{i.recordedBy.name}</TableCell>
               </TableRow>
