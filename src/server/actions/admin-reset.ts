@@ -149,6 +149,8 @@ async function resetTransactionalDataInner(
       await tx.housekeepingIssueLine.deleteMany();
       await tx.housekeepingAdjustment.deleteMany();
       await tx.housekeepingIssue.deleteMany();
+      // Jobs after the issues that point at them (issue.jobId).
+      await tx.housekeepingJob.deleteMany();
       await tx.housekeepingReceiptLine.deleteMany();
       await tx.housekeepingReceipt.deleteMany();
       await tx.maintenanceActivityLine.deleteMany();
@@ -156,6 +158,10 @@ async function resetTransactionalDataInner(
       await tx.maintenanceActivity.deleteMany();
       await tx.maintenanceReceiptLine.deleteMany();
       await tx.maintenanceReceipt.deleteMany();
+      // The departments' stock requests / POs, after the receipts that
+      // point at them (receipt.purchaseOrderId, line.poLineId).
+      await tx.deptPurchaseOrderLine.deleteMany();
+      await tx.deptPurchaseOrder.deleteMany();
       await tx.banquetIssueLine.deleteMany();
       await tx.banquetIssue.deleteMany();
       await tx.banquetReceiptLine.deleteMany();
