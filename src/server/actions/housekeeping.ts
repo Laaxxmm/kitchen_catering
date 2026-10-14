@@ -192,18 +192,21 @@ export async function deleteRoom(id: string): Promise<ActionResult> {
 
 async function deleteRoomInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
-  // Jobs would lose their room silently (the FK sets it null), so they
-  // count as history too.
-  const [issues, jobs] = await Promise.all([
-    db.housekeepingIssue.count({ where: { roomId: id } }),
-    db.housekeepingJob.count({ where: { roomId: id } }),
-  ]);
-  if (issues + jobs > 0) {
-    throw new ActionError(
-      `This room has ${historyLabel(issues, jobs)}. Deactivate instead to keep the audit trail.`
-    );
-  }
   await db.$transaction(async (tx) => {
+    // Lock first, count under the lock: a job raised against the room
+    // between the count and the delete would otherwise lose its room (the
+    // FK sets it null) or hit the maintenance FK as a raw error.
+    await tx.$executeRaw`SELECT 1 FROM "Room" WHERE "id" = ${id} FOR UPDATE`;
+    const [issues, jobs, mtJobs] = await Promise.all([
+      tx.housekeepingIssue.count({ where: { roomId: id } }),
+      tx.housekeepingJob.count({ where: { roomId: id } }),
+      tx.maintenanceActivity.count({ where: { roomId: id } }),
+    ]);
+    if (issues + jobs + mtJobs > 0) {
+      throw new ActionError(
+        `This room has ${historyLabel(issues, jobs + mtJobs)}. Deactivate instead to keep the audit trail.`
+      );
+    }
     await tx.room.delete({ where: { id } });
     await tx.auditLog.create({
       data: {
@@ -216,6 +219,13 @@ async function deleteRoomInner(id: string): Promise<{ ok: true }> {
   });
   revalidatePath("/housekeeping/rooms");
   return { ok: true };
+}
+
+/** An IST datetime-local string that is a real instant (garbage refused). */
+function validWhen(raw: string): Date {
+  const d = istToUtc(raw);
+  if (Number.isNaN(d.getTime())) throw new ActionError("Enter a valid date and time");
+  return d;
 }
 
 export async function listRooms(opts: { activeOnly?: boolean } = {}) {
@@ -323,16 +333,18 @@ export async function deleteHousekeepingStaff(id: string): Promise<ActionResult>
 
 async function deleteHousekeepingStaffInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
-  const [issues, jobs] = await Promise.all([
-    db.housekeepingIssue.count({ where: { staffId: id } }),
-    db.housekeepingJob.count({ where: { staffId: id } }),
-  ]);
-  if (issues + jobs > 0) {
-    throw new ActionError(
-      `This staff member has ${historyLabel(issues, jobs)}. Deactivate instead to keep the audit trail.`
-    );
-  }
   await db.$transaction(async (tx) => {
+    // Lock, then count under the lock — see deleteRoom.
+    await tx.$executeRaw`SELECT 1 FROM "HousekeepingStaff" WHERE "id" = ${id} FOR UPDATE`;
+    const [issues, jobs] = await Promise.all([
+      tx.housekeepingIssue.count({ where: { staffId: id } }),
+      tx.housekeepingJob.count({ where: { staffId: id } }),
+    ]);
+    if (issues + jobs > 0) {
+      throw new ActionError(
+        `This staff member has ${historyLabel(issues, jobs)}. Deactivate instead to keep the audit trail.`
+      );
+    }
     await tx.housekeepingStaff.delete({ where: { id } });
     await tx.auditLog.create({
       data: {
@@ -433,7 +445,10 @@ async function upsertHousekeepingItemInner(
           reusable: input.reusable,
           minStock,
           notes: input.notes,
-          active: input.active ?? true,
+          // An edit may reactivate, never hide: hiding goes through
+          // deactivateHousekeepingItem, which refuses while stock is out.
+          // An edit that omits `active` leaves it as it is.
+          ...(input.active === true ? { active: true } : {}),
         },
       });
       await tx.auditLog.create({
@@ -500,6 +515,19 @@ async function upsertHousekeepingItemInner(
     return created;
   });
 
+  // Stock that did not come through an approved request: the manager hears
+  // about it, the same rule as a hand adjustment or a stock upload.
+  if (!id && session.user.role === Role.HOUSEKEEPING_MANAGER && row.currentStock.gt(0)) {
+    deferAfterResponse("housekeeping:opening:notify", () =>
+      notifyRoles([Role.MANAGER], {
+        kind: "GENERIC",
+        title: "Housekeeping item added with opening stock",
+        body: `${row.name}: ${row.currentStock.toString()} ${row.unit} — by ${session.user.name ?? session.user.email}`,
+        link: "/housekeeping/items",
+        dedupeKey: `hk-opening:${row.id}`,
+      }),
+    );
+  }
   revalidatePath("/housekeeping/items");
   revalidatePath("/housekeeping/receipts");
   revalidatePath("/housekeeping");
@@ -657,7 +685,7 @@ async function recordHousekeepingReceiptInner(raw: unknown): Promise<{ ok: true;
 
     const created = await tx.housekeepingReceipt.create({
       data: {
-        receivedAt: istToUtc(input.receivedAt),
+        receivedAt: validWhen(input.receivedAt),
         recordedById: session.user.id,
         sourceNote: input.sourceNote ?? null,
         sourceContact: input.sourceContact ?? null,
@@ -746,7 +774,7 @@ async function recordHousekeepingIssueInner(raw: unknown): Promise<{ ok: true; i
   const issue = await db.$transaction((tx) =>
     drawHousekeepingIssue(tx, {
       recordedById: session.user.id,
-      issuedAt: istToUtc(input.issuedAt),
+      issuedAt: validWhen(input.issuedAt),
       staffId: input.staffId,
       roomId: input.roomId,
       purpose: input.purpose ?? null,

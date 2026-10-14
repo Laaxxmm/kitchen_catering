@@ -270,16 +270,19 @@ describe("the rules on the way", () => {
     expect((await activity(started)).startedAt).toBeInstanceOf(Date);
   });
 
-  it("cancel puts back the parts drawn when the job was logged", async () => {
+  it("spares are refused at logging; a job logged with spares before 14 Oct still restores on cancel", async () => {
     asMaintenance();
+    // Spares come off once, at completion — never at logging (no double draw).
+    const refused = await recordMaintenanceActivity(
+      job({ status: "IN_PROGRESS", staffId, lines: [{ itemId: bulbId, quantity: "3" }] }),
+    );
+    expect(refused.ok).toBe(false);
+    // A job logged the old way (spares drawn at logging), as production may hold.
     const before = Number(await stock(bulbId));
-    const id = mustOk(
-      await recordMaintenanceActivity(
-        job({ status: "IN_PROGRESS", staffId, lines: [{ itemId: bulbId, quantity: "3" }] }),
-      ),
-      "job with parts",
-    ).id;
-    expectDecimal(await stock(bulbId), String(before - 3), "drawn at logging");
+    const id = mustOk(await recordMaintenanceActivity(job({ status: "IN_PROGRESS", staffId })), "open job").id;
+    await db.maintenanceActivityLine.create({ data: { activityId: id, itemId: bulbId, quantity: "3" } });
+    await db.maintenanceItem.update({ where: { id: bulbId }, data: { currentStock: { decrement: 3 } } });
+    expectDecimal(await stock(bulbId), String(before - 3), "drawn at logging (legacy)");
     mustOk(await updateMaintenanceActivityStatus(id, { status: "CANCELLED" }), "cancel");
     expectDecimal(await stock(bulbId), String(before), "restored");
     const restored = await db.maintenanceAdjustment.findMany({ where: { activityId: id } });

@@ -982,7 +982,7 @@ export const HousekeepingReceiptInput = z.object({
   receivedAt: isoDate,
   sourceNote: z.string().max(500).nullable().optional(),
   sourceContact: z.string().max(160).nullable().optional(),
-  lines: z.array(ReceiptLineInput).min(1, "Add at least one line"),
+  lines: z.array(ReceiptLineInput).min(1, "Add at least one line").max(50, "50 lines at most"),
 });
 
 const IssueLineInput = z.object({
@@ -996,7 +996,7 @@ export const HousekeepingIssueInput = z.object({
   roomId: z.string().min(1, "Pick a room"),
   purpose: z.string().max(200).nullable().optional(),
   notes: z.string().max(500).nullable().optional(),
-  lines: z.array(IssueLineInput).min(1, "Add at least one item"),
+  lines: z.array(IssueLineInput).min(1, "Add at least one item").max(50, "50 lines at most"),
 });
 
 // Closing the reusable loop: linen back from a room (RETURNED) or written
@@ -1046,7 +1046,7 @@ export const MaintenanceReceiptInput = z.object({
   receivedAt: isoDate,
   sourceNote: z.string().trim().max(500).nullable().optional(),
   sourceContact: z.string().trim().max(160).nullable().optional(),
-  lines: z.array(MaintReceiptLineInput).min(1, "Add at least one line"),
+  lines: z.array(MaintReceiptLineInput).min(1, "Add at least one line").max(50, "50 lines at most"),
 });
 
 const MaintActivityLineInput = z.object({

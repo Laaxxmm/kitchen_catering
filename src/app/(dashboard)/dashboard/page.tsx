@@ -35,7 +35,6 @@ import { LogBoard, type LogBucket } from "@/components/ik/dashboard/LogBoard";
 import { listHousekeepingIssues } from "@/server/actions/housekeeping";
 import { listMaintenanceActivities } from "@/server/actions/maintenance";
 import { listDeptPurchaseOrdersAwaitingApproval } from "@/server/actions/dept-purchase";
-import { getStoreStock } from "@/server/actions/store-stock";
 import { toDecimal, formatINRWhole } from "@/lib/money";
 import { isPayable } from "@/lib/vendor-bill-gates";
 import { formatIST, istDayWindow, istScopeWindow, istWeekWindow, type EventDateScope } from "@/lib/time";
@@ -756,22 +755,21 @@ export default async function DashboardPage({
   const needPOApproval = proc?.poPendingApproval ?? 0;
   const needMatch = proc?.billsPendingMatch ?? 0;
   const needPay = proc?.billsPendingPayment ?? 0;
-  // The two hotel-side stores, same Out / Low split their landing pages
-  // show. The banner counts them; the Stock card below stays the kitchen's,
-  // since that is where its link lands.
-  const [hkStock, mtStock] = isManagerScope
-    ? await Promise.all([getStoreStock("housekeeping"), getStoreStock("maintenance")])
-    : [null, null];
+  // Housekeeping and maintenance run their own stores: their shelves are
+  // theirs to watch, and what reaches management is the stock request
+  // waiting for a signature.
+  // (approvals[6] is listDeptPurchaseOrdersAwaitingApproval, fetched above.)
+  const deptRequests = approvals ? approvals[6].length : 0;
   const kitchenReorder = summary.lowStockCount;
-  const storesReorder = [hkStock, mtStock].reduce((n, s) => n + (s ? s.out + s.low : 0), 0);
-  const needReorder = kitchenReorder + storesReorder;
-  const attnCount = needApproval + needPOApproval + needMatch + needPay + needReorder;
+  const needReorder = kitchenReorder;
+  const attnCount = needApproval + needPOApproval + needMatch + needPay + needReorder + deptRequests;
   const attnBreakdown = [
     needApproval ? `${needApproval} order${needApproval === 1 ? "" : "s"} to approve` : null,
     needPOApproval ? `${needPOApproval} PO${needPOApproval === 1 ? "" : "s"} to approve` : null,
     needMatch ? `${needMatch} ${needMatch === 1 ? "bill" : "bills"} to match` : null,
     needPay ? `${needPay} to pay` : null,
     needReorder ? `${needReorder} to reorder` : null,
+    deptRequests ? `${deptRequests} department stock request${deptRequests === 1 ? "" : "s"} to approve` : null,
   ]
     .filter(Boolean)
     .join(" · ");

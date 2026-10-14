@@ -122,7 +122,8 @@ export function ActivityForm({
           issueReported: issueReported.trim(),
           workDone: reportOnly ? null : workDone.trim() || null,
           notes: notes.trim() || null,
-          lines: cleanLines,
+          // Spares are recorded only when the job is logged as completed.
+          lines: status === MaintenanceActivityStatus.COMPLETED ? cleanLines : [],
         });
         if (!res.ok) {
           toast.error(res.error);
@@ -208,7 +209,7 @@ export function ActivityForm({
         </div>
       </section>
 
-      {!reportOnly && <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
+      {!reportOnly && status === MaintenanceActivityStatus.COMPLETED && <section className="grid gap-3 rounded-2xl border border-ik-rule bg-ik-card shadow-ik-card p-4">
         <div className="flex items-center justify-between">
           <div className="text-[12px] font-medium text-ik-ink-2">Spares used (optional)</div>
           <Button size="sm" variant="outline" onClick={addLine}>+ Add item</Button>

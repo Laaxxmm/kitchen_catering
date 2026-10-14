@@ -129,18 +129,17 @@ describe("cancelling", () => {
   it("puts the spares back with a RESTORED record per line", async () => {
     asMaintenance();
     const before = Number(await stock());
-    const { id } = mustOk(
-      await recordMaintenanceActivity(
-        job({
-          status: "IN_PROGRESS",
-          lines: [
-            { itemId, quantity: "2" },
-            { itemId, quantity: "3" },
-          ],
-        }),
-      ),
-      "job with parts",
-    );
+    // Logged the pre-14-Oct way, with spares drawn at logging (production
+    // may hold such jobs); the action itself now takes spares only at
+    // completion.
+    const { id } = mustOk(await recordMaintenanceActivity(job({ status: "IN_PROGRESS" })), "open job");
+    await db.maintenanceActivityLine.createMany({
+      data: [
+        { activityId: id, itemId, quantity: "2" },
+        { activityId: id, itemId, quantity: "3" },
+      ],
+    });
+    await db.maintenanceItem.update({ where: { id: itemId }, data: { currentStock: { decrement: 5 } } });
     expectDecimal(await stock(), String(before - 5), "drawn");
 
     mustOk(await updateMaintenanceActivityStatus(id, { status: "CANCELLED", note: "False alarm" }), "cancel");
@@ -179,10 +178,9 @@ describe("cancelling", () => {
       ),
       "kept",
     );
-    const dropped = mustOk(
-      await recordMaintenanceActivity(job({ roomId: room, lines: [{ itemId, quantity: "4" }] })),
-      "to cancel",
-    );
+    const dropped = mustOk(await recordMaintenanceActivity(job({ roomId: room })), "to cancel");
+    await db.maintenanceActivityLine.create({ data: { activityId: dropped.id, itemId, quantity: "4" } });
+    await db.maintenanceItem.update({ where: { id: itemId }, data: { currentStock: { decrement: 4 } } });
     mustOk(await updateMaintenanceActivityStatus(dropped.id, { status: "CANCELLED" }), "cancel");
 
     const byRoom = await activitiesByRoom("CUSTOM", { from: today, to: today });

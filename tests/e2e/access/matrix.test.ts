@@ -13,6 +13,7 @@ import * as chefRequisitions from "@/server/actions/chef-requisitions";
 import * as customerInvoices from "@/server/actions/customer-invoices";
 import * as deliveries from "@/server/actions/deliveries";
 import * as deptPurchase from "@/server/actions/dept-purchase";
+import * as deptStockUpload from "@/server/actions/dept-stock-upload";
 import * as dishes from "@/server/actions/dishes";
 import * as documents from "@/server/actions/documents";
 import * as housekeeping from "@/server/actions/housekeeping";
@@ -476,6 +477,12 @@ const CASES: GateCase[] = [
   ),
   gate("dept-purchase", "cancelDeptPurchaseOrder", ["admin", "manager", "housekeeping", "maintenance"], () =>
     deptPurchase.cancelDeptPurchaseOrder(MISSING_ID, "gate probe"),
+  ),
+
+  // The one-time stock upload: a department head uploads their own store
+  // only (proven both ways in tests/e2e/dept/upload.test.ts).
+  gate("dept-stock-upload", "applyDeptStockUpload", ["admin", "manager", "housekeeping"], () =>
+    deptStockUpload.applyDeptStockUpload("HOUSEKEEPING", new FormData()),
   ),
 
   gate("customer-invoices", "approveCustomerInvoiceForRelease", ["admin", "manager"], () =>

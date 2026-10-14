@@ -187,13 +187,16 @@ export async function deleteMaintenanceStaff(id: string): Promise<ActionResult> 
 
 async function deleteMaintenanceStaffInner(id: string): Promise<{ ok: true }> {
   const session = await requireRole(WRITE_ROLES);
-  const activities = await db.maintenanceActivity.count({ where: { staffId: id } });
-  if (activities > 0) {
-    throw new ActionError(
-      `This staff member has ${activities} historical activit${activities === 1 ? "y" : "ies"}. Deactivate instead to keep the audit trail.`
-    );
-  }
   await db.$transaction(async (tx) => {
+    // Lock, then count under the lock: a job assigned between a count and
+    // the delete would silently lose its technician (the FK sets it null).
+    await tx.$executeRaw`SELECT 1 FROM "MaintenanceStaff" WHERE "id" = ${id} FOR UPDATE`;
+    const activities = await tx.maintenanceActivity.count({ where: { staffId: id } });
+    if (activities > 0) {
+      throw new ActionError(
+        `This staff member has ${activities} historical activit${activities === 1 ? "y" : "ies"}. Deactivate instead to keep the audit trail.`
+      );
+    }
     await tx.maintenanceStaff.delete({ where: { id } });
     await tx.auditLog.create({
       data: {
@@ -252,7 +255,9 @@ async function upsertMaintenanceItemInner(
       minStock,
       // Omitted = untouched; the item form has no notes field.
       ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
-      active: input.active ?? true,
+      // On an edit, `active` may only reactivate: hiding goes through
+      // deactivateMaintenanceItem, which refuses while stock is on the shelf.
+      ...(id ? (input.active === true ? { active: true } : {}) : { active: input.active ?? true }),
     };
     if (id) {
       await lockMaintenanceItemRows(tx, [id]);
@@ -324,6 +329,19 @@ async function upsertMaintenanceItemInner(
     return created;
   });
 
+  // Stock that did not come through an approved request: the manager hears
+  // about it, the same rule as a hand adjustment or a stock upload.
+  if (!id && session.user.role === Role.MAINTENANCE_MANAGER && opening && opening.gt(0)) {
+    deferAfterResponse("maintenance:opening:notify", () =>
+      notifyRoles([Role.MANAGER], {
+        kind: "GENERIC",
+        title: "Maintenance item added with opening stock",
+        body: `${input.name}: ${opening.toString()} ${input.unit} — by ${session.user.name ?? session.user.email}`,
+        link: "/maintenance/items",
+        dedupeKey: `mt-opening:${row.id}`,
+      }),
+    );
+  }
   revalidatePath("/maintenance/items");
   revalidatePath("/maintenance/receipts");
   revalidatePath("/maintenance");
@@ -634,6 +652,12 @@ async function recordMaintenanceActivityInner(raw: unknown): Promise<{ ok: true;
   }
   if (status === MaintenanceActivityStatus.COMPLETED && !workDone) {
     throw new ActionError("Say what work was done — a completed job records it");
+  }
+  // Spares come off the shelf once, when the job is closed with what was
+  // actually used. Taking them at logging too let the same bulbs be drawn
+  // again in the Complete dialog, which starts empty.
+  if (input.lines.length > 0 && status !== MaintenanceActivityStatus.COMPLETED) {
+    throw new ActionError("Record the spares when you complete the job — they come off the shelf then");
   }
   const lines = input.lines.map((l) => ({ itemId: l.itemId, qty: qty3(l.quantity) }));
   const now = new Date();
