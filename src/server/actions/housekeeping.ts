@@ -578,12 +578,17 @@ async function deleteHousekeepingItemInner(id: string): Promise<{ ok: true }> {
         ],
       },
     });
-    if (receiptLines > 0 || issueLines > 0 || adjustments > 0 || transfers > 0) {
+    // A stock request line keeps its item (the FK would set it null, and a
+    // CHECK needs exactly one item id on the line, so the delete would just
+    // fail with a raw error) — counted as history like the rest.
+    const requestLines = await tx.deptPurchaseOrderLine.count({ where: { hkItemId: id } });
+    if (receiptLines > 0 || issueLines > 0 || adjustments > 0 || transfers > 0 || requestLines > 0) {
       const bits: string[] = [];
       if (receiptLines > 0) bits.push(`${receiptLines} receipt line${receiptLines === 1 ? "" : "s"}`);
       if (issueLines > 0) bits.push(`${issueLines} issue line${issueLines === 1 ? "" : "s"}`);
       if (adjustments > 0) bits.push(`${adjustments} adjustment${adjustments === 1 ? "" : "s"}`);
       if (transfers > 0) bits.push(`${transfers} store transfer${transfers === 1 ? "" : "s"}`);
+      if (requestLines > 0) bits.push(`${requestLines} stock request line${requestLines === 1 ? "" : "s"}`);
       throw new ActionError(
         `This item has history (${bits.join(" + ")}). Deactivate instead to keep the audit trail.`
       );

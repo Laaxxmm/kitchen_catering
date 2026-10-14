@@ -15,6 +15,7 @@ import {
 } from "@/server/actions/housekeeping-jobs";
 import {
   deactivateRoom,
+  deleteHousekeepingItem,
   deleteRoom,
   housekeepingSummary,
   jobsReport,
@@ -407,6 +408,24 @@ describe("the department's module, adjusted", () => {
     const why = await expectRefused(() => deleteRoom(roomId));
     expect(why).toMatch(/job/);
     expect(await db.room.count({ where: { id: roomId } })).toBe(1);
+  });
+
+  it("an item on a stock request line can't be deleted — it has history", async () => {
+    asHousekeeping();
+    const requested = await newItem("Requested shampoo", "0");
+    const po = await db.deptPurchaseOrder.create({
+      data: {
+        number: `HK-PO-E2E-${tag}`,
+        department: "HOUSEKEEPING",
+        reason: "Running low",
+        createdById: desk("housekeeping").id,
+        lines: { create: [{ hkItemId: requested, itemName: `Requested shampoo ${tag}`, unit: "piece", quantity: "5" }] },
+      },
+    });
+    const why = await expectRefused(() => deleteHousekeepingItem(requested));
+    expect(why).toBe("This item has history (1 stock request line). Deactivate instead to keep the audit trail.");
+    expect(await db.housekeepingItem.count({ where: { id: requested } })).toBe(1);
+    expect(await db.deptPurchaseOrderLine.count({ where: { poId: po.id, hkItemId: requested } })).toBe(1);
   });
 
   it("the summary counts open jobs; the report counts the period", async () => {
