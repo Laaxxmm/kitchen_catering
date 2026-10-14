@@ -12,6 +12,7 @@ import * as catalogueImport from "@/server/actions/catalogue-import";
 import * as chefRequisitions from "@/server/actions/chef-requisitions";
 import * as customerInvoices from "@/server/actions/customer-invoices";
 import * as deliveries from "@/server/actions/deliveries";
+import * as deptPurchase from "@/server/actions/dept-purchase";
 import * as dishes from "@/server/actions/dishes";
 import * as documents from "@/server/actions/documents";
 import * as housekeeping from "@/server/actions/housekeeping";
@@ -447,6 +448,35 @@ const CASES: GateCase[] = [
       method: PaymentMethod.NEFT,
     }),
   ),
+  // ── Housekeeping / maintenance stock requests & POs ───────────────────
+  // The department heads run the whole document; only the decision is
+  // admin / manager. Which department a head may touch is proven end to end
+  // in tests/e2e/dept/purchase.test.ts (a missing id is past the gate here).
+  gate("dept-purchase", "createDeptPurchaseOrder", ["admin", "manager", "housekeeping", "maintenance"], () =>
+    deptPurchase.createDeptPurchaseOrder({}),
+  ),
+  gate("dept-purchase", "updateDeptPurchaseOrder", ["admin", "manager", "housekeeping", "maintenance"], () =>
+    deptPurchase.updateDeptPurchaseOrder(MISSING_ID, {}),
+  ),
+  gate("dept-purchase", "submitDeptPurchaseOrder", ["admin", "manager", "housekeeping", "maintenance"], () =>
+    deptPurchase.submitDeptPurchaseOrder(MISSING_ID),
+  ),
+  gate("dept-purchase", "decideDeptPurchaseOrder", ["admin", "manager"], () =>
+    deptPurchase.decideDeptPurchaseOrder(MISSING_ID, {}),
+  ),
+  gate("dept-purchase", "markDeptPurchaseOrdered", ["admin", "manager", "housekeeping", "maintenance"], () =>
+    deptPurchase.markDeptPurchaseOrdered(MISSING_ID, {}),
+  ),
+  gate("dept-purchase", "receiveDeptPurchaseOrder", ["admin", "manager", "housekeeping", "maintenance"], () =>
+    deptPurchase.receiveDeptPurchaseOrder(MISSING_ID, {}),
+  ),
+  gate("dept-purchase", "closeDeptPurchaseOrderShort", ["admin", "manager", "housekeeping", "maintenance"], () =>
+    deptPurchase.closeDeptPurchaseOrderShort(MISSING_ID, "gate probe"),
+  ),
+  gate("dept-purchase", "cancelDeptPurchaseOrder", ["admin", "manager", "housekeeping", "maintenance"], () =>
+    deptPurchase.cancelDeptPurchaseOrder(MISSING_ID, "gate probe"),
+  ),
+
   gate("customer-invoices", "approveCustomerInvoiceForRelease", ["admin", "manager"], () =>
     customerInvoices.approveCustomerInvoiceForRelease(MISSING_ID),
   ),
