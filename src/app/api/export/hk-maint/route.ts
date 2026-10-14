@@ -107,7 +107,7 @@ export async function GET(req: Request) {
       name: "Maintenance activities",
       header: ["Date", "Room", "Staff", "Category", "Status", "Issue", "Work done"],
       rows: mtActivities.map((a) => [
-        a.performedAt, a.room.number, a.staff.name, a.category, a.status, a.issueReported, a.workDone,
+        a.performedAt, a.room.number, a.staff?.name ?? "Unassigned", a.category, a.status, a.issueReported, a.workDone,
       ]),
       widths: [12, 10, 20, 12, 12, 32, 32],
     },

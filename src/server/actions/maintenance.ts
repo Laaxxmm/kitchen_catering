@@ -940,15 +940,15 @@ export async function activitiesByStaff(
   });
   if (grouped.length === 0) return [];
   const staff = await db.maintenanceStaff.findMany({
-    where: { id: { in: grouped.map((g) => g.staffId) } },
+    where: { id: { in: grouped.map((g) => g.staffId).filter((id): id is string => id !== null) } },
     select: { id: true, name: true, category: true },
   });
   const byId = new Map(staff.map((s) => [s.id, s]));
   return grouped
     .map((g) => ({
       staffId: g.staffId,
-      staffName: byId.get(g.staffId)?.name ?? "—",
-      category: byId.get(g.staffId)?.category ?? "GENERAL",
+      staffName: (g.staffId && byId.get(g.staffId)?.name) || "Unassigned",
+      category: (g.staffId && byId.get(g.staffId)?.category) || "GENERAL",
       count: g._count._all,
     }))
     .sort((a, b) => b.count - a.count);

@@ -38,7 +38,9 @@ async function nextSequenceValue(
     | "GPItemCodeSequence"
     | "GPInhouseItemCodeSequence"
     | "GPHiredItemCodeSequence"
-    | "PettyCashVoucherNumberSequence",
+    | "PettyCashVoucherNumberSequence"
+    | "HousekeepingPONumberSequence"
+    | "MaintenancePONumberSequence",
   storageYear: number,
 ): Promise<number> {
   const table = Prisma.raw(`"${tableName}"`);
@@ -177,4 +179,23 @@ export function salaryRunNo(periodMonth: Date): string {
   const fy = getFyForDate(periodMonth);
   const mm = String(periodMonth.getUTCMonth() + 1).padStart(2, "0");
   return `SR-${fy.label}-${mm}`;
+}
+
+/**
+ * The housekeeping / maintenance department's own stock request + PO
+ * (DeptPurchaseOrder). Two series so each department's numbers run on their
+ * own: HK-PO-26-27-0001, MT-PO-26-27-0001.
+ */
+export async function nextDeptPurchaseOrderNumber(
+  tx: Tx,
+  department: "HOUSEKEEPING" | "MAINTENANCE",
+): Promise<string> {
+  const fy = getFyForDate(new Date());
+  const hk = department === "HOUSEKEEPING";
+  const n = await nextSequenceValue(
+    tx,
+    hk ? "HousekeepingPONumberSequence" : "MaintenancePONumberSequence",
+    fy.storageYear,
+  );
+  return `${hk ? "HK" : "MT"}-PO-${fy.label}-${String(n).padStart(4, "0")}`;
 }

@@ -464,6 +464,12 @@ model User {
   maintenanceReceiptsRecorded   MaintenanceReceipt[]  @relation("MaintenanceReceiptRecordedBy")
   maintenanceActivitiesRecorded MaintenanceActivity[] @relation("MaintenanceActivityRecordedBy")
 
+  // Housekeeping / maintenance as self-run departments
+  housekeepingJobsReported  HousekeepingJob[]   @relation("HousekeepingJobReportedBy")
+  housekeepingJobsClosed    HousekeepingJob[]   @relation("HousekeepingJobClosedBy")
+  deptPurchaseOrdersCreated DeptPurchaseOrder[] @relation("DeptPOCreatedBy")
+  deptPurchaseOrdersDecided DeptPurchaseOrder[] @relation("DeptPODecidedBy")
+
   // Banquet (F&B store)
   banquetReceiptsRecorded      BanquetReceipt[]       @relation("BanquetReceiptRecordedBy")
   banquetIssuesRecorded        BanquetIssue[]         @relation("BanquetIssueRecordedBy")
@@ -847,20 +853,20 @@ model IngredientReturn {
   // backfill to it.
   status IngredientReturnStatus @default(CONFIRMED)
 
-  returnedAt DateTime
+  returnedAt   DateTime
   // Who wrote the document: the chef on a declaration, the store keeper on
   // a direct counter return.
   recordedById String
-  recordedBy   User   @relation("IngredientReturnRecordedBy", fields: [recordedById], references: [id])
+  recordedBy   User     @relation("IngredientReturnRecordedBy", fields: [recordedById], references: [id])
   notes        String?
   createdAt    DateTime @default(now())
 
   // Who booked the stock in, and when. Always set on a CONFIRMED row —
   // equal to recordedBy on the direct path, so "who took delivery" reads
   // off one column without a "was there a declaration?" branch.
-  confirmedById String?
-  confirmedBy   User?     @relation("IngredientReturnConfirmedBy", fields: [confirmedById], references: [id])
-  confirmedAt   DateTime?
+  confirmedById    String?
+  confirmedBy      User?     @relation("IngredientReturnConfirmedBy", fields: [confirmedById], references: [id])
+  confirmedAt      DateTime?
   // Note the store left when what arrived differed from what was declared.
   confirmationNote String?
 
@@ -886,26 +892,26 @@ enum IngredientReturnStatus {
 }
 
 model IngredientReturnLine {
-  id       String           @id @default(cuid())
-  returnId String
-  return   IngredientReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
-  issueId  String
-  issue    IngredientIssue  @relation(fields: [issueId], references: [id])
+  id               String           @id @default(cuid())
+  returnId         String
+  return           IngredientReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  issueId          String
+  issue            IngredientIssue  @relation(fields: [issueId], references: [id])
   // What this document is for right now: the declared figure while it is
   // DECLARED, the received figure once the store has confirmed it. Only
   // counts as moved stock when the parent is CONFIRMED.
-  quantity Decimal          @db.Decimal(14, 3)
+  quantity         Decimal          @db.Decimal(14, 3)
   // What the chef said they were sending. Set once at declaration and never
   // overwritten, so "declared 2 kg, received 1.5 kg" survives confirmation —
   // same shape as ManpowerRequest.requested* vs approved*. NULL means the
   // store recorded this line directly, with no declaration behind it.
-  declaredQuantity Decimal? @db.Decimal(14, 3)
+  declaredQuantity Decimal?         @db.Decimal(14, 3)
   // Snapshot of the issue's unitCostAtIssue: the value credited back is
   // quantity × this, never quantity × today's moving average.
-  unitCost Decimal          @db.Decimal(12, 4)
+  unitCost         Decimal          @db.Decimal(12, 4)
   // Mandatory — "unused", "excess", "wrong item" or free text. This is what
   // makes the food-cost correction auditable after the event.
-  reason   String
+  reason           String
 
   @@index([returnId])
   @@index([issueId])
@@ -2375,6 +2381,7 @@ model Room {
   updatedAt DateTime @updatedAt
 
   housekeepingIssues    HousekeepingIssue[]
+  housekeepingJobs      HousekeepingJob[]
   maintenanceActivities MaintenanceActivity[]
 
   @@index([active])
@@ -2390,6 +2397,7 @@ model HousekeepingStaff {
   updatedAt DateTime @updatedAt
 
   housekeepingIssues HousekeepingIssue[]
+  housekeepingJobs   HousekeepingJob[]
 
   @@index([active])
 }
@@ -2415,9 +2423,10 @@ model HousekeepingItem {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  receiptLines HousekeepingReceiptLine[]
-  issueLines   HousekeepingIssueLine[]
-  adjustments  HousekeepingAdjustment[]
+  receiptLines  HousekeepingReceiptLine[]
+  issueLines    HousekeepingIssueLine[]
+  adjustments   HousekeepingAdjustment[]
+  purchaseLines DeptPurchaseOrderLine[]   @relation("DeptPOLineHKItem")
 
   @@unique([name])
   @@index([active])
@@ -2427,31 +2436,40 @@ model HousekeepingItem {
 // manager (or admin) records this. `sourceNote` captures who supplied
 // it (e.g. "Maintenance — Mr Kumar, GRN-9183").
 model HousekeepingReceipt {
-  id            String   @id @default(cuid())
-  receivedAt    DateTime
-  recordedById  String
-  recordedBy    User     @relation("HousekeepingReceiptRecordedBy", fields: [recordedById], references: [id])
-  sourceNote    String? // free-text — "from kitchen store", "vendor delivery"
-  sourceContact String? // name of the maintenance person who handed over
-  createdAt     DateTime @default(now())
+  id              String             @id @default(cuid())
+  receivedAt      DateTime
+  recordedById    String
+  recordedBy      User               @relation("HousekeepingReceiptRecordedBy", fields: [recordedById], references: [id])
+  sourceNote      String? // free-text — "from kitchen store", "vendor delivery"
+  sourceContact   String? // name of the maintenance person who handed over
+  // The approved stock request these goods arrived against. Null on an
+  // opening balance / upload, or a receipt a manager posted directly.
+  purchaseOrderId String?
+  purchaseOrder   DeptPurchaseOrder? @relation("HKReceiptPO", fields: [purchaseOrderId], references: [id])
+  supplierBillNo  String?
+  createdAt       DateTime           @default(now())
 
   lines HousekeepingReceiptLine[]
 
   @@index([receivedAt])
+  @@index([purchaseOrderId])
 }
 
 model HousekeepingReceiptLine {
-  id          String              @id @default(cuid())
+  id          String                 @id @default(cuid())
   receiptId   String
-  receipt     HousekeepingReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  receipt     HousekeepingReceipt    @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   itemId      String
-  item        HousekeepingItem    @relation(fields: [itemId], references: [id])
-  quantity    Decimal             @db.Decimal(14, 3)
+  item        HousekeepingItem       @relation(fields: [itemId], references: [id])
+  quantity    Decimal                @db.Decimal(14, 3)
   // Optional cost tracking — useful for the admin consumption-value report.
-  costPerUnit Decimal?            @db.Decimal(12, 2)
+  costPerUnit Decimal?               @db.Decimal(12, 2)
+  poLineId    String?
+  poLine      DeptPurchaseOrderLine? @relation("HKReceiptLinePOLine", fields: [poLineId], references: [id])
 
   @@index([receiptId])
   @@index([itemId])
+  @@index([poLineId])
 }
 
 // Stock OUT — housekeeping staff took items to a room (or common area).
@@ -2469,11 +2487,74 @@ model HousekeepingIssue {
   // Free-text e.g. "guest checkout cleaning", "fresh linen swap"
   purpose      String?
   notes        String?
+  // The housekeeping job whose closing drew these items, if any. One job
+  // closes with at most one issue; a direct issue has no job.
+  jobId        String?           @unique
+  job          HousekeepingJob?  @relation(fields: [jobId], references: [id])
   createdAt    DateTime          @default(now())
 
   lines HousekeepingIssueLine[]
 
   @@index([issuedAt])
+  @@index([roomId])
+  @@index([staffId])
+}
+
+// A housekeeping job — the department's own work order. The housekeeping
+// head opens it (room 102 checkout clean, guest wants extra towels), it is
+// done by their staff, and they close it, recording what was used; closing
+// with items draws them from the housekeeping store as a HousekeepingIssue.
+// No approval anywhere: the department runs its own jobs.
+enum HousekeepingJobType {
+  CHECKOUT_CLEAN
+  STAYOVER_CLEAN
+  TURNDOWN
+  DEEP_CLEAN
+  GUEST_REQUEST
+  LAUNDRY
+  OTHER
+}
+
+enum DeptJobStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum JobPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model HousekeepingJob {
+  id           String              @id @default(cuid())
+  type         HousekeepingJobType @default(GUEST_REQUEST)
+  priority     JobPriority         @default(NORMAL)
+  status       DeptJobStatus       @default(OPEN)
+  roomId       String?
+  room         Room?               @relation(fields: [roomId], references: [id])
+  description  String
+  staffId      String?
+  staff        HousekeepingStaff?  @relation(fields: [staffId], references: [id])
+  reportedAt   DateTime            @default(now())
+  reportedById String
+  reportedBy   User                @relation("HousekeepingJobReportedBy", fields: [reportedById], references: [id])
+  startedAt    DateTime?
+  completedAt  DateTime?
+  cancelledAt  DateTime?
+  closedById   String?
+  closedBy     User?               @relation("HousekeepingJobClosedBy", fields: [closedById], references: [id])
+  outcome      String? // what was done, on closing
+  notes        String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  issue HousekeepingIssue?
+
+  @@index([status, reportedAt])
   @@index([roomId])
   @@index([staffId])
 }
@@ -2546,6 +2627,7 @@ model MaintenanceItem {
   receiptLines  MaintenanceReceiptLine[]
   activityLines MaintenanceActivityLine[]
   adjustments   MaintenanceAdjustment[]
+  purchaseLines DeptPurchaseOrderLine[]   @relation("DeptPOLineMTItem")
 
   @@unique([name])
   @@index([active])
@@ -2554,30 +2636,39 @@ model MaintenanceItem {
 
 // Stock IN — purchased / handed-over to maintenance.
 model MaintenanceReceipt {
-  id            String   @id @default(cuid())
-  receivedAt    DateTime
-  recordedById  String
-  recordedBy    User     @relation("MaintenanceReceiptRecordedBy", fields: [recordedById], references: [id])
-  sourceNote    String?
-  sourceContact String?
-  createdAt     DateTime @default(now())
+  id              String             @id @default(cuid())
+  receivedAt      DateTime
+  recordedById    String
+  recordedBy      User               @relation("MaintenanceReceiptRecordedBy", fields: [recordedById], references: [id])
+  sourceNote      String?
+  sourceContact   String?
+  // The approved stock request these goods arrived against (see the
+  // housekeeping receipt for the same field).
+  purchaseOrderId String?
+  purchaseOrder   DeptPurchaseOrder? @relation("MTReceiptPO", fields: [purchaseOrderId], references: [id])
+  supplierBillNo  String?
+  createdAt       DateTime           @default(now())
 
   lines MaintenanceReceiptLine[]
 
   @@index([receivedAt])
+  @@index([purchaseOrderId])
 }
 
 model MaintenanceReceiptLine {
-  id          String             @id @default(cuid())
+  id          String                 @id @default(cuid())
   receiptId   String
-  receipt     MaintenanceReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  receipt     MaintenanceReceipt     @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   itemId      String
-  item        MaintenanceItem    @relation(fields: [itemId], references: [id])
-  quantity    Decimal            @db.Decimal(14, 3)
-  costPerUnit Decimal?           @db.Decimal(12, 2)
+  item        MaintenanceItem        @relation(fields: [itemId], references: [id])
+  quantity    Decimal                @db.Decimal(14, 3)
+  costPerUnit Decimal?               @db.Decimal(12, 2)
+  poLineId    String?
+  poLine      DeptPurchaseOrderLine? @relation("MTReceiptLinePOLine", fields: [poLineId], references: [id])
 
   @@index([receiptId])
   @@index([itemId])
+  @@index([poLineId])
 }
 
 // Activity — one work visit at a room. The "issueReported" captures what
@@ -2588,17 +2679,22 @@ model MaintenanceActivity {
   performedAt   DateTime
   recordedById  String
   recordedBy    User                      @relation("MaintenanceActivityRecordedBy", fields: [recordedById], references: [id])
-  staffId       String
-  staff         MaintenanceStaff          @relation(fields: [staffId], references: [id])
+  // Optional while the job is only reported (housekeeping logs a defect
+  // without knowing which technician will take it); set by the time it
+  // is worked.
+  staffId       String?
+  staff         MaintenanceStaff?         @relation(fields: [staffId], references: [id])
   roomId        String
   room          Room                      @relation(fields: [roomId], references: [id])
   category      MaintenanceCategory
+  priority      JobPriority               @default(NORMAL)
   status        MaintenanceActivityStatus @default(COMPLETED)
   issueReported String // "AC not cooling", "tap dripping"
   workDone      String? // "replaced capacitor", "tightened washer"
   notes         String?
   // Set by updateMaintenanceActivityStatus; a job is COMPLETED or CANCELLED
   // once, and a cancel puts its spares back on the shelf.
+  startedAt     DateTime?
   completedAt   DateTime?
   cancelledAt   DateTime?
   createdAt     DateTime                  @default(now())
@@ -2640,9 +2736,13 @@ model HousekeepingAdjustment {
   itemId           String
   item             HousekeepingItem    @relation(fields: [itemId], references: [id])
   kind             StoreAdjustmentKind
-  /** Change to clean / available stock. */
+  /**
+   * Change to clean / available stock.
+   */
   delta            Decimal             @db.Decimal(14, 3)
-  /** Change to stock out in rooms (reusables only). */
+  /**
+   * Change to stock out in rooms (reusables only).
+   */
   circulationDelta Decimal             @default(0) @db.Decimal(14, 3)
   beforeQty        Decimal             @db.Decimal(14, 3)
   afterQty         Decimal             @db.Decimal(14, 3)
@@ -2668,7 +2768,9 @@ model MaintenanceAdjustment {
   afterQty   Decimal             @db.Decimal(14, 3)
   reason     String
   note       String?
-  /** The job whose cancel put these spares back. */
+  /**
+   * The job whose cancel put these spares back.
+   */
   activityId String?
   byId       String
   by         User                @relation("MaintenanceAdjustmentBy", fields: [byId], references: [id])
@@ -2676,6 +2778,105 @@ model MaintenanceAdjustment {
 
   @@index([itemId, at])
   @@index([kind, at])
+}
+
+// =====================================================================
+// HOUSEKEEPING / MAINTENANCE — the department's own stock requests & POs
+// =====================================================================
+//
+// Housekeeping and maintenance are self-run departments, untied from the
+// kitchen stores and kitchen procurement. When the department needs stock,
+// its head raises a request (items, quantities, estimated rates, supplier);
+// an ADMIN or MANAGER approves it (and may cut quantities) or rejects it;
+// the head then places it with the supplier and records the goods as they
+// arrive, which lands them in the department's own store. One document
+// carries the request and the PO.
+
+enum StoreDepartment {
+  HOUSEKEEPING
+  MAINTENANCE
+}
+
+enum DeptPurchaseStatus {
+  DRAFT // being written by the department head
+  PENDING_APPROVAL // submitted; waiting on admin / manager
+  APPROVED // approved; not yet placed with the supplier
+  REJECTED // terminal
+  ORDERED // placed with the supplier
+  PARTIALLY_RECEIVED
+  RECEIVED // terminal — everything approved has arrived (or was closed short)
+  CANCELLED // terminal
+}
+
+model DeptPurchaseOrder {
+  id             String             @id @default(cuid())
+  number         String             @unique // HK-PO-26-27-0001 / MT-PO-26-27-0001
+  department     StoreDepartment
+  status         DeptPurchaseStatus @default(DRAFT)
+  reason         String // why the stock is needed
+  supplierName   String?
+  supplierPhone  String?
+  expectedAt     DateTime?
+  notes          String?
+  /**
+   * Σ line quantity × rate at the time of the last save — for the approver.
+   */
+  estimatedTotal Decimal            @default(0) @db.Decimal(14, 2)
+
+  createdById  String
+  createdBy    User      @relation("DeptPOCreatedBy", fields: [createdById], references: [id])
+  submittedAt  DateTime?
+  decidedById  String?
+  decidedBy    User?     @relation("DeptPODecidedBy", fields: [decidedById], references: [id])
+  decidedAt    DateTime?
+  decisionNote String?
+  orderedAt    DateTime?
+  closedAt     DateTime?
+  cancelledAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  lines      DeptPurchaseOrderLine[]
+  hkReceipts HousekeepingReceipt[]   @relation("HKReceiptPO")
+  mtReceipts MaintenanceReceipt[]    @relation("MTReceiptPO")
+
+  @@index([department, status])
+  @@index([status, submittedAt])
+}
+
+model DeptPurchaseOrderLine {
+  id          String            @id @default(cuid())
+  poId        String
+  po          DeptPurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  sortOrder   Int               @default(0)
+  // Exactly one of these is set, matching the order's department.
+  hkItemId    String?
+  hkItem      HousekeepingItem? @relation("DeptPOLineHKItem", fields: [hkItemId], references: [id])
+  mtItemId    String?
+  mtItem      MaintenanceItem?  @relation("DeptPOLineMTItem", fields: [mtItemId], references: [id])
+  itemName    String // snapshot at request time
+  unit        String // snapshot at request time
+  quantity    Decimal           @db.Decimal(14, 3) // asked for
+  approvedQty Decimal?          @db.Decimal(14, 3) // set at approval; null = as asked
+  receivedQty Decimal           @default(0) @db.Decimal(14, 3)
+  rate        Decimal?          @db.Decimal(12, 2) // estimated unit cost
+
+  hkReceiptLines HousekeepingReceiptLine[] @relation("HKReceiptLinePOLine")
+  mtReceiptLines MaintenanceReceiptLine[]  @relation("MTReceiptLinePOLine")
+
+  @@index([poId, sortOrder])
+  @@index([hkItemId])
+  @@index([mtItemId])
+}
+
+model HousekeepingPONumberSequence {
+  year Int @id
+  next Int @default(1)
+}
+
+model MaintenancePONumberSequence {
+  year Int @id
+  next Int @default(1)
 }
 
 // =====================================================================

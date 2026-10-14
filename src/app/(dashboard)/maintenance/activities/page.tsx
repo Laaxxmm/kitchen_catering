@@ -189,10 +189,16 @@ export default async function ActivitiesListPage({
                   {a.room.name && <div className="text-[11px] text-ik-ink-3">{a.room.name}</div>}
                 </TableCell>
                 <TableCell className="text-[12.5px]">
-                  {a.staff.name}
-                  <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">
-                    {CAT_LABEL[a.staff.category]}
-                  </div>
+                  {a.staff ? (
+                    <>
+                      {a.staff.name}
+                      <div className="text-[10.5px] uppercase tracking-wide text-ik-ink-3">
+                        {CAT_LABEL[a.staff.category]}
+                      </div>
+                    </>
+                  ) : (
+                    <span className="text-ik-ink-3">Unassigned</span>
+                  )}
                 </TableCell>
                 <TableCell className="text-[11.5px] uppercase tracking-wide text-ik-ink-2">
                   {CAT_LABEL[a.category]}
