@@ -1,6 +1,6 @@
 import type { IconName } from "@/components/ik/Icon";
 
-// 8 top-level nav groups. Labels are display-only — the `href`s are the
+// Top-level nav groups. Labels are display-only — the `href`s are the
 // existing routes, unchanged (e.g. "Menu" → /dishes, "Kitchen stock" →
 // /inventory, "Invoices" → /invoices). `badgeKey` ties a group to a
 // "needs-you" count from getNavBadges(); groups without one carry no badge.
@@ -70,9 +70,44 @@ export const NAV_GROUPS: NavGroup[] = [
     badgeKey: "stores",
     items: [
       { key: "inventory", label: "Kitchen stock", icon: "box", href: "/inventory" },
-      { key: "housekeeping", label: "Housekeeping", icon: "box", href: "/housekeeping" },
-      { key: "maintenance", label: "Maintenance", icon: "briefcase", href: "/maintenance" },
       { key: "banquet", label: "Banquet", icon: "box", href: "/banquet" },
+    ],
+  },
+  // Housekeeping and maintenance are self-run departments, not stores: each
+  // has its own stock, its own stock requests and its own head. The heads
+  // see their whole department here; admin / manager see the overview, the
+  // requests waiting on them and the go-live upload (see role-nav.ts).
+  {
+    key: "housekeepingdept",
+    label: "Housekeeping",
+    collapsible: true,
+    items: [
+      { key: "housekeeping", label: "Overview", icon: "box", href: "/housekeeping" },
+      { key: "hk-jobs", label: "Jobs", icon: "kanban", href: "/housekeeping/jobs" },
+      { key: "hk-stock", label: "Stock", icon: "box", href: "/housekeeping/items" },
+      { key: "hk-issues", label: "Issue to room", icon: "truck", href: "/housekeeping/issues" },
+      { key: "hk-returns", label: "Returns", icon: "refresh", href: "/housekeeping/returns" },
+      { key: "hk-purchase", label: "Stock requests", icon: "invoice", href: "/housekeeping/purchase" },
+      { key: "hk-upload", label: "Upload stock", icon: "upload", href: "/housekeeping/upload" },
+      { key: "hk-rooms", label: "Rooms", icon: "building", href: "/housekeeping/rooms" },
+      { key: "hk-staff", label: "Staff", icon: "user", href: "/housekeeping/staff" },
+      { key: "hk-reports", label: "Reports", icon: "report", href: "/housekeeping/reports" },
+    ],
+  },
+  {
+    key: "maintenancedept",
+    label: "Maintenance",
+    collapsible: true,
+    items: [
+      { key: "maintenance", label: "Overview", icon: "briefcase", href: "/maintenance" },
+      { key: "mt-jobs", label: "Jobs", icon: "wrench", href: "/maintenance/activities" },
+      { key: "mt-stock", label: "Stock", icon: "box", href: "/maintenance/items" },
+      { key: "mt-purchase", label: "Stock requests", icon: "invoice", href: "/maintenance/purchase" },
+      { key: "mt-upload", label: "Upload stock", icon: "upload", href: "/maintenance/upload" },
+      // The room master is housekeeping's; maintenance reads it.
+      { key: "mt-rooms", label: "Rooms", icon: "building", href: "/housekeeping/rooms" },
+      { key: "mt-staff", label: "Staff", icon: "user", href: "/maintenance/staff" },
+      { key: "mt-reports", label: "Reports", icon: "report", href: "/maintenance/reports" },
     ],
   },
   {

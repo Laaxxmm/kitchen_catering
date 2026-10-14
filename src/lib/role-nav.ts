@@ -8,20 +8,27 @@ import type { Role } from "@prisma/client";
  *
  * Read this together with src/server/rbac.ts and CLAUDE.md role rules.
  */
+/** Admin / manager: each department's overview, the stock requests that
+ *  wait on their approval, and the one-time stock upload. */
+const DEPT_OVERSIGHT = [
+  "housekeeping", "hk-purchase", "hk-upload",
+  "maintenance", "mt-purchase", "mt-upload",
+];
+
 export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
   ADMIN: new Set([
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
     "kitchen", "requisitions", "deliveries", "inventory",
     "purchaseorders", "vendors", "supplierbills",
     "roomservicebills", "invoices", "payments", "pettycash", "salary", "reports",
-    "housekeeping", "maintenance", "banquet", "admin",
+    "banquet", "admin", ...DEPT_OVERSIGHT,
   ]),
   MANAGER: new Set([
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
     "kitchen", "requisitions", "deliveries", "inventory",
     "purchaseorders", "vendors", "supplierbills",
     "roomservicebills", "invoices", "payments", "pettycash", "salary", "reports",
-    "housekeeping", "maintenance", "banquet",
+    "banquet", ...DEPT_OVERSIGHT,
   ]),
   SALES: new Set([
     "dashboard", "tasks", "customers", "quotes", "orders", "dishes",
@@ -60,14 +67,19 @@ export const SIDEBAR_KEYS_BY_ROLE: Record<Role, ReadonlySet<string>> = {
     "dashboard", "tasks", "roomservicebills", "invoices", "payments", "inventory",
     "purchaseorders", "vendors", "supplierbills", "pettycash", "reports",
   ]),
-  // Housekeeping manager: laser-focused on the hotel-side stockroom.
-  // Personal task list + housekeeping module only.
+  // Housekeeping head: runs a self-contained department — jobs, its own
+  // stock and stock requests, issues to rooms and returns. Nothing of the
+  // kitchen stores, and nothing of maintenance.
   HOUSEKEEPING_MANAGER: new Set([
-    "dashboard", "tasks", "housekeeping",
+    "dashboard", "tasks",
+    "hk-jobs", "hk-stock", "hk-issues", "hk-returns", "hk-purchase", "hk-upload",
+    "hk-rooms", "hk-staff", "hk-reports",
   ]),
-  // Maintenance manager: electrical + mechanical work-log and spares store.
+  // Maintenance head: the same shape — jobs, spares stock and requests, and
+  // the shared room list.
   MAINTENANCE_MANAGER: new Set([
-    "dashboard", "tasks", "maintenance",
+    "dashboard", "tasks",
+    "mt-jobs", "mt-stock", "mt-purchase", "mt-upload", "mt-rooms", "mt-staff", "mt-reports",
   ]),
   // F&B service: takes room-service / alacarte / management orders, serves
   // them, and bills them (the in-house room-billing screen). Also drives the
