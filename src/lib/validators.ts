@@ -44,6 +44,17 @@ export const decimalString = z
   // ending in a letter could block the server's event loop for minutes.
   .refine((s) => s === "" || (s.length <= 40 && /^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(s)), "Enter a valid number");
 
+/**
+ * A percentage. The columns are Decimal(5,2), so an unchecked "1000" used to
+ * reach Postgres and fail as "numeric field overflow" — a server crash for a
+ * typo. Blank still means "not provided".
+ */
+export const percentString = (label: string, max = 100) =>
+  decimalString.refine(
+    (s) => s === "" || (Number(s) >= 0 && Number(s) <= max),
+    `${label} must be between 0 and ${max}`,
+  );
+
 /** 2-digit Indian GST state code, e.g. "29" for Karnataka. */
 export const stateCode = z.string().regex(/^[0-9]{2}$/, "stateCode must be 2 digits");
 
@@ -94,7 +105,7 @@ export const CustomerInput = z.object({
     .max(20),
   notes: z.string().max(2000).nullable().optional(),
   groupId: z.string().nullable().optional(),
-  defaultTdsRatePct: decimalString.nullable().optional(),
+  defaultTdsRatePct: percentString("TDS %").nullable().optional(),
   defaultTdsSection: z.string().max(20).nullable().optional(),
   // Optional "bill to" entity when the legal name on the invoice
   // differs from the customer's display name. Defaults to `name`.
@@ -140,7 +151,7 @@ export const IngredientInput = z.object({
   reorderLevel: decimalString.optional(),
   preferredVendorId: z.string().nullable().optional(),
   hsnSac: z.string().max(20).nullable().optional(),
-  gstRatePct: decimalString.optional(),
+  gstRatePct: percentString("GST %").optional(),
 });
 export type IngredientInputT = z.infer<typeof IngredientInput>;
 
@@ -251,7 +262,7 @@ export const DishInput = z.object({
   unitPrice: decimalString,
   unit: z.string().min(1).max(20).optional(),
   hsnSac: z.string().max(20).nullable().optional(),
-  gstRatePct: decimalString.optional(),
+  gstRatePct: percentString("GST %").optional(),
 });
 export type DishInputT = z.infer<typeof DishInput>;
 
@@ -260,7 +271,7 @@ export const RecipeIngredientInput = z.object({
   ingredientId: z.string(),
   qty: decimalString,
   unit: z.string().min(1).max(20),
-  wastagePercent: decimalString.optional(),
+  wastagePercent: percentString("Wastage %").optional(),
   notes: z.string().max(500).nullable().optional(),
 });
 export type RecipeIngredientInputT = z.infer<typeof RecipeIngredientInput>;
@@ -271,7 +282,7 @@ export const RecipeInput = z.object({
   isSubRecipe: z.boolean().optional(),
   yieldQty: decimalString.optional(),
   yieldUnit: z.string().max(20).optional(),
-  standardYieldPercent: decimalString.optional(),
+  standardYieldPercent: percentString("Yield %", 999.99).optional(),
   notes: z.string().max(1000).nullable().optional(),
   ingredients: z.array(RecipeIngredientInput).optional(),
 });
@@ -294,8 +305,8 @@ export const QuoteLineInput = z.object({
   quantity: decimalString,
   unit: z.string().min(1).max(20),
   unitPrice: decimalString,
-  discountPct: decimalString.optional(),
-  gstRatePct: decimalString.optional(),
+  discountPct: percentString("Discount %").optional(),
+  gstRatePct: percentString("GST %").optional(),
   hsnSac: z.string().max(20).nullable().optional(),
 });
 export type QuoteLineInputT = z.infer<typeof QuoteLineInput>;
@@ -329,8 +340,8 @@ export const OrderItemInput = z.object({
   dishId: z.string(),
   portions: decimalString,
   unitPrice: decimalString,
-  discountPct: decimalString.optional(),
-  gstRatePct: decimalString.optional(),
+  discountPct: percentString("Discount %").optional(),
+  gstRatePct: percentString("GST %").optional(),
   notes: z.string().max(500).nullable().optional(),
 });
 export type OrderItemInputT = z.infer<typeof OrderItemInput>;
@@ -599,8 +610,8 @@ export const CustomerInvoiceLineInput = z.object({
   hsnSac: z.string().max(20).nullable().optional(),
   qty: decimalString,
   unitPrice: decimalString,
-  discountPct: decimalString.optional(),
-  gstRatePct: decimalString.optional(),
+  discountPct: percentString("Discount %").optional(),
+  gstRatePct: percentString("GST %").optional(),
 });
 
 export const CustomerInvoiceInput = z.object({
@@ -662,7 +673,7 @@ export const VendorInput = z.object({
   paymentTerms: z.string().max(40).optional(),
   creditLimit: decimalString.optional(),
   notes: z.string().max(2000).nullable().optional(),
-  defaultTdsRatePct: decimalString.nullable().optional(),
+  defaultTdsRatePct: percentString("TDS %").nullable().optional(),
   defaultTdsSection: z.string().max(20).nullable().optional(),
 });
 export type VendorInputT = z.infer<typeof VendorInput>;
@@ -689,7 +700,7 @@ export const VendorPOLineInput = z.object({
   unit: z.string().min(1).max(20),
   quantity: decimalString,
   unitPrice: decimalString,
-  gstRatePct: decimalString.optional(),
+  gstRatePct: percentString("GST %").optional(),
 });
 export type VendorPOLineInputT = z.infer<typeof VendorPOLineInput>;
 
@@ -724,7 +735,7 @@ export const VendorPOLineEditInput = z.object({
     (v) => Number.isFinite(Number(v)) && Number(v) >= 0,
     "Unit price cannot be negative",
   ),
-  gstRatePct: decimalString.refine(
+  gstRatePct: percentString("GST %").refine(
     (v) => Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= 100,
     "GST % must be between 0 and 100",
   ),
@@ -763,7 +774,7 @@ export const GRNExtraLineInput = z
     banquetItemId: z.string().min(1).nullable().optional(),
     quantity: decimalString,
     unitPrice: decimalString,
-    gstRatePct: decimalString.optional(),
+    gstRatePct: percentString("GST %").optional(),
     reason: z.string().min(1).max(500),
   })
   .refine((l) => !!l.ingredientId !== !!l.banquetItemId, {
@@ -790,7 +801,7 @@ export const VendorBillLineInput = z.object({
   quantity: decimalString,
   unit: z.string().min(1).max(20),
   unitPrice: decimalString,
-  gstRatePct: decimalString.optional(),
+  gstRatePct: percentString("GST %").optional(),
 });
 export type VendorBillLineInputT = z.infer<typeof VendorBillLineInput>;
 

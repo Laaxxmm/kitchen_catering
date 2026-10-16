@@ -27,3 +27,15 @@ describe("number inputs are linear-time", () => {
     expect(positiveQty.safeParse("-2").success).toBe(false);
   });
 });
+
+describe("percentages stay inside their Decimal(5,2) columns", () => {
+  it("refuses a GST % that used to crash the ingredient save", async () => {
+    const { IngredientInput } = await import("@/lib/validators");
+    const base = { name: "Paneer", unit: "kg" };
+    expect(IngredientInput.safeParse({ ...base, gstRatePct: "1000" }).success).toBe(false);
+    expect(IngredientInput.safeParse({ ...base, gstRatePct: "-5" }).success).toBe(false);
+    for (const ok of ["0", "5", "18", "100", ""]) {
+      expect(IngredientInput.safeParse({ ...base, gstRatePct: ok }).success, ok).toBe(true);
+    }
+  });
+});

@@ -69,6 +69,16 @@ export function actionFailure(err: unknown): { ok: false; error: string } {
       error: label ? `${label}: ${first.message}` : first.message,
     };
   }
+  // A value too big for its column (Postgres 22003 / Prisma P2020). Every
+  // input should be range-checked before this; this is the backstop so a
+  // missed one reads as a message, not a crash.
+  if (
+    (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2020") ||
+    (err instanceof Error && /numeric field overflow|code: "22003"/.test(err.message))
+  ) {
+    console.error("[action] value out of range:", err.message.slice(0, 500));
+    return { ok: false, error: "One of the numbers is too large — check quantities, prices and percentages." };
+  }
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     if (err.code === "P2002") {
       return { ok: false, error: "A record with these details already exists." };
